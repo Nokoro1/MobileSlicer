@@ -4,6 +4,7 @@ import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 internal object GcodeSummaryParser {
@@ -67,6 +68,13 @@ internal object GcodeSummaryParser {
         var positiveExtrusionMm = 0.0
         var estimatedSecondsFromMoves = 0.0
         var accelerationMmPerS2 = 10000.0
+        var firstExtrusionZ: Double? = null
+        val firstLayerExtrusionBounds = GcodeBoundsAccumulator()
+        val nozzleTemperaturesC = linkedSetOf<Int>()
+        val bedTemperaturesC = linkedSetOf<Int>()
+        val fanSpeeds = linkedSetOf<Int>()
+        val extrusionFeedratesMmPerMin = linkedSetOf<Double>()
+        val accelerationsMmPerSec2 = linkedSetOf<Double>()
 
         gcode.lineSequence().forEach { line ->
             lineCount += 1
@@ -90,7 +98,17 @@ internal object GcodeSummaryParser {
                                 ?: parseWordValue(command, 'T')
                         if (acceleration != null && acceleration > 0.0) {
                             accelerationMmPerS2 = acceleration
+                            accelerationsMmPerSec2.addCapped(acceleration)
                         }
+                    }
+                    commandMatches(command, "M104") || commandMatches(command, "M109") -> {
+                        parseWordValue(command, 'S')?.roundGcodeScalar()?.let { nozzleTemperaturesC.addCapped(it) }
+                    }
+                    commandMatches(command, "M140") || commandMatches(command, "M190") -> {
+                        parseWordValue(command, 'S')?.roundGcodeScalar()?.let { bedTemperaturesC.addCapped(it) }
+                    }
+                    commandMatches(command, "M106") -> {
+                        parseWordValue(command, 'S')?.roundGcodeScalar()?.let { fanSpeeds.addCapped(it) }
                     }
                     commandMatches(command, "G92") -> {
                         if (parseMoveWords(command, moveWords)) {
@@ -123,6 +141,13 @@ internal object GcodeSummaryParser {
                             }
                             if (de > 0.0) {
                                 positiveExtrusionMm += de
+                                if (feedrateMmPerMin > 0.0) extrusionFeedratesMmPerMin.addCapped(feedrateMmPerMin)
+                                val extrusionZ = z
+                                val firstZ = firstExtrusionZ ?: extrusionZ.also { firstExtrusionZ = it }
+                                if (kotlin.math.abs(extrusionZ - firstZ) <= 0.001) {
+                                    firstLayerExtrusionBounds.include(previousX, previousY)
+                                    firstLayerExtrusionBounds.include(x, y)
+                                }
                             }
                             if (estimatedPrintTimeText == null) {
                                 val dx = x - previousX
@@ -264,7 +289,15 @@ internal object GcodeSummaryParser {
             observedTypes = observedTypes.take(8),
             wallShellTypes = wallShellTypes.take(6),
             estimatedPrintTimeText = estimatedPrintTimeText,
-            filamentUsedGrams = filamentUsedGrams
+            filamentUsedGrams = filamentUsedGrams,
+            regressionMetrics = GcodeRegressionMetrics(
+                firstLayerExtrusionBounds = firstLayerExtrusionBounds.toBoundsOrNull(),
+                nozzleTemperaturesC = nozzleTemperaturesC.toList(),
+                bedTemperaturesC = bedTemperaturesC.toList(),
+                fanSpeeds = fanSpeeds.toList(),
+                extrusionFeedratesMmPerMin = extrusionFeedratesMmPerMin.toList(),
+                accelerationsMmPerSec2 = accelerationsMmPerSec2.toList()
+            )
         )
     }
 
@@ -530,6 +563,15 @@ internal object GcodeSummaryParser {
         return null
     }
 
+    private fun Double.roundGcodeScalar(): Int =
+        roundToInt()
+
+    private fun <T> LinkedHashSet<T>.addCapped(value: T, maxSize: Int = 32) {
+        if (size < maxSize || contains(value)) {
+            add(value)
+        }
+    }
+
     private fun estimateTrapezoidMoveSeconds(
         distanceMm: Double,
         feedrateMmPerMin: Double,
@@ -587,9 +629,31 @@ internal object GcodeSummaryParser {
             minutes > 0 -> String.format(Locale.US, "%dm %02ds", minutes, seconds)
             else -> String.format(Locale.US, "%ds", seconds)
         }
+}
+
+private class GcodeBoundsAccumulator {
+    private var minX = Double.POSITIVE_INFINITY
+    private var maxX = Double.NEGATIVE_INFINITY
+    private var minY = Double.POSITIVE_INFINITY
+    private var maxY = Double.NEGATIVE_INFINITY
+
+    fun include(x: Double, y: Double) {
+        if (!x.isFinite() || !y.isFinite()) return
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
     }
 
-    private data class GcodeMoveWords(
+    fun toBoundsOrNull(): GcodeMotionBounds? =
+        if (minX.isFinite() && maxX.isFinite() && minY.isFinite() && maxY.isFinite()) {
+            GcodeMotionBounds(minX = minX, maxX = maxX, minY = minY, maxY = maxY)
+        } else {
+            null
+        }
+}
+
+private data class GcodeMoveWords(
         var hasX: Boolean = false,
         var x: Double = 0.0,
         var hasY: Boolean = false,

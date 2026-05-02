@@ -109,7 +109,8 @@ internal data class SliceResultSummary(
     val wallShellTypes: List<String>,
     val estimatedPrintTimeText: String? = null,
     val filamentUsedGrams: Double? = null,
-    val previewInfo: PreviewInfoSummary = PreviewInfoSummary()
+    val previewInfo: PreviewInfoSummary = PreviewInfoSummary(),
+    val regressionMetrics: GcodeRegressionMetrics = GcodeRegressionMetrics()
 ) {
     fun compactMetricsLine(): String = buildString {
         append(formatCount(byteCount))
@@ -163,6 +164,25 @@ internal data class SliceResultSummary(
         append('\n')
         append("Current screen still shows the imported STL mesh, not these emitted toolpaths.")
     }
+}
+
+internal data class GcodeRegressionMetrics(
+    val firstLayerExtrusionBounds: GcodeMotionBounds? = null,
+    val nozzleTemperaturesC: List<Int> = emptyList(),
+    val bedTemperaturesC: List<Int> = emptyList(),
+    val fanSpeeds: List<Int> = emptyList(),
+    val extrusionFeedratesMmPerMin: List<Double> = emptyList(),
+    val accelerationsMmPerSec2: List<Double> = emptyList()
+)
+
+internal data class GcodeMotionBounds(
+    val minX: Double,
+    val maxX: Double,
+    val minY: Double,
+    val maxY: Double
+) {
+    val widthMm: Double get() = maxX - minX
+    val depthMm: Double get() = maxY - minY
 }
 
 internal data class PreviewInfoSummary(

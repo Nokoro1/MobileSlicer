@@ -138,6 +138,30 @@ class GcodeSummaryParserTest {
     }
 
     @Test
+    fun summarizesLargeGcodeFallbackWithinSmokeBudget() {
+        val gcode = buildString {
+            appendLine("; filament_diameter: 1.75")
+            appendLine("; filament_density: 1.24")
+            repeat(600) { layer ->
+                appendLine("; CHANGE_LAYER")
+                appendLine(";Z:${(layer + 1) * 0.2}")
+                appendLine(";TYPE:${if (layer % 2 == 0) "Outer wall" else "Inner wall"}")
+                appendLine("G1 X${layer % 200} Y${(layer * 3) % 200} E${layer + 1}.0 F1200")
+            }
+            appendLine("; total filament used [g] = 42.50")
+        }
+
+        val startedAtNs = System.nanoTime()
+        val summary = GcodeSummaryParser.fromGcode(gcode)
+        val elapsedMs = (System.nanoTime() - startedAtNs) / 1_000_000.0
+
+        assertTrue("large G-code fallback summary exceeded smoke-test budget: $elapsedMs ms", elapsedMs < 5_000.0)
+        assertEquals(600, summary.layerChangeCount)
+        assertEquals(42.50, summary.filamentUsedGrams!!, 0.0001)
+        assertEquals(listOf("Outer wall", "Inner wall"), summary.observedTypes)
+    }
+
+    @Test
     fun summarizesOrcaChangeLayerMarkers() {
         val gcode = """
             ; CHANGE_LAYER
@@ -195,7 +219,47 @@ class GcodeSummaryParserTest {
 
         assertEquals(20.00, summary.filamentUsedGrams!!, 0.0001)
     }
+
+    @Test
+    fun extractsRegressionMetricsForSlicingParameterProofs() {
+        val narrowBrim = GcodeSummaryParser.fromGcode(firstLayerSquareGcode(min = 10.0, max = 30.0))
+        val wideBrim = GcodeSummaryParser.fromGcode(firstLayerSquareGcode(min = 5.0, max = 35.0))
+
+        val narrowBounds = requireNotNull(narrowBrim.regressionMetrics.firstLayerExtrusionBounds)
+        val wideBounds = requireNotNull(wideBrim.regressionMetrics.firstLayerExtrusionBounds)
+
+        assertEquals(20.0, narrowBounds.widthMm, 0.0001)
+        assertEquals(30.0, wideBounds.widthMm, 0.0001)
+        assertTrue(wideBounds.widthMm > narrowBounds.widthMm)
+        assertEquals(listOf(210, 220), wideBrim.regressionMetrics.nozzleTemperaturesC)
+        assertEquals(listOf(60), wideBrim.regressionMetrics.bedTemperaturesC)
+        assertEquals(listOf(0, 128, 255), wideBrim.regressionMetrics.fanSpeeds)
+        assertEquals(listOf(500.0, 1500.0), wideBrim.regressionMetrics.accelerationsMmPerSec2)
+        assertEquals(listOf(1200.0, 1500.0, 1800.0), wideBrim.regressionMetrics.extrusionFeedratesMmPerMin)
+    }
 }
+
+private fun firstLayerSquareGcode(min: Double, max: Double): String = """
+    M104 S210
+    M109 S220
+    M140 S60
+    M106 S0
+    M106 S128
+    M106 S255
+    M204 S500
+    G90
+    M82
+    G1 X$min Y$min Z0.2 F6000
+    ;TYPE:Brim
+    G1 X$max Y$min E1.0 F1200
+    G1 X$max Y$max E2.0 F1200
+    M204 S1500
+    G1 X$min Y$max E3.0 F1500
+    G1 X$min Y$min E4.0 F1500
+    ; CHANGE_LAYER
+    G1 Z0.4
+    G1 X100 Y100 E5.0 F1800
+""".trimIndent()
 
 private object NativePreviewSummaryFixture {
     const val fullSummary: String =
