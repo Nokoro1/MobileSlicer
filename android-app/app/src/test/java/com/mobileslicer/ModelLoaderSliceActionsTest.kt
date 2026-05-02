@@ -3,6 +3,15 @@ package com.mobileslicer
 import com.mobileslicer.calibration.CalibrationJob
 import com.mobileslicer.calibration.CalibrationOptions
 import com.mobileslicer.calibration.CalibrationType
+import com.mobileslicer.profiles.ProfileStore
+import com.mobileslicer.profiles.ProfileStoreRepository
+import com.mobileslicer.profiles.activeConfiguration
+import com.mobileslicer.profiles.newProcessProfileUnchecked
+import com.mobileslicer.viewer.MeshBounds
+import com.mobileslicer.viewer.ViewerModelTransform
+import com.mobileslicer.workspace.ImportedModelFormat
+import com.mobileslicer.workspace.PlateFilamentSlot
+import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.workspace.SliceResult
 import com.mobileslicer.workspace.WorkspaceMode
 import java.io.File
@@ -93,6 +102,70 @@ class ModelLoaderSliceActionsTest {
     }
 
     @Test
+    fun sliceRunInputsSnapshotPlateStateAndFallbackFilamentSlot() {
+        val store = profileStore()
+        val objects = mutableListOf(plateObject(id = 1L))
+        val filaments = store.filaments.toMutableList()
+
+        val inputs = captureModelLoaderSliceRunInputs(
+            configuration = store.activeConfiguration(),
+            calibrationJob = null,
+            plateObjects = objects,
+            profileFilaments = filaments,
+            plateFilamentSlots = emptyList(),
+            fallbackFilament = store.activeConfiguration().filament,
+            flushVolumes = null,
+            printer = store.activeConfiguration().printer,
+            modelFilePath = "/tmp/model.stl",
+            preparedMesh = null,
+            modelBounds = objects.first().bounds,
+            modelTransform = objects.first().transform,
+            gcodeFileName = "model.gcode"
+        )
+
+        objects += plateObject(id = 2L)
+        filaments.clear()
+
+        assertEquals(1, inputs.plateObjects.size)
+        assertEquals(store.filaments.size, inputs.profileFilaments.size)
+        assertEquals(1, inputs.activePlateSlots.single().index)
+        assertEquals(store.activeConfiguration().filament.id, inputs.activePlateSlots.single().filamentProfileId)
+        assertEquals("/tmp/model.stl", inputs.modelFilePath)
+        assertEquals("model.gcode", inputs.gcodeFileName)
+    }
+
+    @Test
+    fun sliceRunInputsPreserveConfiguredPlateSlots() {
+        val store = profileStore()
+        val slot = PlateFilamentSlot(
+            index = 2,
+            filamentProfileId = "custom",
+            label = "Custom",
+            materialType = "PETG",
+            colorHex = "#FFAA00"
+        )
+
+        val inputs = captureModelLoaderSliceRunInputs(
+            configuration = store.activeConfiguration(),
+            calibrationJob = calibrationJob(),
+            plateObjects = emptyList(),
+            profileFilaments = store.filaments,
+            plateFilamentSlots = listOf(slot),
+            fallbackFilament = store.activeConfiguration().filament,
+            flushVolumes = null,
+            printer = store.activeConfiguration().printer,
+            modelFilePath = null,
+            preparedMesh = null,
+            modelBounds = null,
+            modelTransform = null,
+            gcodeFileName = "calibration.gcode"
+        )
+
+        assertEquals(listOf(slot), inputs.activePlateSlots)
+        assertEquals(calibrationJob().gcodeFileName(), inputs.calibrationJob?.gcodeFileName())
+    }
+
+    @Test
     fun sliceCompletionUsesResultFileNameAndAdvancesPreviewKeyOnlyForGeneratedGcode() {
         val plan = planModelLoaderSliceCompletion(
             result = SliceResult(
@@ -163,5 +236,39 @@ class ModelLoaderSliceActionsTest {
                 endValue = "0",
                 stepValue = "0"
             )
+        )
+
+    private fun profileStore(): ProfileStore {
+        val printers = listOf(ProfileStoreRepository.fallbackPrinterProfile())
+        val filaments = ProfileStoreRepository.defaultFilamentProfiles()
+        val processes = listOf(
+            newProcessProfileUnchecked(
+                0 to "process_fixture",
+                1 to "Fixture Process",
+                3 to false,
+                5 to 0.20f,
+                259 to printers.first().id,
+                261 to printers.first().nozzleDiameterMm
+            )
+        )
+        return ProfileStore(
+            printers = printers,
+            filaments = filaments,
+            processes = processes,
+            selectedPrinterId = printers.first().id,
+            selectedFilamentId = filaments.first().id,
+            selectedProcessId = processes.first().id
+        )
+    }
+
+    private fun plateObject(id: Long): PlateObject =
+        PlateObject(
+            id = id,
+            label = "object_$id",
+            filePath = "/tmp/object_$id.stl",
+            format = ImportedModelFormat.Stl,
+            importTiming = null,
+            bounds = MeshBounds(0f, 0f, 0f, 10f, 10f, 10f),
+            transform = ViewerModelTransform(centerXmm = 5f, centerYmm = 5f)
         )
 }

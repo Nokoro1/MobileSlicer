@@ -1,6 +1,15 @@
 package com.mobileslicer
 
 import com.mobileslicer.calibration.CalibrationJob
+import com.mobileslicer.profiles.ActiveSlicerConfiguration
+import com.mobileslicer.profiles.FilamentProfile
+import com.mobileslicer.profiles.PrinterProfile
+import com.mobileslicer.viewer.MeshBounds
+import com.mobileslicer.viewer.StlMesh
+import com.mobileslicer.viewer.ViewerModelTransform
+import com.mobileslicer.workspace.PlateFilamentSlot
+import com.mobileslicer.workspace.PlateFlushVolumes
+import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.workspace.SliceResult
 import com.mobileslicer.workspace.WorkspaceMode
 
@@ -54,6 +63,21 @@ internal data class ModelLoaderSliceCompletionPlan(
     val completionResult: SliceResult
 )
 
+internal data class ModelLoaderSliceRunInputs(
+    val configuration: ActiveSlicerConfiguration,
+    val calibrationJob: CalibrationJob?,
+    val plateObjects: List<PlateObject>,
+    val profileFilaments: List<FilamentProfile>,
+    val activePlateSlots: List<PlateFilamentSlot>,
+    val flushVolumes: PlateFlushVolumes?,
+    val printer: PrinterProfile,
+    val modelFilePath: String?,
+    val preparedMesh: StlMesh?,
+    val modelBounds: MeshBounds?,
+    val modelTransform: ViewerModelTransform?,
+    val gcodeFileName: String
+)
+
 internal data class ModelLoaderSliceUiStartPlan(
     val sliceInProgress: Boolean,
     val gcodeFilePath: String?,
@@ -77,6 +101,38 @@ internal fun planModelLoaderSliceUiStart(statusMessage: String): ModelLoaderSlic
         firstVisiblePreviewFrameMs = null,
         workspaceMode = WorkspaceMode.Prepare,
         statusMessage = statusMessage
+    )
+
+internal fun captureModelLoaderSliceRunInputs(
+    configuration: ActiveSlicerConfiguration,
+    calibrationJob: CalibrationJob?,
+    plateObjects: List<PlateObject>,
+    profileFilaments: List<FilamentProfile>,
+    plateFilamentSlots: List<PlateFilamentSlot>,
+    fallbackFilament: FilamentProfile,
+    flushVolumes: PlateFlushVolumes?,
+    printer: PrinterProfile,
+    modelFilePath: String?,
+    preparedMesh: StlMesh?,
+    modelBounds: MeshBounds?,
+    modelTransform: ViewerModelTransform?,
+    gcodeFileName: String
+): ModelLoaderSliceRunInputs =
+    ModelLoaderSliceRunInputs(
+        configuration = configuration,
+        calibrationJob = calibrationJob,
+        plateObjects = plateObjects.toList(),
+        profileFilaments = profileFilaments.toList(),
+        activePlateSlots = plateFilamentSlots.toList().ifEmpty {
+            listOf(fallbackFilament.toPlateFilamentSlot(index = 1))
+        },
+        flushVolumes = flushVolumes,
+        printer = printer,
+        modelFilePath = modelFilePath,
+        preparedMesh = preparedMesh,
+        modelBounds = modelBounds,
+        modelTransform = modelTransform,
+        gcodeFileName = gcodeFileName
     )
 
 internal fun planModelLoaderSliceCompletion(

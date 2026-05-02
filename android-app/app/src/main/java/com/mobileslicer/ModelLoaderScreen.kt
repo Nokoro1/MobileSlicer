@@ -1081,42 +1081,44 @@ internal fun ModelLoaderScreen(
                             firstVisiblePreviewFrameMs = uiStartPlan.firstVisiblePreviewFrameMs
                             workspaceMode = uiStartPlan.workspaceMode
                             workspaceStatus = uiStartPlan.statusMessage
+                            val sliceInputs = captureModelLoaderSliceRunInputs(
+                                configuration = activeConfiguration,
+                                calibrationJob = currentCalibrationJob,
+                                plateObjects = plateObjects.toList(),
+                                profileFilaments = sliceReadyProfileStore.filaments,
+                                plateFilamentSlots = plateFilamentSlots.toList(),
+                                fallbackFilament = selectedFilament,
+                                flushVolumes = plateFlushVolumes,
+                                printer = selectedPrinter,
+                                modelFilePath = currentModelFilePath,
+                                preparedMesh = currentPreparedMesh,
+                                modelBounds = currentModelBounds,
+                                modelTransform = currentModelTransform,
+                                gcodeFileName = effectiveGcodeFileName()
+                            )
                             coroutineScope.launch {
-                                val sliceConfiguration = activeConfiguration
-                                val sliceCalibrationJob = currentCalibrationJob
-                                val slicePlateObjects = plateObjects.toList()
-                                val sliceProfileFilaments = sliceReadyProfileStore.filaments
-                                val slicePrinter = selectedPrinter
-                                val sliceModelFilePath = currentModelFilePath
-                                val slicePreparedMesh = currentPreparedMesh
-                                val sliceModelBounds = currentModelBounds
-                                val sliceModelTransform = currentModelTransform
-                                val sliceGcodeFileName = effectiveGcodeFileName()
-                                val activePlateSlots = plateFilamentSlots.toList().ifEmpty {
-                                    listOf(selectedFilament.toPlateFilamentSlot(index = 1))
-                                }
                                 val preparedResult = withContext(Dispatchers.Default) {
                                     runModelLoaderSlice(
                                         context = context.applicationContext,
-                                        configuration = sliceConfiguration,
-                                        calibrationJob = sliceCalibrationJob,
-                                        plateObjects = slicePlateObjects,
-                                        profileFilaments = sliceProfileFilaments,
-                                        activePlateSlots = activePlateSlots,
-                                        flushVolumes = plateFlushVolumes,
-                                        printer = slicePrinter,
-                                        modelFilePath = sliceModelFilePath,
-                                        preparedMesh = slicePreparedMesh,
-                                        modelBounds = sliceModelBounds,
-                                        modelTransform = sliceModelTransform,
-                                        gcodeFileName = sliceGcodeFileName,
+                                        configuration = sliceInputs.configuration,
+                                        calibrationJob = sliceInputs.calibrationJob,
+                                        plateObjects = sliceInputs.plateObjects,
+                                        profileFilaments = sliceInputs.profileFilaments,
+                                        activePlateSlots = sliceInputs.activePlateSlots,
+                                        flushVolumes = sliceInputs.flushVolumes,
+                                        printer = sliceInputs.printer,
+                                        modelFilePath = sliceInputs.modelFilePath,
+                                        preparedMesh = sliceInputs.preparedMesh,
+                                        modelBounds = sliceInputs.modelBounds,
+                                        modelTransform = sliceInputs.modelTransform,
+                                        gcodeFileName = sliceInputs.gcodeFileName,
                                         onSliceRequested = onSliceRequested
                                     )
                                 }
                                 val completionPlan = planModelLoaderSliceCompletion(
                                     result = preparedResult,
-                                    calibrationJob = sliceCalibrationJob,
-                                    fallbackFileName = sliceGcodeFileName,
+                                    calibrationJob = sliceInputs.calibrationJob,
+                                    fallbackFileName = sliceInputs.gcodeFileName,
                                     previousPreviewKey = currentSlicePreviewKey
                                 )
                                 currentGcodeFilePath = completionPlan.gcodeFilePath
