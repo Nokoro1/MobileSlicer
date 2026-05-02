@@ -17,6 +17,9 @@ internal data class ModelLoaderCalibrationPlateBuildResult(
     val nextObjectId: Long
 )
 
+internal fun calibrationPlateCreationFailureStatus(error: Throwable): String =
+    "Calibration could not be created\n${error.localizedMessage ?: "Unable to write Orca calibration model."}"
+
 private data class PendingCalibrationObject(
     val modelFile: File,
     val mesh: StlMesh?,

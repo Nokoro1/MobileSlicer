@@ -20,6 +20,40 @@ internal data class ModelLoaderObjectDeleteResult(
     val changed: Boolean
 )
 
+internal fun autoOrientPlateObjectsStatus(result: PlateAutoOrientResult): String =
+    if (result.changedCount == 0) {
+        if (result.selectedOnly) {
+            "Object already oriented\nSnapped to nearest 90 degrees"
+        } else {
+            "Objects already oriented\n${result.targetCount} checked"
+        }
+    } else {
+        if (result.selectedOnly) {
+            "Object auto-oriented\nSnapped to nearest 90 degrees"
+        } else {
+            "Objects auto-oriented\n${result.changedCount} snapped to nearest 90 degrees"
+        }
+    }
+
+internal fun autoArrangePlateObjectsFailureStatus(
+    objectCount: Int,
+    bed: PrinterBedSpec
+): String =
+    "Objects do not fit\n$objectCount on ${bed.widthMm.toInt()} x ${bed.depthMm.toInt()} mm plate"
+
+internal fun autoArrangePlateObjectsStatus(
+    objectCount: Int,
+    result: PlateAutoArrangeResult
+): String =
+    if (result.reservedPrimeTowerSpace) {
+        "Objects arranged\n$objectCount on plate; prime tower space reserved"
+    } else {
+        "Objects arranged\n$objectCount on plate"
+    }
+
+internal fun clonedPlateObjectStatus(objectCount: Int): String =
+    "Object duplicated\n$objectCount on plate"
+
 internal fun addPlateFilamentSlot(
     slots: List<PlateFilamentSlot>,
     objects: List<PlateObject>,

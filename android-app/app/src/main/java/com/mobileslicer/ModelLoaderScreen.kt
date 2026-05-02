@@ -548,11 +548,7 @@ internal fun ModelLoaderScreen(
         if (VerboseWorkspacePlanningLogs) {
             Log.i("MobileSlicer", "autoOrient local applied: targets=${result.targetCount} changed=${result.changedCount}")
         }
-        workspaceStatus = if (result.changedCount == 0) {
-            if (result.selectedOnly) "Object already oriented\nSnapped to nearest 90 degrees" else "Objects already oriented\n${result.targetCount} checked"
-        } else {
-            if (result.selectedOnly) "Object auto-oriented\nSnapped to nearest 90 degrees" else "Objects auto-oriented\n${result.changedCount} snapped to nearest 90 degrees"
-        }
+        workspaceStatus = autoOrientPlateObjectsStatus(result)
     }
 
     fun arrangePlateObjects() {
@@ -567,7 +563,7 @@ internal fun ModelLoaderScreen(
             primeTowerBrimWidthMm = activeConfiguration.process.primeTowerBrimWidthMm
         )
         if (result == null) {
-            workspaceStatus = "Objects do not fit\n${plateObjects.size} on ${bed.widthMm.toInt()} x ${bed.depthMm.toInt()} mm plate"
+            workspaceStatus = autoArrangePlateObjectsFailureStatus(plateObjects.size, bed)
             return
         }
         plateObjects.clear()
@@ -581,11 +577,7 @@ internal fun ModelLoaderScreen(
                 "autoArrange local applied: objects=${plateObjects.size} changed=${result.changedCount} centers=${result.centersSummary}"
             )
         }
-        workspaceStatus = if (result.reservedPrimeTowerSpace) {
-            "Objects arranged\n${plateObjects.size} on plate; prime tower space reserved"
-        } else {
-            "Objects arranged\n${plateObjects.size} on plate"
-        }
+        workspaceStatus = autoArrangePlateObjectsStatus(plateObjects.size, result)
     }
 
     fun cloneSelectedPlateObject() {
@@ -600,7 +592,7 @@ internal fun ModelLoaderScreen(
         plateObjects.add(clone)
         workspaceSession.clearGeneratedPreviewState()
         syncSelectedObjectToLegacyState(clone)
-        workspaceStatus = "Object duplicated\n${plateObjects.size} on plate"
+        workspaceStatus = clonedPlateObjectStatus(plateObjects.size)
     }
 
     fun startCalibrationJob(job: CalibrationJob) {
@@ -622,7 +614,7 @@ internal fun ModelLoaderScreen(
             firstObjectId = nextPlateObjectId,
             defaultTransform = ::defaultPlateObjectTransform
         ).getOrElse { error ->
-            workspaceStatus = "Calibration could not be created\n${error.localizedMessage ?: "Unable to write Orca calibration model."}"
+            workspaceStatus = calibrationPlateCreationFailureStatus(error)
             return
         }
         nextPlateObjectId = calibrationPlateResult.nextObjectId

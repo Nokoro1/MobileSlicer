@@ -104,6 +104,42 @@ class ModelLoaderPlateActionsTest {
         assertEquals("No model loaded", result.statusMessage)
     }
 
+    @Test
+    fun platePlanningStatusMessagesAreStable() {
+        assertEquals(
+            "Object already oriented\nSnapped to nearest 90 degrees",
+            autoOrientPlateObjectsStatus(
+                PlateAutoOrientResult(objects = emptyList(), targetCount = 1, changedCount = 0, selectedOnly = true)
+            )
+        )
+        assertEquals(
+            "Objects auto-oriented\n3 snapped to nearest 90 degrees",
+            autoOrientPlateObjectsStatus(
+                PlateAutoOrientResult(objects = emptyList(), targetCount = 5, changedCount = 3, selectedOnly = false)
+            )
+        )
+        assertEquals(
+            "Objects do not fit\n4 on 200 x 180 mm plate",
+            autoArrangePlateObjectsFailureStatus(
+                objectCount = 4,
+                bed = PrinterBedSpec(widthMm = 200f, depthMm = 180f, maxHeightMm = 180f)
+            )
+        )
+        assertEquals(
+            "Objects arranged\n2 on plate; prime tower space reserved",
+            autoArrangePlateObjectsStatus(
+                objectCount = 2,
+                result = PlateAutoArrangeResult(
+                    objects = emptyList(),
+                    changedCount = 1,
+                    reservedPrimeTowerSpace = true,
+                    centersSummary = ""
+                )
+            )
+        )
+        assertEquals("Object duplicated\n3 on plate", clonedPlateObjectStatus(3))
+    }
+
     private fun slot(index: Int, physicalNozzleIndex: Int? = null): PlateFilamentSlot =
         PlateFilamentSlot(
             index = index,
