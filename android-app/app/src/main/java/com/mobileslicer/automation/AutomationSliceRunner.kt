@@ -67,6 +67,36 @@ internal data class AutomationSliceRequest(
     }
 }
 
+internal data class AutomationSliceTiming(
+    val stagingMs: Long,
+    val nativeLoadMs: Long,
+    val placementMs: Long,
+    val configMs: Long,
+    val nativeSliceMs: Long,
+    val writeGcodeMs: Long,
+    val totalMs: Long
+)
+
+internal fun automationSliceSuccessStatus(
+    modelFile: File,
+    stagedModel: File,
+    outputFile: File,
+    timing: AutomationSliceTiming,
+    configJson: String
+): String =
+    "success: model=${modelFile.absolutePath} " +
+        "staged=${stagedModel.absolutePath} " +
+        "output=${outputFile.absolutePath} " +
+        "bytes=${outputFile.length()} " +
+        "stagingMs=${timing.stagingMs} " +
+        "nativeLoadMs=${timing.nativeLoadMs} " +
+        "placementMs=${timing.placementMs} " +
+        "configMs=${timing.configMs} " +
+        "nativeSliceMs=${timing.nativeSliceMs} " +
+        "writeGcodeMs=${timing.writeGcodeMs} " +
+        "elapsedMs=${timing.totalMs} " +
+        "config=$configJson"
+
 internal class AutomationSliceRunner(
     private val ensureEngine: () -> Long,
     private val stageModelFile: (File) -> File?,
@@ -76,6 +106,7 @@ internal class AutomationSliceRunner(
     private val nativeSliceFailureStatus: () -> String
 ) {
     fun run(request: AutomationSliceRequest): Boolean {
+        val startedAt = SystemClock.elapsedRealtime()
         val modelFile = File(request.modelPath)
         val outputFile = File(request.outputPath)
         val statusFile = File(request.statusPath)
@@ -95,17 +126,21 @@ internal class AutomationSliceRunner(
             writeStatus("failed: model not found path=${request.modelPath}")
             return false
         }
+        val stagingStartedAt = SystemClock.elapsedRealtime()
         val stagedModel = stageModelFile(modelFile)
         if (stagedModel == null) {
             writeStatus("failed: unable to stage model path=${request.modelPath}")
             return false
         }
+        val stagingMs = SystemClock.elapsedRealtime() - stagingStartedAt
+        val nativeLoadStartedAt = SystemClock.elapsedRealtime()
         val loadResult = NativeEngineCalls.loadModel(engineHandle, stagedModel.absolutePath)
         if (loadResult !is NativeEngineCallResult.Success) {
             writeStatus("failed: ${loadResult.statusMessage} path=${request.modelPath} staged=${stagedModel.absolutePath}")
             onModelLoadRejected()
             return false
         }
+        val nativeLoadMs = SystemClock.elapsedRealtime() - nativeLoadStartedAt
         onModelLoaded(stagedModel)
 
         val configJson = runCatching { resolveConfigJson(request.intent) }.getOrElse { exception ->
@@ -133,13 +168,15 @@ internal class AutomationSliceRunner(
         }
         val placementMs = SystemClock.elapsedRealtime() - placementStartedAt
 
+        val configStartedAt = SystemClock.elapsedRealtime()
         val configResult = NativeEngineCalls.setConfigJson(engineHandle, configJson)
         if (configResult !is NativeEngineCallResult.Success) {
             writeStatus("failed: ${configResult.statusMessage} config=$configJson")
             return false
         }
+        val configMs = SystemClock.elapsedRealtime() - configStartedAt
 
-        val startedAt = SystemClock.elapsedRealtime()
+        val nativeSliceStartedAt = SystemClock.elapsedRealtime()
         var sliceResult = NativeEngineCalls.slice(engineHandle)
         if (
             sliceResult !is NativeEngineCallResult.Success &&
@@ -148,6 +185,7 @@ internal class AutomationSliceRunner(
             Log.w(TAG, "automation:native slice failed with vector; retrying full native slice once on same engine")
             sliceResult = NativeEngineCalls.slice(engineHandle)
         }
+        val nativeSliceMs = SystemClock.elapsedRealtime() - nativeSliceStartedAt
         if (sliceResult !is NativeEngineCallResult.Success) {
             writeStatus(
                 "failed: ${sliceResult.statusMessage} fallback=${nativeSliceFailureStatus()} elapsedMs=${SystemClock.elapsedRealtime() - startedAt} config=$configJson"
@@ -156,7 +194,9 @@ internal class AutomationSliceRunner(
         }
 
         outputFile.parentFile?.mkdirs()
+        val writeGcodeStartedAt = SystemClock.elapsedRealtime()
         val writeResult = NativeEngineCalls.writeGcodeToFile(engineHandle, outputFile.absolutePath)
+        val writeGcodeMs = SystemClock.elapsedRealtime() - writeGcodeStartedAt
         if (writeResult !is NativeEngineCallResult.Success) {
             writeStatus("failed: ${writeResult.statusMessage} elapsedMs=${SystemClock.elapsedRealtime() - startedAt}")
             return false
@@ -166,7 +206,21 @@ internal class AutomationSliceRunner(
             return false
         }
         writeStatus(
-            "success: model=${modelFile.absolutePath} staged=${stagedModel.absolutePath} output=${outputFile.absolutePath} bytes=${outputFile.length()} placementMs=$placementMs elapsedMs=${SystemClock.elapsedRealtime() - startedAt} config=$configJson"
+            automationSliceSuccessStatus(
+                modelFile = modelFile,
+                stagedModel = stagedModel,
+                outputFile = outputFile,
+                timing = AutomationSliceTiming(
+                    stagingMs = stagingMs,
+                    nativeLoadMs = nativeLoadMs,
+                    placementMs = placementMs,
+                    configMs = configMs,
+                    nativeSliceMs = nativeSliceMs,
+                    writeGcodeMs = writeGcodeMs,
+                    totalMs = SystemClock.elapsedRealtime() - startedAt
+                ),
+                configJson = configJson
+            )
         )
         return true
     }

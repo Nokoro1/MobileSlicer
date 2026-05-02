@@ -12,6 +12,9 @@ DEFAULT_SERIAL="RFCYA01ANVE"
 DEFAULT_SLICE_SMOKE_STL="$ROOT_DIR/mobileslicer_test_cube.stl"
 SUPPORT_SLICE_SMOKE_STL="$ROOT_DIR/proof-fixtures/stage2_bridge_speed_fixture.stl"
 PERIMETER_ARRAY_SLICE_SMOKE_STL="$ROOT_DIR/proof-fixtures/stage2_small_perimeter_array_fixture.stl"
+MEDIUM_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/volumetric_speed/SpeedTestStructure.stl"
+COMPLEX_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/vfa/vfa.stl"
+STRESS_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/temperature_tower/temperature_tower.stl"
 BENCHY_AUTOMATION_CONFIG='{"bed_width_mm":270,"bed_depth_mm":270,"max_height_mm":256,"nozzle_diameter":0.4000000059604645,"filament_diameter":1.75,"filament_type":"PLA","filament_max_volumetric_speed":50,"nozzle_temperature_initial_layer":210,"nozzle_temperature":210,"bed_temperature_initial_layer":60,"bed_temperature":60,"cooling_baseline":100,"close_fan_the_first_x_layers":1,"layer_height":0.20000000298023224,"first_layer_height":0.20000000298023224,"first_layer_print_speed":10,"first_layer_infill_speed":22.5,"initial_layer_travel_speed_percent":50,"slow_down_layers":0,"outer_wall_speed":30,"inner_wall_speed":30,"top_surface_speed":30,"travel_speed":120,"outer_wall_acceleration":500,"inner_wall_acceleration":10000,"top_surface_acceleration":500,"sparse_infill_acceleration":500,"bridge_speed":10,"small_perimeter_speed":15,"small_perimeter_threshold":0,"sparse_infill_speed":300,"internal_solid_infill_speed":30,"gap_infill_speed":15,"top_shell_layers":4,"bottom_shell_layers":3,"seam_position":"aligned","precise_outer_wall":true,"only_one_wall_top":true,"top_surface_pattern":"monotonicline","sparse_infill_density":15,"sparse_infill_pattern":"grid","wall_loops":2,"print_speed_baseline":60,"skirts":2,"brim_width":0}'
 CURRENT_AUTOMATION_SERIAL=""
 CURRENT_AUTOMATION_LABEL=""
@@ -20,8 +23,13 @@ CURRENT_AUTOMATION_STATUS_PATH=""
 AUTOMATION_LAST_OUTPUT_PATH=""
 AUTOMATION_LAST_STATUS=""
 AUTOMATION_LAST_BYTES=""
+AUTOMATION_LAST_STAGING_MS=""
+AUTOMATION_LAST_NATIVE_LOAD_MS=""
 AUTOMATION_LAST_ELAPSED_MS=""
 AUTOMATION_LAST_PLACEMENT_MS=""
+AUTOMATION_LAST_CONFIG_MS=""
+AUTOMATION_LAST_NATIVE_SLICE_MS=""
+AUTOMATION_LAST_WRITE_GCODE_MS=""
 AUTOMATION_LAST_PEAK_PSS_KB=""
 PERF_LAST_PEAK_PSS_KB=0
 
@@ -576,8 +584,13 @@ run_automation_slice() {
   AUTOMATION_LAST_OUTPUT_PATH="$output_path"
   AUTOMATION_LAST_STATUS="$status"
   AUTOMATION_LAST_BYTES="$output_bytes"
+  AUTOMATION_LAST_STAGING_MS="$(status_metric "$status" "stagingMs")"
+  AUTOMATION_LAST_NATIVE_LOAD_MS="$(status_metric "$status" "nativeLoadMs")"
   AUTOMATION_LAST_ELAPSED_MS="$(status_metric "$status" "elapsedMs")"
   AUTOMATION_LAST_PLACEMENT_MS="$(status_metric "$status" "placementMs")"
+  AUTOMATION_LAST_CONFIG_MS="$(status_metric "$status" "configMs")"
+  AUTOMATION_LAST_NATIVE_SLICE_MS="$(status_metric "$status" "nativeSliceMs")"
+  AUTOMATION_LAST_WRITE_GCODE_MS="$(status_metric "$status" "writeGcodeMs")"
   AUTOMATION_LAST_PEAK_PSS_KB="$PERF_LAST_PEAK_PSS_KB"
   clear_current_automation_context
 }
@@ -608,16 +621,38 @@ append_perf_record() {
   local name="$2"
   local type="$3"
   local startup_ms="$4"
-  local elapsed_ms="$5"
-  local placement_ms="$6"
-  local peak_pss_kb="$7"
-  local bytes="$8"
-  local device_output_path="$9"
-  python3 - "$records_path" "$name" "$type" "$startup_ms" "$elapsed_ms" "$placement_ms" "$peak_pss_kb" "$bytes" "$device_output_path" <<'PY'
+  local staging_ms="$5"
+  local native_load_ms="$6"
+  local placement_ms="$7"
+  local config_ms="$8"
+  local native_slice_ms="$9"
+  local write_gcode_ms="${10}"
+  local elapsed_ms="${11}"
+  local peak_pss_kb="${12}"
+  local bytes="${13}"
+  local fixture_bytes="${14}"
+  local device_output_path="${15}"
+  python3 - "$records_path" "$name" "$type" "$startup_ms" "$staging_ms" "$native_load_ms" "$placement_ms" "$config_ms" "$native_slice_ms" "$write_gcode_ms" "$elapsed_ms" "$peak_pss_kb" "$bytes" "$fixture_bytes" "$device_output_path" <<'PY'
 import json
 import sys
 
-path, name, record_type, startup_ms, elapsed_ms, placement_ms, peak_pss_kb, bytes_value, device_output_path = sys.argv[1:]
+(
+    path,
+    name,
+    record_type,
+    startup_ms,
+    staging_ms,
+    native_load_ms,
+    placement_ms,
+    config_ms,
+    native_slice_ms,
+    write_gcode_ms,
+    elapsed_ms,
+    peak_pss_kb,
+    bytes_value,
+    fixture_bytes,
+    device_output_path,
+) = sys.argv[1:]
 
 def maybe_int(value):
     return int(value) if value.isdigit() else None
@@ -628,10 +663,16 @@ record = {
 }
 for key, value in [
     ("startup_ms", startup_ms),
-    ("elapsed_ms", elapsed_ms),
+    ("staging_ms", staging_ms),
+    ("native_load_ms", native_load_ms),
     ("placement_ms", placement_ms),
+    ("config_ms", config_ms),
+    ("native_slice_ms", native_slice_ms),
+    ("write_gcode_ms", write_gcode_ms),
+    ("elapsed_ms", elapsed_ms),
     ("peak_pss_kb", peak_pss_kb),
     ("bytes", bytes_value),
+    ("fixture_bytes", fixture_bytes),
 ]:
     parsed = maybe_int(value)
     if parsed is not None:
@@ -650,15 +691,23 @@ run_perf_slice_case() {
   local fixture="$4"
   local config_json="$5"
   run_automation_slice "$fixture" "$serial" "perf-$name" "0" "$config_json" "1"
+  local fixture_bytes
+  fixture_bytes="$(wc -c < "$fixture" | tr -d ' ')"
   append_perf_record \
     "$records_path" \
     "$name" \
     "slice" \
     "" \
-    "$AUTOMATION_LAST_ELAPSED_MS" \
+    "$AUTOMATION_LAST_STAGING_MS" \
+    "$AUTOMATION_LAST_NATIVE_LOAD_MS" \
     "$AUTOMATION_LAST_PLACEMENT_MS" \
+    "$AUTOMATION_LAST_CONFIG_MS" \
+    "$AUTOMATION_LAST_NATIVE_SLICE_MS" \
+    "$AUTOMATION_LAST_WRITE_GCODE_MS" \
+    "$AUTOMATION_LAST_ELAPSED_MS" \
     "$AUTOMATION_LAST_PEAK_PSS_KB" \
     "$AUTOMATION_LAST_BYTES" \
+    "$fixture_bytes" \
     "$AUTOMATION_LAST_OUTPUT_PATH"
 }
 
@@ -668,6 +717,9 @@ run_performance_gate() {
   require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "small cube performance STL"
   require_automation_fixture "$SUPPORT_SLICE_SMOKE_STL" "bridge support performance STL"
   require_automation_fixture "$PERIMETER_ARRAY_SLICE_SMOKE_STL" "perimeter array performance STL"
+  require_automation_fixture "$MEDIUM_SLICE_PERF_STL" "medium performance STL"
+  require_automation_fixture "$COMPLEX_SLICE_PERF_STL" "complex performance STL"
+  require_automation_fixture "$STRESS_SLICE_PERF_STL" "stress performance STL"
   install_perf_apk "$serial"
 
   local artifact_root="$ROOT_DIR/artifacts/performance"
@@ -686,17 +738,27 @@ run_performance_gate() {
   startup_ms="$(printf '%s\n' "$startup_output" | tail -n 1)"
   sleep 2
   startup_pss_kb="$(device_pss_kb "$serial" || true)"
-  append_perf_record "$records_path" "cold-start" "startup" "$startup_ms" "" "" "${startup_pss_kb:-0}" "" ""
+  append_perf_record "$records_path" "cold-start" "startup" "$startup_ms" "" "" "" "" "" "" "" "${startup_pss_kb:-0}" "" "" ""
   assert_no_crash_after_launch "$serial"
 
-  local default_config support_config perimeter_config
+  local default_config support_config perimeter_config medium_config complex_config stress_config
   default_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
   support_config="$(automation_config_with_overrides brim_width=0 enable_support=true support_type=normal\(auto\) support_style=default support_threshold_angle=10 support_on_build_plate_only=false)"
   perimeter_config="$(automation_config_with_overrides brim_width=0 wall_loops=3 sparse_infill_density=20 enable_support=false small_perimeter_speed=20)"
+  medium_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
+  complex_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
+  stress_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=10 enable_support=false)"
 
   run_perf_slice_case "$records_path" "$serial" "small-cube" "$DEFAULT_SLICE_SMOKE_STL" "$default_config"
   run_perf_slice_case "$records_path" "$serial" "bridge-support" "$SUPPORT_SLICE_SMOKE_STL" "$support_config"
   run_perf_slice_case "$records_path" "$serial" "perimeter-array" "$PERIMETER_ARRAY_SLICE_SMOKE_STL" "$perimeter_config"
+  run_perf_slice_case "$records_path" "$serial" "medium-speed-structure" "$MEDIUM_SLICE_PERF_STL" "$medium_config"
+  run_perf_slice_case "$records_path" "$serial" "complex-vfa" "$COMPLEX_SLICE_PERF_STL" "$complex_config"
+  if [[ "${MOBILE_SLICER_PERF_INCLUDE_STRESS:-0}" =~ ^(1|true|TRUE|yes|YES)$ ]]; then
+    run_perf_slice_case "$records_path" "$serial" "stress-temperature-tower" "$STRESS_SLICE_PERF_STL" "$stress_config"
+  else
+    log "Skipping stress-temperature-tower; set MOBILE_SLICER_PERF_INCLUDE_STRESS=1 to include the 10MB stress fixture."
+  fi
 
   local baseline_args=()
   if [[ -n "${MOBILE_SLICER_PERF_BASELINE:-}" ]]; then

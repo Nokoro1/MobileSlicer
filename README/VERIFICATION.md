@@ -53,7 +53,7 @@ MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh perf RFCYA01AN
 `perf` is developer/release tooling only; it does not add or expose benchmark UI
 inside the app. It builds and installs the `perfDebug` APK, measures cold startup,
 then runs app-private automation slices for the small cube, bridge/support, and
-small-perimeter-array fixtures. Reports are written under
+small-perimeter-array fixtures plus medium and complex calibration STLs. Reports are written under
 `artifacts/performance/<timestamp>/` with `report.json`, `report.md`, and a
 `latest` symlink.
 
@@ -64,6 +64,23 @@ Default hard budgets are intentionally broad enough for normal phone variance:
 - small cube slice: `MOBILE_SLICER_PERF_MAX_SMALL_CUBE_SLICE_MS`, default `120000`
 - bridge/support slice: `MOBILE_SLICER_PERF_MAX_BRIDGE_SUPPORT_SLICE_MS`, default `180000`
 - perimeter-array slice: `MOBILE_SLICER_PERF_MAX_PERIMETER_ARRAY_SLICE_MS`, default `180000`
+- medium speed-structure slice: `MOBILE_SLICER_PERF_MAX_MEDIUM_SPEED_STRUCTURE_SLICE_MS`, default `240000`
+- complex VFA slice: `MOBILE_SLICER_PERF_MAX_COMPLEX_VFA_SLICE_MS`, default `300000`
+- stress temperature-tower slice: `MOBILE_SLICER_PERF_MAX_STRESS_TEMPERATURE_TOWER_SLICE_MS`, default `600000`
+
+The default `perf` run skips the largest 10MB temperature-tower stress fixture to
+keep routine checks bounded. Include it explicitly before release candidates or
+when chasing large-model performance:
+
+```bash
+MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 \
+MOBILE_SLICER_PERF_INCLUDE_STRESS=1 \
+scripts/verify_android.sh perf RFCYA01ANVE
+```
+
+Slice records include phase timings from the automation path:
+`stagingMs`, `nativeLoadMs`, `placementMs`, `configMs`, `nativeSliceMs`,
+`writeGcodeMs`, and `elapsedMs`.
 
 To compare against a previous run, pass the prior `report.json`:
 

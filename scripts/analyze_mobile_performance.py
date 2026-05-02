@@ -15,6 +15,9 @@ DEFAULT_SLICE_BUDGETS_MS = {
     "small-cube": 120_000,
     "bridge-support": 180_000,
     "perimeter-array": 180_000,
+    "medium-speed-structure": 240_000,
+    "complex-vfa": 300_000,
+    "stress-temperature-tower": 600_000,
 }
 
 
@@ -102,6 +105,31 @@ def build_markdown(records: list[dict[str, Any]], failures: list[str]) -> str:
     if failures:
         lines.extend(["", "## Failures", ""])
         lines.extend(f"- {failure}" for failure in failures)
+    slice_records = [record for record in records if record.get("type") == "slice"]
+    if slice_records:
+        lines.extend(
+            [
+                "",
+                "## Slice Phases",
+                "",
+                "| Name | Fixture bytes | Stage ms | Native load ms | Placement ms | Config ms | Native slice ms | Write G-code ms | Total ms |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for record in slice_records:
+            lines.append(
+                "| {name} | {fixture_bytes} | {stage} | {native_load} | {placement} | {config} | {native_slice} | {write_gcode} | {elapsed} |".format(
+                    name=record.get("name", ""),
+                    fixture_bytes=record.get("fixture_bytes", ""),
+                    stage=record.get("staging_ms", ""),
+                    native_load=record.get("native_load_ms", ""),
+                    placement=record.get("placement_ms", ""),
+                    config=record.get("config_ms", ""),
+                    native_slice=record.get("native_slice_ms", ""),
+                    write_gcode=record.get("write_gcode_ms", ""),
+                    elapsed=record.get("elapsed_ms", ""),
+                )
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -149,6 +177,9 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
         comparisons = [
             ("startup_ms", startup_regression_percent),
             ("elapsed_ms", slice_regression_percent),
+            ("native_load_ms", slice_regression_percent),
+            ("native_slice_ms", slice_regression_percent),
+            ("write_gcode_ms", slice_regression_percent),
             ("peak_pss_kb", memory_regression_percent),
             ("bytes", output_regression_percent),
         ]
@@ -196,7 +227,10 @@ def main() -> int:
         elif record.get("type") == "slice":
             print(
                 f"{record.get('name')}: elapsedMs={record.get('elapsed_ms')} "
-                f"placementMs={record.get('placement_ms')} peakPssKb={record.get('peak_pss_kb')} "
+                f"stagingMs={record.get('staging_ms')} nativeLoadMs={record.get('native_load_ms')} "
+                f"placementMs={record.get('placement_ms')} configMs={record.get('config_ms')} "
+                f"nativeSliceMs={record.get('native_slice_ms')} writeGcodeMs={record.get('write_gcode_ms')} "
+                f"peakPssKb={record.get('peak_pss_kb')} "
                 f"bytes={record.get('bytes')}"
             )
     if failures:

@@ -6,6 +6,8 @@ import java.io.File
 import java.io.RandomAccessFile
 import kotlin.math.sqrt
 
+private const val BINARY_BOUNDS_IN_MEMORY_LIMIT_BYTES = 32L * 1024L * 1024L
+
 internal fun looksLikeBinaryStl(file: File): Boolean {
 if (file.length() < 84L) return false
 return RandomAccessFile(file, "r").use { raf ->
@@ -194,6 +196,10 @@ return BufferedInputStream(file.inputStream(), 1 shl 20).use { input ->
 internal fun parseBinaryBounds(file: File): MeshBounds {
 require(file.length() >= 84L) { "Binary STL too small." }
 
+if (file.length() <= BINARY_BOUNDS_IN_MEMORY_LIMIT_BYTES) {
+    return parseBinaryBoundsInMemory(file)
+}
+
 return BufferedInputStream(file.inputStream(), 1 shl 20).use { input ->
     skipExactly(input, 80)
     val triangleCount = readLittleEndianInt(input)
@@ -230,6 +236,41 @@ return BufferedInputStream(file.inputStream(), 1 shl 20).use { input ->
 }
 }
 
+private fun parseBinaryBoundsInMemory(file: File): MeshBounds {
+    val bytes = file.readBytes()
+    val triangleCount = readLittleEndianInt(bytes, 80)
+    require(triangleCount in 1..STL_MAX_TRIANGLES) { "Binary STL triangle count is invalid." }
+    val expectedSize = 84L + triangleCount.toLong() * 50L
+    require(expectedSize == bytes.size.toLong()) { "Binary STL size does not match triangle count." }
+
+    var minX = Float.POSITIVE_INFINITY
+    var minY = Float.POSITIVE_INFINITY
+    var minZ = Float.POSITIVE_INFINITY
+    var maxX = Float.NEGATIVE_INFINITY
+    var maxY = Float.NEGATIVE_INFINITY
+    var maxZ = Float.NEGATIVE_INFINITY
+
+    var triangleOffset = 84
+    repeat(triangleCount) {
+        repeat(3) { vertexInTriangle ->
+            val base = triangleOffset + 12 + vertexInTriangle * 12
+            val x = readLittleEndianFloat(bytes, base)
+            val y = readLittleEndianFloat(bytes, base + 4)
+            val z = readLittleEndianFloat(bytes, base + 8)
+
+            minX = minOf(minX, x)
+            minY = minOf(minY, y)
+            minZ = minOf(minZ, z)
+            maxX = maxOf(maxX, x)
+            maxY = maxOf(maxY, y)
+            maxZ = maxOf(maxZ, z)
+        }
+        triangleOffset += 50
+    }
+
+    return MeshBounds(minX, minY, minZ, maxX, maxY, maxZ)
+}
+
 internal fun readLittleEndianInt(raf: RandomAccessFile): Int {
     val b0 = raf.read()
     val b1 = raf.read()
@@ -252,13 +293,15 @@ internal fun readLittleEndianInt(input: BufferedInputStream): Int {
     return b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
 }
 
+internal fun readLittleEndianInt(bytes: ByteArray, offset: Int): Int {
+    return (bytes[offset].toInt() and 0xff) or
+        ((bytes[offset + 1].toInt() and 0xff) shl 8) or
+        ((bytes[offset + 2].toInt() and 0xff) shl 16) or
+        ((bytes[offset + 3].toInt() and 0xff) shl 24)
+}
+
 internal fun readLittleEndianFloat(bytes: ByteArray, offset: Int): Float {
-    val bits =
-        (bytes[offset].toInt() and 0xff) or
-            ((bytes[offset + 1].toInt() and 0xff) shl 8) or
-            ((bytes[offset + 2].toInt() and 0xff) shl 16) or
-            ((bytes[offset + 3].toInt() and 0xff) shl 24)
-    return Float.fromBits(bits)
+    return Float.fromBits(readLittleEndianInt(bytes, offset))
 }
 
 internal fun skipExactly(input: BufferedInputStream, byteCount: Int) {
