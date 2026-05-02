@@ -7,9 +7,12 @@ import com.mobileslicer.nativebridge.NativeEngineCallResult
 import com.mobileslicer.nativebridge.NativeEngineCalls
 import com.mobileslicer.nativebridge.NativeEngineHandle
 import com.mobileslicer.nativebridge.isSuccess
-import com.mobileslicer.workspace.NativeModelTransform
-import com.mobileslicer.workspace.defaultNativeModelTransform
 import com.mobileslicer.workspace.GcodeSummaryParser
+import com.mobileslicer.workspace.ModelImportTiming
+import com.mobileslicer.workspace.NativeModelTransform
+import com.mobileslicer.workspace.SlicePipelineTiming
+import com.mobileslicer.workspace.defaultNativeModelTransform
+import com.mobileslicer.workspace.workspaceResponsivenessLogLine
 import com.mobileslicer.viewer.DefaultPreviewVertexBudget
 import com.mobileslicer.viewer.PrinterBedSpec
 import com.mobileslicer.viewer.parsePreviewRangePlan
@@ -339,20 +342,40 @@ internal class AutomationSliceRunner(
             engineHandle = engineHandle,
             layerCount = previewInfoMetrics.layerCount
         )
+        val totalMs = SystemClock.elapsedRealtime() - startedAt
+        val timing = AutomationSliceTiming(
+            stagingMs = stagingMs,
+            nativeLoadMs = nativeLoadMs,
+            placementMs = placementMs,
+            configMs = configMs,
+            nativeSliceMs = nativeSliceMs,
+            writeGcodeMs = writeGcodeMs,
+            totalMs = totalMs
+        )
+        Log.i(
+            PERF_TAG,
+            workspaceResponsivenessLogLine(
+                eventName = "automation_slice_completed",
+                importTiming = ModelImportTiming(stagingMs = stagingMs, nativeLoadMs = nativeLoadMs),
+                workspacePreparationTiming = null,
+                firstVisibleWorkspaceFrameMs = null,
+                firstVisiblePreviewFrameMs = null,
+                sliceTiming = SlicePipelineTiming(
+                    modelReloadMs = 0L,
+                    configMs = configMs,
+                    nativeSliceMs = nativeSliceMs,
+                    writeGcodeMs = writeGcodeMs,
+                    summaryMs = 0L,
+                    totalMs = totalMs
+                )
+            )
+        )
         writeStatus(
             automationSliceSuccessStatus(
                 modelFile = modelFile,
                 stagedModel = stagedModel,
                 outputFile = outputFile,
-                timing = AutomationSliceTiming(
-                    stagingMs = stagingMs,
-                    nativeLoadMs = nativeLoadMs,
-                    placementMs = placementMs,
-                    configMs = configMs,
-                    nativeSliceMs = nativeSliceMs,
-                    writeGcodeMs = writeGcodeMs,
-                    totalMs = SystemClock.elapsedRealtime() - startedAt
-                ),
+                timing = timing,
                 nativeMetrics = nativeMetrics,
                 previewInfoMetrics = previewInfoMetrics,
                 previewLoadMetrics = previewLoadMetrics,
@@ -389,5 +412,6 @@ internal class AutomationSliceRunner(
 
     private companion object {
         private const val TAG = "MobileSlicer"
+        private const val PERF_TAG = "MobileSlicerPerf"
     }
 }

@@ -81,6 +81,7 @@ Usage:
   scripts/verify_android.sh slice-regression [serial]
   scripts/verify_android.sh profile-ui [serial]
   scripts/verify_android.sh responsiveness [serial]
+  scripts/verify_android.sh responsiveness-slice [serial]
   scripts/verify_android.sh perf [serial]
   scripts/verify_android.sh perf-heavy [serial]
   scripts/verify_android.sh benchy <local-stl-path> [serial]
@@ -119,6 +120,11 @@ Modes:
           Build, install, cold-launch, time representative UI navigation steps,
           and capture MobileSlicerPerf logcat events under artifacts/responsiveness.
           Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  responsiveness-slice
+          Build, install, run the cube automation slice, and capture model-load,
+          slice, preview planning, memory, and MobileSlicerPerf timing artifacts
+          under artifacts/responsiveness-slice. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   perf    Build/install perfDebug, run non-UI startup and slicing benchmarks,
           write reports under artifacts/performance, and fail on hard budgets
           or optional baseline regressions. Requires
@@ -567,6 +573,65 @@ PY
     fi
   } > "$artifact_dir/report.md"
   log "Responsiveness profile artifacts: $artifact_dir"
+}
+
+run_responsiveness_slice_profile() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "default slice smoke STL"
+  local artifact_root="$ROOT_DIR/artifacts/responsiveness-slice"
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  local artifact_dir="$artifact_root/$stamp"
+  mkdir -p "$artifact_dir"
+
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "responsiveness-slice" "1" "$BENCHY_AUTOMATION_CONFIG" "1"
+  adb_device "$serial" logcat -d -v time > "$artifact_dir/logcat.txt" 2>&1 || true
+  grep -E 'MobileSlicerPerf|workspace_responsiveness|automation:' "$artifact_dir/logcat.txt" > "$artifact_dir/timing-logcat.txt" || true
+  adb_device "$serial" logcat -b crash -d -v time > "$artifact_dir/crash-logcat.txt" 2>&1 || true
+  if [[ -s "$artifact_dir/crash-logcat.txt" ]]; then
+    cat "$artifact_dir/crash-logcat.txt" >&2
+    fail "Crash log buffer is not empty after responsiveness slice profile."
+  fi
+  if [[ -n "$AUTOMATION_LAST_STATUS" ]]; then
+    printf '%s\n' "$AUTOMATION_LAST_STATUS" > "$artifact_dir/status.txt"
+  fi
+  if [[ -n "$AUTOMATION_LAST_OUTPUT_PATH" ]]; then
+    adb_device "$serial" exec-out run-as "$PACKAGE_NAME" sh -c "head -n 200 '$AUTOMATION_LAST_OUTPUT_PATH'" > "$artifact_dir/gcode-head.txt" 2>&1 || true
+  fi
+  {
+    printf '# MobileSlicer Responsiveness Slice Profile\n\n'
+    printf -- '- serial: %s\n' "$serial"
+    printf -- '- captured_at: %s\n' "$stamp"
+    printf -- '- fixture: %s\n' "$DEFAULT_SLICE_SMOKE_STL"
+    printf -- '- gcode_bytes: %s\n\n' "${AUTOMATION_LAST_BYTES:-unknown}"
+    printf '## Phase Timings\n\n'
+    printf -- '- staging: %s ms\n' "${AUTOMATION_LAST_STAGING_MS:-unknown}"
+    printf -- '- native_load: %s ms\n' "${AUTOMATION_LAST_NATIVE_LOAD_MS:-unknown}"
+    printf -- '- placement: %s ms\n' "${AUTOMATION_LAST_PLACEMENT_MS:-unknown}"
+    printf -- '- config: %s ms\n' "${AUTOMATION_LAST_CONFIG_MS:-unknown}"
+    printf -- '- native_slice: %s ms\n' "${AUTOMATION_LAST_NATIVE_SLICE_MS:-unknown}"
+    printf -- '- write_gcode: %s ms\n' "${AUTOMATION_LAST_WRITE_GCODE_MS:-unknown}"
+    printf -- '- total: %s ms\n\n' "${AUTOMATION_LAST_ELAPSED_MS:-unknown}"
+    printf '## Preview Readiness\n\n'
+    printf -- '- preview_plan: %s ms\n' "${AUTOMATION_LAST_PREVIEW_PLAN_MS:-unknown}"
+    printf -- '- preview_load: %s ms\n' "${AUTOMATION_LAST_PREVIEW_LOAD_MS:-unknown}"
+    printf -- '- preview_ranges: %s\n' "${AUTOMATION_LAST_PREVIEW_RANGES:-unknown}"
+    printf -- '- preview_loaded_layers: %s\n' "${AUTOMATION_LAST_PREVIEW_LOADED_LAYERS:-unknown}"
+    printf -- '- preview_load_success: %s\n\n' "${AUTOMATION_LAST_PREVIEW_LOAD_SUCCESS:-unknown}"
+    printf '## Peak Memory\n\n'
+    printf -- '- pss_kb: %s\n' "${AUTOMATION_LAST_PEAK_PSS_KB:-unknown}"
+    printf -- '- java_heap_kb: %s\n' "${AUTOMATION_LAST_PEAK_JAVA_HEAP_KB:-unknown}"
+    printf -- '- native_heap_kb: %s\n' "${AUTOMATION_LAST_PEAK_NATIVE_HEAP_KB:-unknown}"
+    printf -- '- graphics_kb: %s\n\n' "${AUTOMATION_LAST_PEAK_GRAPHICS_KB:-unknown}"
+    printf '## App Timing Events\n\n'
+    if [[ -s "$artifact_dir/timing-logcat.txt" ]]; then
+      sed 's/^/- /' "$artifact_dir/timing-logcat.txt"
+    else
+      printf 'No timing events were captured.\n'
+    fi
+  } > "$artifact_dir/report.md"
+  log "Responsiveness slice artifacts: $artifact_dir"
 }
 
 stage_app_private_file() {
@@ -1461,6 +1526,9 @@ case "$mode" in
     ;;
   responsiveness)
     run_responsiveness_profile "$(device_serial "${2:-}")"
+    ;;
+  responsiveness-slice)
+    run_responsiveness_slice_profile "$(device_serial "${2:-}")"
     ;;
   perf)
     run_performance_gate "$(device_serial "${2:-}")"
