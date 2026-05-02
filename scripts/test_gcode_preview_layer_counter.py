@@ -261,6 +261,70 @@ class LayerCountParser:
         return line_has_marker
 
 
+@dataclass(frozen=True)
+class ProcessorMove:
+    move_type: str
+    role: str = "none"
+    mm3_per_mm: float = 0.0
+    layer_id: int = 0
+
+
+WRAPPER_PATH_START_MOVE_TYPES = {"noop", "extrude", "travel", "wipe"}
+PRESERVED_PATH_START_MOVE_TYPES = {"noop", "travel", "wipe", "extrude"}
+
+
+def _add_processor_vertex(layer_vertices: list[int], layer_id: int) -> None:
+    while len(layer_vertices) <= layer_id:
+        layer_vertices.append(0)
+    layer_vertices[layer_id] += 1
+
+
+def wrapper_processor_counts(moves: list[ProcessorMove]) -> list[int]:
+    """Mirror count_preview_vertices_by_layer_from_processor_result()."""
+    if len(moves) < 2:
+        return []
+    layer_vertices: list[int] = []
+    for index in range(1, len(moves)):
+        current = moves[index]
+        previous = moves[index - 1]
+        if current.move_type == "count":
+            continue
+        if current.move_type in WRAPPER_PATH_START_MOVE_TYPES:
+            if (
+                not layer_vertices
+                or previous.move_type != current.move_type
+                or previous.role != current.role
+                or previous.mm3_per_mm != current.mm3_per_mm
+            ):
+                _add_processor_vertex(layer_vertices, current.layer_id)
+        _add_processor_vertex(layer_vertices, current.layer_id)
+    return layer_vertices
+
+
+def preserved_processor_counts(moves: list[ProcessorMove]) -> list[int]:
+    """Mirror mobile_preview_layer_vertex_counts() before moves are released."""
+    if len(moves) < 2:
+        return []
+    layer_vertices: list[int] = []
+    for index in range(1, len(moves)):
+        current = moves[index]
+        if current.move_type == "count":
+            continue
+        previous = moves[index - 1]
+        if (
+            current.move_type in PRESERVED_PATH_START_MOVE_TYPES
+            and (
+                not layer_vertices
+                or previous.move_type != current.move_type
+                or previous.role != current.role
+                or previous.mm3_per_mm != current.mm3_per_mm
+            )
+        ):
+            _add_processor_vertex(layer_vertices, current.layer_id)
+        _add_processor_vertex(layer_vertices, current.layer_id)
+    return layer_vertices
+
+
 def two_pass_counts(gcode: str) -> list[int]:
     markers_available = "LAYER_CHANGE" in gcode or "CHANGE_LAYER" in gcode
     parser = LayerCountParser(markers_available)
@@ -365,6 +429,40 @@ class GcodePreviewLayerCounterTest(unittest.TestCase):
     def test_range_packing_stays_stable_for_large_counts(self) -> None:
         counts = [100, 200, 300, 250, 250, 500]
         self.assertEqual("0-1;2-3;4-4;5-5", pack_ranges(counts, 0, 5, 600))
+
+    def test_preserved_processor_counts_match_wrapper_processor_counts(self) -> None:
+        moves = [
+            ProcessorMove("noop", layer_id=0),
+            ProcessorMove("extrude", "perimeter", 0.04, 0),
+            ProcessorMove("extrude", "perimeter", 0.04, 0),
+            ProcessorMove("extrude", "infill", 0.04, 0),
+            ProcessorMove("travel", "none", 0.0, 0),
+            ProcessorMove("travel", "none", 0.0, 1),
+            ProcessorMove("wipe", "none", 0.0, 1),
+            ProcessorMove("retract", "none", 0.0, 1),
+            ProcessorMove("unretract", "none", 0.0, 1),
+            ProcessorMove("count", "none", 0.0, 99),
+            ProcessorMove("extrude", "infill", 0.08, 2),
+        ]
+
+        expected = wrapper_processor_counts(moves)
+        self.assertEqual([7, 5, 2], expected)
+        self.assertEqual(expected, preserved_processor_counts(moves))
+
+    def test_preserved_processor_counts_keep_same_parameter_layer_transition(self) -> None:
+        moves = [
+            ProcessorMove("noop", layer_id=0),
+            ProcessorMove("extrude", "perimeter", 0.04, 0),
+            ProcessorMove("extrude", "perimeter", 0.04, 1),
+        ]
+
+        expected = wrapper_processor_counts(moves)
+        self.assertEqual([2, 1], expected)
+        self.assertEqual(expected, preserved_processor_counts(moves))
+
+    def test_preserved_processor_counts_ignore_too_few_moves(self) -> None:
+        self.assertEqual([], preserved_processor_counts([]))
+        self.assertEqual([], preserved_processor_counts([ProcessorMove("noop", layer_id=0)]))
 
 
 if __name__ == "__main__":

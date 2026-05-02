@@ -711,21 +711,26 @@ static bool should_fold_into_top_surface(libvgcode::EGCodeExtrusionRole role)
 
 static void normalize_top_surface_layers(libvgcode::GCodeInputData& data)
 {
-    uint32_t max_layer_id = 0;
-    for (const libvgcode::PathVertex& vertex : data.vertices) {
-        max_layer_id = std::max(max_layer_id, vertex.layer_id);
-    }
-
-    std::vector<bool> top_surface_layers(static_cast<size_t>(max_layer_id) + 1, false);
+    std::vector<uint32_t> top_surface_layer_ids;
+    uint32_t max_top_surface_layer_id = 0;
     for (const libvgcode::PathVertex& vertex : data.vertices) {
         if (vertex.type == libvgcode::EMoveType::Extrude &&
             vertex.role == libvgcode::EGCodeExtrusionRole::TopSolidInfill) {
-            top_surface_layers[static_cast<size_t>(vertex.layer_id)] = true;
+            top_surface_layer_ids.push_back(vertex.layer_id);
+            max_top_surface_layer_id = std::max(max_top_surface_layer_id, vertex.layer_id);
         }
+    }
+    if (top_surface_layer_ids.empty()) {
+        return;
+    }
+    std::vector<bool> top_surface_layers(static_cast<size_t>(max_top_surface_layer_id) + 1, false);
+    for (const uint32_t layer_id : top_surface_layer_ids) {
+        top_surface_layers[static_cast<size_t>(layer_id)] = true;
     }
 
     for (libvgcode::PathVertex& vertex : data.vertices) {
         if (vertex.type == libvgcode::EMoveType::Extrude &&
+            vertex.layer_id < top_surface_layers.size() &&
             top_surface_layers[static_cast<size_t>(vertex.layer_id)] &&
             should_fold_into_top_surface(vertex.role)) {
             vertex.role = libvgcode::EGCodeExtrusionRole::TopSolidInfill;
