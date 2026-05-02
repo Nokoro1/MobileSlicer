@@ -232,6 +232,46 @@ struct GcodeMoveWords {
     bool has_j{false};
 };
 
+static bool is_gcode_number_char(char ch)
+{
+    return (ch >= '0' && ch <= '9') ||
+        ch == '+' ||
+        ch == '-' ||
+        ch == '.' ||
+        ch == 'e' ||
+        ch == 'E';
+}
+
+static double parse_gcode_word_value(std::string_view command, size_t number_start, char** end)
+{
+    const char* source = command.data() + number_start;
+    size_t number_length = 0;
+    while (number_start + number_length < command.size() &&
+        is_gcode_number_char(command[number_start + number_length])) {
+        ++number_length;
+    }
+    if (number_length == 0) {
+        *end = const_cast<char*>(source);
+        return 0.0;
+    }
+
+    std::array<char, 96> stack_buffer{};
+    if (number_length < stack_buffer.size()) {
+        std::memcpy(stack_buffer.data(), source, number_length);
+        stack_buffer[number_length] = '\0';
+        char* parsed_end = nullptr;
+        const double value = std::strtod(stack_buffer.data(), &parsed_end);
+        *end = const_cast<char*>(source) + (parsed_end - stack_buffer.data());
+        return value;
+    }
+
+    const std::string tail(command.substr(number_start, number_length));
+    char* parsed_end = nullptr;
+    const double value = std::strtod(tail.c_str(), &parsed_end);
+    *end = const_cast<char*>(source) + (parsed_end - tail.c_str());
+    return value;
+}
+
 static bool parse_gcode_move_words(std::string_view command, GcodeMoveWords& words)
 {
     words = GcodeMoveWords{};
@@ -249,10 +289,9 @@ static bool parse_gcode_move_words(std::string_view command, GcodeMoveWords& wor
         if (number_start >= command.size()) {
             continue;
         }
-        const std::string tail(command.substr(number_start));
         char* end = nullptr;
-        const double value = std::strtod(tail.c_str(), &end);
-        if (end == tail.c_str()) {
+        const double value = parse_gcode_word_value(command, number_start, &end);
+        if (end == command.data() + number_start) {
             continue;
         }
         switch (letter) {
@@ -267,7 +306,7 @@ static bool parse_gcode_move_words(std::string_view command, GcodeMoveWords& wor
             default: break;
         }
         parsed_any = true;
-        i = number_start + static_cast<size_t>(end - tail.c_str());
+        i = static_cast<size_t>(end - command.data());
     }
     return parsed_any;
 }

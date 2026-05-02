@@ -549,48 +549,51 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_processor_result
     return layer_vertices;
 }
 
-static bool starts_with_text(const std::string& value, const char* prefix)
+static bool starts_with_text(std::string_view value, const char* prefix)
 {
     return value.rfind(prefix, 0) == 0;
 }
 
-static bool parse_float_after_prefix(const std::string& value, const char* prefix, float& out)
+static bool parse_float_after_prefix(std::string_view value, const char* prefix, float& out)
 {
     if (!starts_with_text(value, prefix)) {
         return false;
     }
+    const size_t prefix_size = std::char_traits<char>::length(prefix);
+    const std::string tail(value.substr(prefix_size));
     char* end = nullptr;
-    const float parsed = std::strtof(value.c_str() + std::char_traits<char>::length(prefix), &end);
-    if (end == value.c_str() + std::char_traits<char>::length(prefix)) {
+    const float parsed = std::strtof(tail.c_str(), &end);
+    if (end == tail.c_str()) {
         return false;
     }
     out = parsed;
     return true;
 }
 
-static libvgcode::EGCodeExtrusionRole role_from_type_marker(std::string marker)
+static libvgcode::EGCodeExtrusionRole role_from_type_marker(std::string_view marker)
 {
-    marker = trim_copy(marker);
-    std::transform(marker.begin(), marker.end(), marker.begin(), [](unsigned char ch) {
+    marker = trim_view(marker);
+    std::string normalized(marker);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
     });
 
-    if (marker == "skirt") return libvgcode::EGCodeExtrusionRole::Skirt;
-    if (marker == "brim") return libvgcode::EGCodeExtrusionRole::Brim;
-    if (marker == "inner wall" || marker == "internal perimeter") return libvgcode::EGCodeExtrusionRole::Perimeter;
-    if (marker == "outer wall" || marker == "external perimeter") return libvgcode::EGCodeExtrusionRole::ExternalPerimeter;
-    if (marker == "overhang wall" || marker == "overhang perimeter") return libvgcode::EGCodeExtrusionRole::OverhangPerimeter;
-    if (marker == "sparse infill" || marker == "internal infill") return libvgcode::EGCodeExtrusionRole::InternalInfill;
-    if (marker == "internal solid infill" || marker == "solid infill") return libvgcode::EGCodeExtrusionRole::SolidInfill;
-    if (marker == "top surface" || marker == "top solid infill") return libvgcode::EGCodeExtrusionRole::TopSolidInfill;
-    if (marker == "bottom surface") return libvgcode::EGCodeExtrusionRole::BottomSurface;
-    if (marker == "bridge" || marker == "internal bridge") return libvgcode::EGCodeExtrusionRole::InternalBridgeInfill;
-    if (marker == "gap infill" || marker == "gap fill") return libvgcode::EGCodeExtrusionRole::GapFill;
-    if (marker.find("support interface") != std::string::npos) return libvgcode::EGCodeExtrusionRole::SupportMaterialInterface;
-    if (marker.find("support") != std::string::npos) return libvgcode::EGCodeExtrusionRole::SupportMaterial;
-    if (marker == "iron" || marker == "ironing") return libvgcode::EGCodeExtrusionRole::Ironing;
-    if (marker == "prime tower" || marker == "wipe tower") return libvgcode::EGCodeExtrusionRole::WipeTower;
-    if (marker == "custom") return libvgcode::EGCodeExtrusionRole::Custom;
+    if (normalized == "skirt") return libvgcode::EGCodeExtrusionRole::Skirt;
+    if (normalized == "brim") return libvgcode::EGCodeExtrusionRole::Brim;
+    if (normalized == "inner wall" || normalized == "internal perimeter") return libvgcode::EGCodeExtrusionRole::Perimeter;
+    if (normalized == "outer wall" || normalized == "external perimeter") return libvgcode::EGCodeExtrusionRole::ExternalPerimeter;
+    if (normalized == "overhang wall" || normalized == "overhang perimeter") return libvgcode::EGCodeExtrusionRole::OverhangPerimeter;
+    if (normalized == "sparse infill" || normalized == "internal infill") return libvgcode::EGCodeExtrusionRole::InternalInfill;
+    if (normalized == "internal solid infill" || normalized == "solid infill") return libvgcode::EGCodeExtrusionRole::SolidInfill;
+    if (normalized == "top surface" || normalized == "top solid infill") return libvgcode::EGCodeExtrusionRole::TopSolidInfill;
+    if (normalized == "bottom surface") return libvgcode::EGCodeExtrusionRole::BottomSurface;
+    if (normalized == "bridge" || normalized == "internal bridge") return libvgcode::EGCodeExtrusionRole::InternalBridgeInfill;
+    if (normalized == "gap infill" || normalized == "gap fill") return libvgcode::EGCodeExtrusionRole::GapFill;
+    if (normalized.find("support interface") != std::string::npos) return libvgcode::EGCodeExtrusionRole::SupportMaterialInterface;
+    if (normalized.find("support") != std::string::npos) return libvgcode::EGCodeExtrusionRole::SupportMaterial;
+    if (normalized == "iron" || normalized == "ironing") return libvgcode::EGCodeExtrusionRole::Ironing;
+    if (normalized == "prime tower" || normalized == "wipe tower") return libvgcode::EGCodeExtrusionRole::WipeTower;
+    if (normalized == "custom") return libvgcode::EGCodeExtrusionRole::Custom;
     return libvgcode::EGCodeExtrusionRole::None;
 }
 
@@ -679,15 +682,16 @@ static void append_path_vertex(
     data.vertices.push_back(vertex);
 }
 
-static std::optional<uint8_t> parse_tool_select_command(const std::string& command)
+static std::optional<uint8_t> parse_tool_select_command(std::string_view command)
 {
     if (command.empty() || (command[0] != 'T' && command[0] != 't')) {
         return std::nullopt;
     }
-    const char* start = command.c_str() + 1;
-    if (!std::isdigit(static_cast<unsigned char>(*start))) {
+    if (command.size() < 2 || !std::isdigit(static_cast<unsigned char>(command[1]))) {
         return std::nullopt;
     }
+    const std::string tail(command.substr(1));
+    const char* start = tail.c_str();
     char* end = nullptr;
     const unsigned long parsed = std::strtoul(start, &end, 10);
     if (end == start || parsed > std::numeric_limits<uint8_t>::max()) {
@@ -794,8 +798,11 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
             break;
         }
         const size_t comment_pos = raw_line.find(';');
-        const std::string command = trim_copy(raw_line.substr(0, comment_pos));
-        const std::string comment = comment_pos == std::string::npos ? std::string() : trim_copy(raw_line.substr(comment_pos + 1));
+        const std::string_view raw_line_view(raw_line);
+        const std::string_view command = trim_view(raw_line_view.substr(0, comment_pos));
+        const std::string_view comment = comment_pos == std::string::npos ?
+            std::string_view() :
+            trim_view(raw_line_view.substr(comment_pos + 1));
 
         if (!comment.empty()) {
             if (starts_with_text(comment, "TYPE:")) {
@@ -805,7 +812,7 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
                     preview_position_synced = false;
                 }
             } else if (starts_with_text(comment, "FEATURE:")) {
-                role = role_from_type_marker(trim_copy(comment.substr(8)));
+                role = role_from_type_marker(comment.substr(8));
                 if (role_is_previewable_toolpath(role)) {
                     print_toolpath_started = true;
                     preview_position_synced = false;
@@ -1190,8 +1197,11 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_text(const
     std::string raw_line;
     while (std::getline(stream, raw_line)) {
         const size_t comment_pos = raw_line.find(';');
-        const std::string command = trim_copy(raw_line.substr(0, comment_pos));
-        const std::string comment = comment_pos == std::string::npos ? std::string() : trim_copy(raw_line.substr(comment_pos + 1));
+        const std::string_view raw_line_view(raw_line);
+        const std::string_view command = trim_view(raw_line_view.substr(0, comment_pos));
+        const std::string_view comment = comment_pos == std::string::npos ?
+            std::string_view() :
+            trim_view(raw_line_view.substr(comment_pos + 1));
 
         if (!comment.empty()) {
             if (starts_with_text(comment, "TYPE:")) {
@@ -1201,7 +1211,7 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_text(const
                     preview_position_synced = false;
                 }
             } else if (starts_with_text(comment, "FEATURE:")) {
-                role = role_from_type_marker(trim_copy(comment.substr(8)));
+                role = role_from_type_marker(comment.substr(8));
                 if (role_is_previewable_toolpath(role)) {
                     print_toolpath_started = true;
                     preview_position_synced = false;
@@ -1350,8 +1360,11 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
     std::string raw_line;
     while (std::getline(stream, raw_line)) {
         const size_t comment_pos = raw_line.find(';');
-        const std::string command = trim_copy(raw_line.substr(0, comment_pos));
-        const std::string comment = comment_pos == std::string::npos ? std::string() : trim_copy(raw_line.substr(comment_pos + 1));
+        const std::string_view raw_line_view(raw_line);
+        const std::string_view command = trim_view(raw_line_view.substr(0, comment_pos));
+        const std::string_view comment = comment_pos == std::string::npos ?
+            std::string_view() :
+            trim_view(raw_line_view.substr(comment_pos + 1));
 
         if (!comment.empty()) {
             if (starts_with_text(comment, "TYPE:")) {
@@ -1361,7 +1374,7 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
                     preview_position_synced = false;
                 }
             } else if (starts_with_text(comment, "FEATURE:")) {
-                role = role_from_type_marker(trim_copy(comment.substr(8)));
+                role = role_from_type_marker(comment.substr(8));
                 if (role_is_previewable_toolpath(role)) {
                     print_toolpath_started = true;
                     preview_position_synced = false;
