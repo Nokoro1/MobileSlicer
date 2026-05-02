@@ -4071,10 +4071,19 @@ extern "C" int orca_slice(OrcaEngine* engine)
             "|previewCacheBuilt=" + std::string(engine->impl.cached_preview_valid ? "1" : "0") +
             "|previewCacheComplete=" + std::string(engine->impl.cached_preview_complete ? "1" : "0") +
             "|previewCachedVertices=" + std::to_string(processor_preview_vertices) +
-            "|previewCacheBuildMs=" + std::to_string(processor_preview_build_ms);
+            "|previewCacheBuildMs=" + std::to_string(processor_preview_build_ms) +
+            "|gcodeBytes=" + std::to_string(gcode_size) +
+            "|processorMoveBytes=" + std::to_string(preview_moves * sizeof(Slic3r::GCodeProcessorResult::MoveVertex)) +
+            "|processorLineEndBytes=" + std::to_string(gcode_result.lines_ends.size() * sizeof(size_t)) +
+            "|previewLayerCountBytes=" + std::to_string(engine->impl.cached_preview_layer_counts.size() * sizeof(size_t)) +
+            "|exactPreviewCacheEligible=" + std::string(
+                gcode_result.moves.size() >= 2 &&
+                gcode_result.moves.size() * static_cast<size_t>(2) <= static_cast<size_t>(kMaxCachedPreviewVertices) ? "1" : "0");
 #else
         engine->impl.slice_metrics =
-            "previewMoves=0|previewCacheBuilt=0|previewCacheComplete=0|previewCachedVertices=0|previewCacheBuildMs=0";
+            "previewMoves=0|previewCacheBuilt=0|previewCacheComplete=0|previewCachedVertices=0|previewCacheBuildMs=0"
+            "|gcodeBytes=" + std::to_string(gcode_size) +
+            "|processorMoveBytes=0|processorLineEndBytes=0|previewLayerCountBytes=0|exactPreviewCacheEligible=0";
 #endif
         const long summary_parse_ms = elapsed_ms_since(summary_parse_start);
         const float normal_print_time = gcode_result.print_statistics

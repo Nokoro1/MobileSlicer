@@ -88,7 +88,12 @@ internal data class AutomationSliceNativeMetrics(
     val previewCacheBuilt: Boolean = false,
     val previewCacheComplete: Boolean = false,
     val previewCachedVertices: Long = 0L,
-    val previewCacheBuildMs: Long = 0L
+    val previewCacheBuildMs: Long = 0L,
+    val gcodeBytes: Long = 0L,
+    val processorMoveBytes: Long = 0L,
+    val processorLineEndBytes: Long = 0L,
+    val previewLayerCountBytes: Long = 0L,
+    val exactPreviewCacheEligible: Boolean = false
 )
 
 internal data class AutomationSlicePreviewInfoMetrics(
@@ -136,6 +141,11 @@ internal fun automationSliceSuccessStatus(
         "previewCacheComplete=${if (nativeMetrics.previewCacheComplete) 1 else 0} " +
         "previewCachedVertices=${nativeMetrics.previewCachedVertices} " +
         "previewCacheBuildMs=${nativeMetrics.previewCacheBuildMs} " +
+        "nativeGcodeBytes=${nativeMetrics.gcodeBytes} " +
+        "processorMoveBytes=${nativeMetrics.processorMoveBytes} " +
+        "processorLineEndBytes=${nativeMetrics.processorLineEndBytes} " +
+        "previewLayerCountBytes=${nativeMetrics.previewLayerCountBytes} " +
+        "exactPreviewCacheEligible=${if (nativeMetrics.exactPreviewCacheEligible) 1 else 0} " +
         "previewInfoRich=${if (previewInfoMetrics.summaryHasRichPreviewInfo) 1 else 0} " +
         "previewInfoEnrichedRich=${if (previewInfoMetrics.enrichedHasRichPreviewInfo) 1 else 0} " +
         "previewInfoLineTypes=${previewInfoMetrics.lineTypeCount} " +
@@ -169,7 +179,12 @@ internal fun parseAutomationSliceNativeMetrics(metricsText: String?): Automation
         previewCacheBuilt = fields["previewCacheBuilt"] == "1",
         previewCacheComplete = fields["previewCacheComplete"] == "1",
         previewCachedVertices = fields["previewCachedVertices"]?.toLongOrNull() ?: 0L,
-        previewCacheBuildMs = fields["previewCacheBuildMs"]?.toLongOrNull() ?: 0L
+        previewCacheBuildMs = fields["previewCacheBuildMs"]?.toLongOrNull() ?: 0L,
+        gcodeBytes = fields["gcodeBytes"]?.toLongOrNull() ?: 0L,
+        processorMoveBytes = fields["processorMoveBytes"]?.toLongOrNull() ?: 0L,
+        processorLineEndBytes = fields["processorLineEndBytes"]?.toLongOrNull() ?: 0L,
+        previewLayerCountBytes = fields["previewLayerCountBytes"]?.toLongOrNull() ?: 0L,
+        exactPreviewCacheEligible = fields["exactPreviewCacheEligible"] == "1"
     )
 }
 

@@ -36,7 +36,12 @@ class AutomationSliceRunnerTest {
                 previewCacheBuilt = true,
                 previewCacheComplete = true,
                 previewCachedVertices = 8,
-                previewCacheBuildMs = 9
+                previewCacheBuildMs = 9,
+                gcodeBytes = 10,
+                processorMoveBytes = 11,
+                processorLineEndBytes = 12,
+                previewLayerCountBytes = 13,
+                exactPreviewCacheEligible = true
             ),
             previewInfoMetrics = AutomationSlicePreviewInfoMetrics(
                 summaryHasRichPreviewInfo = true,
@@ -70,6 +75,11 @@ class AutomationSliceRunnerTest {
         assertTrue(status.contains("previewCacheComplete=1"))
         assertTrue(status.contains("previewCachedVertices=8"))
         assertTrue(status.contains("previewCacheBuildMs=9"))
+        assertTrue(status.contains("nativeGcodeBytes=10"))
+        assertTrue(status.contains("processorMoveBytes=11"))
+        assertTrue(status.contains("processorLineEndBytes=12"))
+        assertTrue(status.contains("previewLayerCountBytes=13"))
+        assertTrue(status.contains("exactPreviewCacheEligible=1"))
         assertTrue(status.contains("previewInfoRich=1"))
         assertTrue(status.contains("previewInfoEnrichedRich=1"))
         assertTrue(status.contains("previewInfoLineTypes=2"))
@@ -90,7 +100,8 @@ class AutomationSliceRunnerTest {
     @Test
     fun parsesNativeSliceMetrics() {
         val metrics = parseAutomationSliceNativeMetrics(
-            "previewMoves=123|previewCacheBuilt=1|previewCacheComplete=0|previewCachedVertices=456|previewCacheBuildMs=7"
+            "previewMoves=123|previewCacheBuilt=1|previewCacheComplete=0|previewCachedVertices=456|previewCacheBuildMs=7" +
+                "|gcodeBytes=89|processorMoveBytes=100|processorLineEndBytes=11|previewLayerCountBytes=12|exactPreviewCacheEligible=1"
         )
 
         assertEquals(123L, metrics.previewMoves)
@@ -98,6 +109,11 @@ class AutomationSliceRunnerTest {
         assertEquals(false, metrics.previewCacheComplete)
         assertEquals(456L, metrics.previewCachedVertices)
         assertEquals(7L, metrics.previewCacheBuildMs)
+        assertEquals(89L, metrics.gcodeBytes)
+        assertEquals(100L, metrics.processorMoveBytes)
+        assertEquals(11L, metrics.processorLineEndBytes)
+        assertEquals(12L, metrics.previewLayerCountBytes)
+        assertTrue(metrics.exactPreviewCacheEligible)
     }
 
     @Test
