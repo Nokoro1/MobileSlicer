@@ -276,6 +276,7 @@ run_script_tests() {
   bash -n "$ROOT_DIR/scripts/verify_android.sh"
   python3 -m py_compile "$ROOT_DIR"/scripts/*.py
   (cd "$ROOT_DIR" && python3 scripts/test_analyze_mobile_performance.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_analyze_preview_responsiveness.py)
   (cd "$ROOT_DIR" && python3 scripts/test_gcode_preview_layer_counter.py)
 }
 
@@ -850,6 +851,16 @@ run_preview_interaction_profile() {
     fail "Crash log buffer is not empty after $profile_name profile."
   fi
 
+  local responsiveness_json="$artifact_dir/preview-responsiveness.json"
+  local responsiveness_md="$artifact_dir/preview-responsiveness.md"
+  local responsiveness_status=0
+  python3 "$ROOT_DIR/scripts/analyze_preview_responsiveness.py" \
+    --status "$artifact_dir/status.txt" \
+    --timing-log "$artifact_dir/timing-logcat.txt" \
+    --profile "$profile_name" \
+    --output-json "$responsiveness_json" \
+    --output-md "$responsiveness_md" || responsiveness_status=$?
+
   {
     if [[ "$churn_requests" == "0" ]]; then
       printf '# MobileSlicer Preview Interaction Profile\n\n'
@@ -873,6 +884,13 @@ run_preview_interaction_profile() {
     printf -- '- max_frame: %s ms\n' "$(status_metric "$status" "maxFrameMs")"
     printf -- '- slow_frames: %s\n' "$(status_metric "$status" "slowFrames")"
     printf -- '- rendered_frames: %s\n\n' "$rendered_frames"
+    printf '## Responsiveness Gate\n\n'
+    if [[ -s "$responsiveness_md" ]]; then
+      sed 's/^/> /' "$responsiveness_md"
+    else
+      printf 'Preview responsiveness analysis did not produce a report.\n'
+    fi
+    printf '\n'
     printf '## Preview Runtime Summary\n\n'
     write_preview_runtime_summary "$artifact_dir/timing-logcat.txt"
     printf '\n## Timing Events\n\n'
@@ -883,6 +901,8 @@ run_preview_interaction_profile() {
     fi
   } > "$artifact_dir/report.md"
   log "$profile_name artifacts: $artifact_dir"
+  [[ "$responsiveness_status" -eq 0 ]] ||
+    fail "$profile_name responsiveness analyzer failed; see artifacts: $artifact_dir"
 }
 
 stage_app_private_file() {
