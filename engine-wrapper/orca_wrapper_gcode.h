@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -42,7 +43,8 @@ libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     long min_layer = -1,
     long max_layer = -1,
     size_t max_vertices = 1000000,
-    bool* vertex_limit_reached = nullptr);
+    bool* vertex_limit_reached = nullptr,
+    const std::function<bool()>& should_cancel = {});
 
 uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data);
 std::vector<size_t> count_preview_vertices_by_layer_from_processor_result(const Slic3r::GCodeProcessorResult& result);

@@ -31,7 +31,8 @@ class NativeEngineBridge private constructor() {
         @JvmStatic external fun nativeDestroyGcodeViewer(handle: Long)
         @JvmStatic external fun nativeShutdownGcodeViewer(handle: Long): Boolean
         @JvmStatic external fun nativeLoadGcodeIntoGcodeViewer(viewerHandle: Long, gcode: String): Boolean
-        @JvmStatic external fun nativeLoadLatestSliceIntoGcodeViewer(viewerHandle: Long, engineHandle: Long, minLayer: Long, maxLayer: Long, lodHint: Int): Boolean
+        @JvmStatic external fun nativeSetGcodePreviewGeneration(engineHandle: Long, generation: Long): Boolean
+        @JvmStatic external fun nativeLoadLatestSliceIntoGcodeViewer(viewerHandle: Long, engineHandle: Long, minLayer: Long, maxLayer: Long, lodHint: Int, generation: Long): Boolean
         @JvmStatic external fun nativeRenderGcodeViewer(viewerHandle: Long, viewMatrix: FloatArray, projectionMatrix: FloatArray): Boolean
         @JvmStatic external fun nativeGetGcodeViewerLayersCount(viewerHandle: Long): Long
         @JvmStatic external fun nativeSetGcodeViewerLayerRange(viewerHandle: Long, minLayer: Long, maxLayer: Long): Boolean

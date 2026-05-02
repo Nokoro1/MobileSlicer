@@ -26,7 +26,8 @@ internal object NativeGcodeViewerCalls {
         engineHandle: NativeEngineHandle,
         minLayer: Long,
         maxLayer: Long,
-        lodHint: Int
+        lodHint: Int,
+        generation: Long
     ): NativeEngineCallResult =
         booleanCall(handle, "nativeLoadLatestSliceIntoGcodeViewer") {
             NativeEngineBridge.nativeLoadLatestSliceIntoGcodeViewer(
@@ -34,7 +35,8 @@ internal object NativeGcodeViewerCalls {
                 engineHandle.raw,
                 minLayer,
                 maxLayer,
-                lodHint
+                lodHint,
+                generation
             )
         }
 

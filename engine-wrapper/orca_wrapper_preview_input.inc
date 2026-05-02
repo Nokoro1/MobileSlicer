@@ -734,7 +734,8 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     long min_layer,
     long max_layer,
     size_t max_vertices = kMaxPreviewVertices,
-    bool* vertex_limit_reached = nullptr)
+    bool* vertex_limit_reached = nullptr,
+    const std::function<bool()>& should_cancel = {})
 {
     if (vertex_limit_reached != nullptr) {
         *vertex_limit_reached = false;
@@ -782,11 +783,16 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     size_t arc_extrusion_segments = 0;
     const bool layer_filter_enabled = min_layer >= 0 && max_layer >= min_layer;
     GcodeMoveWords move_words;
+    bool parse_cancelled = false;
 
     std::istringstream stream(gcode);
     std::string raw_line;
     while (std::getline(stream, raw_line)) {
         ++line_id;
+        if ((line_id & 0xFFu) == 0 && should_cancel && should_cancel()) {
+            parse_cancelled = true;
+            break;
+        }
         const size_t comment_pos = raw_line.find(';');
         const std::string command = trim_copy(raw_line.substr(0, comment_pos));
         const std::string comment = comment_pos == std::string::npos ? std::string() : trim_copy(raw_line.substr(comment_pos + 1));
@@ -975,6 +981,10 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
             : static_cast<size_t>(1);
         libvgcode::Vec3 segment_start{ static_cast<float>(px), static_cast<float>(py), static_cast<float>(pz) };
         for (size_t segment = 1; segment <= segment_count; ++segment) {
+            if (should_cancel && should_cancel()) {
+                parse_cancelled = true;
+                break;
+            }
             if (max_vertices > 0 && data.vertices.size() >= max_vertices) {
                 if (vertex_limit_reached != nullptr) {
                     *vertex_limit_reached = true;
@@ -1003,12 +1013,20 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
                 !extrusion_path_open && segment == 1);
             segment_start = segment_end;
         }
+        if (parse_cancelled) {
+            break;
+        }
         if (is_arc_move) {
             arc_extrusion_segments += segment_count;
         }
         extrusion_path_open = true;
     }
 
+    if (parse_cancelled) {
+        data.vertices.clear();
+        data.vertices.shrink_to_fit();
+        return data;
+    }
     normalize_top_surface_layers(data);
     if (kVerboseNativeTimingLogs && skipped_custom_extrusions > 0) {
         log_native_info("gcode_preview_parser",

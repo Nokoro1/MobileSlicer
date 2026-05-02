@@ -258,7 +258,11 @@ extern "C" int orca_gcode_viewer_load_gcode(OrcaGcodeViewer*, const char*)
     return ORCA_ERROR_SLICE;
 }
 
-extern "C" int orca_gcode_viewer_load_latest_slice(OrcaGcodeViewer*, OrcaEngine*, long, long, int)
+extern "C" void orca_set_gcode_preview_generation(OrcaEngine*, long)
+{
+}
+
+extern "C" int orca_gcode_viewer_load_latest_slice(OrcaGcodeViewer*, OrcaEngine*, long, long, int, long)
 {
     return ORCA_ERROR_SLICE;
 }

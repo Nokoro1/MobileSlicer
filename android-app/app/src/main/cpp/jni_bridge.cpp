@@ -604,7 +604,17 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadGcodeIntoGcodeVi
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadLatestSliceIntoGcodeViewer(JNIEnv*, jclass, jlong viewer_handle, jlong engine_handle, jlong min_layer, jlong max_layer, jint lod_hint)
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeSetGcodePreviewGeneration(JNIEnv*, jclass, jlong engine_handle, jlong generation)
+{
+    if (engine_handle == 0) {
+        return JNI_FALSE;
+    }
+    orca_set_gcode_preview_generation(engine_from_handle(engine_handle), static_cast<long>(generation));
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadLatestSliceIntoGcodeViewer(JNIEnv*, jclass, jlong viewer_handle, jlong engine_handle, jlong min_layer, jlong max_layer, jint lod_hint, jlong generation)
 {
     if (viewer_handle == 0 || engine_handle == 0) {
         return JNI_FALSE;
@@ -614,7 +624,8 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadLatestSliceIntoG
         engine_from_handle(engine_handle),
         static_cast<long>(min_layer),
         static_cast<long>(max_layer),
-        static_cast<int>(lod_hint)
+        static_cast<int>(lod_hint),
+        static_cast<long>(generation)
     );
     return jni_bool_from_result(result);
 }

@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <iomanip>
 #include <istream>
@@ -133,9 +134,16 @@ libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     long min_layer,
     long max_layer,
     size_t max_vertices,
-    bool* vertex_limit_reached)
+    bool* vertex_limit_reached,
+    const std::function<bool()>& should_cancel)
 {
-    return internal_to_vgcode_input_data_from_gcode_text(gcode, min_layer, max_layer, max_vertices, vertex_limit_reached);
+    return internal_to_vgcode_input_data_from_gcode_text(
+        gcode,
+        min_layer,
+        max_layer,
+        max_vertices,
+        vertex_limit_reached,
+        should_cancel);
 }
 
 uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data)

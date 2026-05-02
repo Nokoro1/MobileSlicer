@@ -42,6 +42,11 @@ internal object NativeEngineCalls {
         NativeEngineBridge.nativeClearGeneratedGcode(handle.raw)
     }
 
+    fun setGcodePreviewGeneration(handle: NativeEngineHandle, generation: Long): NativeEngineCallResult =
+        booleanCall(handle, "nativeSetGcodePreviewGeneration") {
+            NativeEngineBridge.nativeSetGcodePreviewGeneration(handle.raw, generation)
+        }
+
     fun loadPlateModels(
         handle: NativeEngineHandle,
         paths: Array<String>,

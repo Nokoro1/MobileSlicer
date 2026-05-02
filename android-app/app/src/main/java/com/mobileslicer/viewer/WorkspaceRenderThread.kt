@@ -7,6 +7,8 @@ import android.opengl.Matrix
 import android.os.SystemClock
 import android.view.Surface
 import com.mobileslicer.nativebridge.NativeEngineCallResult
+import com.mobileslicer.nativebridge.NativeEngineCalls
+import com.mobileslicer.nativebridge.NativeEngineHandle
 
 internal class WorkspaceRenderThread(
     private val context: Context,
@@ -184,10 +186,16 @@ internal class WorkspaceRenderThread(
                 pendingGcodePreviewKey == safePreviewKey &&
                 pendingGcodePreviewVertexBudget == safeVertexBudget
             ) return
+            val generationEngineHandle = if (safeEngineHandle != 0L) {
+                safeEngineHandle
+            } else {
+                pendingGcodePreviewEngineHandle
+            }
             pendingGcodePreviewEngineHandle = safeEngineHandle
             pendingGcodePreviewKey = safePreviewKey
             pendingGcodePreviewVertexBudget = safeVertexBudget
             gcodePreviewVersion++
+            publishGcodePreviewGeneration(generationEngineHandle, gcodePreviewVersion)
             if (failure != null) {
                 failure = null
                 onFailure(null)
@@ -211,6 +219,7 @@ internal class WorkspaceRenderThread(
             val safeEngineHandle = source.engineHandle
             val safePreviewKey = source.previewKey
             val safeVertexBudget = vertexBudget.coerceIn(1L, GcodePreviewPerformanceMode.HARD_VERTEX_CEILING)
+            val previousEngineHandle = pendingGcodePreviewEngineHandle
             val sourceChanged =
                 pendingGcodePreviewEngineHandle != safeEngineHandle ||
                     pendingGcodePreviewKey != safePreviewKey ||
@@ -236,6 +245,10 @@ internal class WorkspaceRenderThread(
 
             if (sourceChanged || rangeDecision.shouldReloadPreview) {
                 gcodePreviewVersion++
+                publishGcodePreviewGeneration(
+                    if (safeEngineHandle != 0L) safeEngineHandle else previousEngineHandle,
+                    gcodePreviewVersion
+                )
                 pendingGcodePreviewQueuedAtMs = SystemClock.elapsedRealtime()
                 firstFrameCleared = false
             }
@@ -272,6 +285,7 @@ internal class WorkspaceRenderThread(
             }
             if (updateDecision.shouldReloadPreview) {
                 gcodePreviewVersion++
+                publishGcodePreviewGeneration(pendingGcodePreviewEngineHandle, gcodePreviewVersion)
                 pendingGcodePreviewQueuedAtMs = SystemClock.elapsedRealtime()
                 firstFrameCleared = false
             }
@@ -601,7 +615,8 @@ internal class WorkspaceRenderThread(
                     engineRawHandle = previewEngineHandle,
                     requestedLayerMin,
                     requestedLayerMax,
-                    activeGcodePreviewVertexBudget
+                    activeGcodePreviewVertexBudget,
+                    targetGcodePreviewVersion
                 )
                 activePreviewNativeLoadMs = SystemClock.elapsedRealtime() - loadStartedAtMs
                 activePreviewFirstFrameMs = -1L
@@ -716,6 +731,11 @@ internal class WorkspaceRenderThread(
             stateLock.notifyAll()
         }
         return true
+    }
+
+    private fun publishGcodePreviewGeneration(engineRawHandle: Long, generation: Long) {
+        val engineHandle = NativeEngineHandle.fromRaw(engineRawHandle) ?: return
+        NativeEngineCalls.setGcodePreviewGeneration(engineHandle, generation)
     }
 
     private fun renderFrame(width: Int, height: Int) {

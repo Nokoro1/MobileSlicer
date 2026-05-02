@@ -28,7 +28,8 @@ internal class GcodePreviewRenderer {
         engineRawHandle: Long,
         requestedLayerMin: Long,
         requestedLayerMax: Long,
-        vertexBudget: Long = DefaultPreviewVertexBudget
+        vertexBudget: Long = DefaultPreviewVertexBudget,
+        generation: Long = 0L
     ): NativeEngineCallResult {
         val activeHandle = viewerHandle
         val createdHandle = activeHandle ?: NativeGcodeViewerCalls.create()
@@ -47,7 +48,8 @@ internal class GcodePreviewRenderer {
             engineHandle = engineHandle,
             minLayer = requestedLayerMin,
             maxLayer = requestedLayerMax,
-            lodHint = vertexBudget.coerceIn(1L, GcodePreviewPerformanceMode.HARD_VERTEX_CEILING).toInt()
+            lodHint = vertexBudget.coerceIn(1L, GcodePreviewPerformanceMode.HARD_VERTEX_CEILING).toInt(),
+            generation = generation
         )
         if (loadResult is NativeEngineCallResult.Success) {
             loadedLayerStart = requestedLayerMin

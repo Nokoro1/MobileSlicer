@@ -24,6 +24,7 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cctype>
 #include <cstdint>
@@ -78,6 +79,7 @@ struct OrcaEngineImpl {
     std::string slice_metrics;
     std::string last_error;
     std::string preview_range_plan;
+    std::atomic<long> gcode_preview_generation{0};
 #if defined(MOBILE_SLICER_ENABLE_VGCODE)
     libvgcode::GCodeInputData cached_preview_input;
     size_t cached_preview_source_size{0};
@@ -4477,6 +4479,21 @@ static bool cached_preview_covers_layer_range(const OrcaEngineImpl& impl, long m
     return max_layer + 1 < cached_layers;
 }
 
+static bool is_gcode_preview_generation_current(const OrcaEngine* engine, long generation)
+{
+    return engine != nullptr &&
+        (generation <= 0 ||
+            engine->impl.gcode_preview_generation.load(std::memory_order_relaxed) == generation);
+}
+
+extern "C" void orca_set_gcode_preview_generation(OrcaEngine* engine, long generation)
+{
+    if (engine == nullptr) {
+        return;
+    }
+    engine->impl.gcode_preview_generation.store(generation, std::memory_order_relaxed);
+}
+
 extern "C" OrcaGcodeViewer* orca_gcode_viewer_create(void)
 {
     try {
@@ -4582,7 +4599,13 @@ extern "C" int orca_gcode_viewer_load_gcode(OrcaGcodeViewer* viewer, const char*
     }
 }
 
-extern "C" int orca_gcode_viewer_load_latest_slice(OrcaGcodeViewer* viewer, OrcaEngine* engine, long min_layer, long max_layer, int lod_hint)
+extern "C" int orca_gcode_viewer_load_latest_slice(
+    OrcaGcodeViewer* viewer,
+    OrcaEngine* engine,
+    long min_layer,
+    long max_layer,
+    int lod_hint,
+    long generation)
 {
     if (viewer == nullptr || engine == nullptr) {
         return ORCA_ERROR_INVALID_ARGUMENT;
@@ -4596,6 +4619,10 @@ extern "C" int orca_gcode_viewer_load_latest_slice(OrcaGcodeViewer* viewer, Orca
         if (init_result != ORCA_SUCCESS) {
             return init_result;
         }
+    }
+    if (!is_gcode_preview_generation_current(engine, generation)) {
+        viewer->last_error.clear();
+        return ORCA_SUCCESS;
     }
     try {
         const size_t vertex_budget = lod_hint > 0 ?
@@ -4623,11 +4650,20 @@ extern "C" int orca_gcode_viewer_load_latest_slice(OrcaGcodeViewer* viewer, Orca
             loaded_directly_from_cache = preview_vertices > 0 && preview_vertices < vertex_budget;
         } else {
             const auto selected_parse_start = std::chrono::steady_clock::now();
+            auto should_cancel = [engine, generation]() {
+                return !is_gcode_preview_generation_current(engine, generation);
+            };
             viewer->input_data = to_vgcode_input_data_from_gcode_text(
                 engine->impl.gcode,
                 min_layer,
                 max_layer,
-                vertex_budget);
+                vertex_budget,
+                nullptr,
+                should_cancel);
+            if (should_cancel()) {
+                viewer->last_error.clear();
+                return ORCA_SUCCESS;
+            }
             apply_preview_palette_from_config_json(viewer->input_data, engine->impl.config_json);
             selected_parse_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - selected_parse_start).count();
@@ -4880,7 +4916,8 @@ extern "C" void orca_gcode_viewer_destroy(OrcaGcodeViewer*) {}
 extern "C" int orca_gcode_viewer_init(OrcaGcodeViewer*) { return ORCA_ERROR_SLICE; }
 extern "C" int orca_gcode_viewer_shutdown(OrcaGcodeViewer*) { return ORCA_ERROR_SLICE; }
 extern "C" int orca_gcode_viewer_load_gcode(OrcaGcodeViewer*, const char*) { return ORCA_ERROR_SLICE; }
-extern "C" int orca_gcode_viewer_load_latest_slice(OrcaGcodeViewer*, OrcaEngine*, long, long, int) { return ORCA_ERROR_SLICE; }
+extern "C" void orca_set_gcode_preview_generation(OrcaEngine*, long) {}
+extern "C" int orca_gcode_viewer_load_latest_slice(OrcaGcodeViewer*, OrcaEngine*, long, long, int, long) { return ORCA_ERROR_SLICE; }
 extern "C" int orca_gcode_viewer_render(OrcaGcodeViewer*, const float*, const float*) { return ORCA_ERROR_SLICE; }
 extern "C" long orca_gcode_viewer_get_layers_count(OrcaGcodeViewer*) { return 0; }
 extern "C" int orca_gcode_viewer_set_layers_view_range(OrcaGcodeViewer*, long, long) { return ORCA_ERROR_SLICE; }
