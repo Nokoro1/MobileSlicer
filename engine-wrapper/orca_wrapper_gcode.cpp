@@ -52,6 +52,7 @@ static void log_native_info(const char*, const std::string&)
 #define count_preview_vertices_by_layer_from_processor_result internal_count_preview_vertices_by_layer_from_processor_result
 #define count_preview_vertices_by_layer_from_input_data internal_count_preview_vertices_by_layer_from_input_data
 #define count_preview_vertices_by_layer_from_gcode_text internal_count_preview_vertices_by_layer_from_gcode_text
+#define count_preview_vertices_by_layer_from_gcode_file internal_count_preview_vertices_by_layer_from_gcode_file
 #define pack_preview_layer_ranges_from_counts internal_pack_preview_layer_ranges_from_counts
 #define enrich_gcode_summary_from_preview_input internal_enrich_gcode_summary_from_preview_input
 
@@ -74,6 +75,7 @@ static void log_native_info(const char*, const std::string&)
 #undef count_preview_vertices_by_layer_from_processor_result
 #undef count_preview_vertices_by_layer_from_input_data
 #undef count_preview_vertices_by_layer_from_gcode_text
+#undef count_preview_vertices_by_layer_from_gcode_file
 #undef pack_preview_layer_ranges_from_counts
 #undef enrich_gcode_summary_from_preview_input
 
@@ -154,6 +156,11 @@ std::vector<size_t> count_preview_vertices_by_layer_from_processor_result(const 
 std::vector<size_t> count_preview_vertices_by_layer_from_gcode_text(const std::string& gcode)
 {
     return internal_count_preview_vertices_by_layer_from_gcode_text(gcode);
+}
+
+std::vector<size_t> count_preview_vertices_by_layer_from_gcode_file(const std::filesystem::path& path)
+{
+    return internal_count_preview_vertices_by_layer_from_gcode_file(path);
 }
 
 std::string pack_preview_layer_ranges_from_counts(
