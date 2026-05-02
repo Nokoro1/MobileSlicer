@@ -535,13 +535,14 @@ run_responsiveness_profile() {
   measure_responsiveness_step "$timings_path" "layer_height_visible" assert_text_visible "$serial" "Layer height"
   measure_responsiveness_step "$timings_path" "tap_strength_tab" tap_text_after_horizontal_swipe "$serial" "Strength"
   measure_responsiveness_step "$timings_path" "strength_visible" assert_text_visible "$serial" "Top/bottom shells"
-  adb_device "$serial" shell input keyevent KEYCODE_BACK
-  sleep 1
-  assert_no_crash_after_launch "$serial"
 
   adb_device "$serial" logcat -d -v time > "$artifact_dir/logcat.txt" 2>&1 || true
   grep -E 'MobileSlicerPerf|workspace_responsiveness' "$artifact_dir/logcat.txt" > "$artifact_dir/responsiveness-logcat.txt" || true
   adb_device "$serial" logcat -b crash -d -v time > "$artifact_dir/crash-logcat.txt" 2>&1 || true
+  if [[ -s "$artifact_dir/crash-logcat.txt" ]]; then
+    cat "$artifact_dir/crash-logcat.txt" >&2
+    fail "Crash log buffer is not empty after responsiveness profile."
+  fi
   {
     printf '# MobileSlicer Responsiveness Profile\n\n'
     printf -- '- serial: %s\n' "$serial"
