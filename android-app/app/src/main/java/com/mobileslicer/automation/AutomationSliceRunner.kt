@@ -99,6 +99,9 @@ internal data class AutomationSliceNativeMetrics(
     val processorLineEndBytesRetained: Long = 0L,
     val processorReleaseMs: Long = 0L,
     val nativeExportStartRssKb: Long = 0L,
+    val nativeAfterSetupRssKb: Long = 0L,
+    val nativeAfterLayersRssKb: Long = 0L,
+    val nativeAfterFooterRssKb: Long = 0L,
     val nativeAfterGenerationRssKb: Long = 0L,
     val nativeAfterFinalizeRssKb: Long = 0L,
     val nativeAfterReleaseRssKb: Long = 0L
@@ -159,6 +162,9 @@ internal fun automationSliceSuccessStatus(
         "processorLineEndBytesRetained=${nativeMetrics.processorLineEndBytesRetained} " +
         "processorReleaseMs=${nativeMetrics.processorReleaseMs} " +
         "nativeExportStartRssKb=${nativeMetrics.nativeExportStartRssKb} " +
+        "nativeAfterSetupRssKb=${nativeMetrics.nativeAfterSetupRssKb} " +
+        "nativeAfterLayersRssKb=${nativeMetrics.nativeAfterLayersRssKb} " +
+        "nativeAfterFooterRssKb=${nativeMetrics.nativeAfterFooterRssKb} " +
         "nativeAfterGenerationRssKb=${nativeMetrics.nativeAfterGenerationRssKb} " +
         "nativeAfterFinalizeRssKb=${nativeMetrics.nativeAfterFinalizeRssKb} " +
         "nativeAfterReleaseRssKb=${nativeMetrics.nativeAfterReleaseRssKb} " +
@@ -206,6 +212,9 @@ internal fun parseAutomationSliceNativeMetrics(metricsText: String?): Automation
         processorLineEndBytesRetained = fields["processorLineEndBytesRetained"]?.toLongOrNull() ?: 0L,
         processorReleaseMs = fields["processorReleaseMs"]?.toLongOrNull() ?: 0L,
         nativeExportStartRssKb = fields["nativeExportStartRssKb"]?.toLongOrNull() ?: 0L,
+        nativeAfterSetupRssKb = fields["nativeAfterSetupRssKb"]?.toLongOrNull() ?: 0L,
+        nativeAfterLayersRssKb = fields["nativeAfterLayersRssKb"]?.toLongOrNull() ?: 0L,
+        nativeAfterFooterRssKb = fields["nativeAfterFooterRssKb"]?.toLongOrNull() ?: 0L,
         nativeAfterGenerationRssKb = fields["nativeAfterGenerationRssKb"]?.toLongOrNull() ?: 0L,
         nativeAfterFinalizeRssKb = fields["nativeAfterFinalizeRssKb"]?.toLongOrNull() ?: 0L,
         nativeAfterReleaseRssKb = fields["nativeAfterReleaseRssKb"]?.toLongOrNull() ?: 0L

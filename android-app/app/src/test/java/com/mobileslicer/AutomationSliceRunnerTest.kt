@@ -47,7 +47,10 @@ class AutomationSliceRunnerTest {
                 processorLineEndBytesRetained = 0,
                 processorReleaseMs = 14,
                 nativeExportStartRssKb = 101,
-                nativeAfterGenerationRssKb = 202,
+                nativeAfterSetupRssKb = 151,
+                nativeAfterLayersRssKb = 202,
+                nativeAfterFooterRssKb = 212,
+                nativeAfterGenerationRssKb = 222,
                 nativeAfterFinalizeRssKb = 303,
                 nativeAfterReleaseRssKb = 204
             ),
@@ -93,7 +96,10 @@ class AutomationSliceRunnerTest {
         assertTrue(status.contains("processorLineEndBytesRetained=0"))
         assertTrue(status.contains("processorReleaseMs=14"))
         assertTrue(status.contains("nativeExportStartRssKb=101"))
-        assertTrue(status.contains("nativeAfterGenerationRssKb=202"))
+        assertTrue(status.contains("nativeAfterSetupRssKb=151"))
+        assertTrue(status.contains("nativeAfterLayersRssKb=202"))
+        assertTrue(status.contains("nativeAfterFooterRssKb=212"))
+        assertTrue(status.contains("nativeAfterGenerationRssKb=222"))
         assertTrue(status.contains("nativeAfterFinalizeRssKb=303"))
         assertTrue(status.contains("nativeAfterReleaseRssKb=204"))
         assertTrue(status.contains("previewInfoRich=1"))
@@ -119,7 +125,8 @@ class AutomationSliceRunnerTest {
             "previewMoves=123|previewCacheBuilt=1|previewCacheComplete=0|previewCachedVertices=456|previewCacheBuildMs=7" +
                 "|gcodeBytes=89|processorMoveBytes=100|processorLineEndBytes=11|previewLayerCountBytes=12|exactPreviewCacheEligible=1" +
                 "|processorMovesReleasedDuringExport=1|processorMoveBytesRetained=0|processorLineEndBytesRetained=0|processorReleaseMs=3" +
-                "|nativeExportStartRssKb=101|nativeAfterGenerationRssKb=202|nativeAfterFinalizeRssKb=303|nativeAfterReleaseRssKb=204"
+                "|nativeExportStartRssKb=101|nativeAfterSetupRssKb=151|nativeAfterLayersRssKb=202|nativeAfterFooterRssKb=212" +
+                "|nativeAfterGenerationRssKb=222|nativeAfterFinalizeRssKb=303|nativeAfterReleaseRssKb=204"
         )
 
         assertEquals(123L, metrics.previewMoves)
@@ -137,7 +144,10 @@ class AutomationSliceRunnerTest {
         assertEquals(0L, metrics.processorLineEndBytesRetained)
         assertEquals(3L, metrics.processorReleaseMs)
         assertEquals(101L, metrics.nativeExportStartRssKb)
-        assertEquals(202L, metrics.nativeAfterGenerationRssKb)
+        assertEquals(151L, metrics.nativeAfterSetupRssKb)
+        assertEquals(202L, metrics.nativeAfterLayersRssKb)
+        assertEquals(212L, metrics.nativeAfterFooterRssKb)
+        assertEquals(222L, metrics.nativeAfterGenerationRssKb)
         assertEquals(303L, metrics.nativeAfterFinalizeRssKb)
         assertEquals(204L, metrics.nativeAfterReleaseRssKb)
     }

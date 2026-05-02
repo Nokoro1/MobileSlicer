@@ -3255,6 +3255,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     }
     if (this->m_objsWithBrim.empty() && this->m_objSupportsWithBrim.empty()) m_brim_done = true;
 
+#ifdef __ANDROID__
+    m_processor.result().mobile_after_setup_rss_kb = mobile_process_rss_kb();
+#endif
+
     // SoftFever: calib
     if (print.calib_params().mode == CalibMode::Calib_PA_Line) {
         std::string gcode;
@@ -3458,6 +3462,9 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 file.write(m_wipe_tower->finalize(*this));
         }
     }
+#ifdef __ANDROID__
+    m_processor.result().mobile_after_layers_rss_kb = mobile_process_rss_kb();
+#endif
     //BBS: the last retraction
     // Write end commands to file.
     file.write(this->retract(false, true));
@@ -3570,6 +3577,9 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     file.write("\n");
 
     print.throw_if_canceled();
+#ifdef __ANDROID__
+    m_processor.result().mobile_after_footer_rss_kb = mobile_process_rss_kb();
+#endif
 }
 
 // export info requested for filament change

@@ -4125,6 +4125,9 @@ extern "C" int orca_slice(OrcaEngine* engine)
             "|exactPreviewCacheEligible=" + std::string(exact_preview_cache_eligible ? "1" : "0") +
             "|processorMovesReleasedDuringExport=" + std::string(gcode_result.released_move_bytes > 0 ? "1" : "0") +
             "|nativeExportStartRssKb=" + std::to_string(gcode_result.mobile_export_start_rss_kb) +
+            "|nativeAfterSetupRssKb=" + std::to_string(gcode_result.mobile_after_setup_rss_kb) +
+            "|nativeAfterLayersRssKb=" + std::to_string(gcode_result.mobile_after_layers_rss_kb) +
+            "|nativeAfterFooterRssKb=" + std::to_string(gcode_result.mobile_after_footer_rss_kb) +
             "|nativeAfterGenerationRssKb=" + std::to_string(gcode_result.mobile_after_generation_rss_kb) +
             "|nativeAfterFinalizeRssKb=" + std::to_string(gcode_result.mobile_after_finalize_rss_kb) +
             "|nativeAfterReleaseRssKb=" + std::to_string(gcode_result.mobile_after_release_rss_kb);
@@ -4133,7 +4136,8 @@ extern "C" int orca_slice(OrcaEngine* engine)
             "previewMoves=0|previewCacheBuilt=0|previewCacheComplete=0|previewCachedVertices=0|previewCacheBuildMs=0"
             "|gcodeBytes=" + std::to_string(gcode_size) +
             "|processorMoveBytes=0|processorLineEndBytes=0|previewLayerCountBytes=0|exactPreviewCacheEligible=0|processorMovesReleasedDuringExport=0"
-            "|nativeExportStartRssKb=0|nativeAfterGenerationRssKb=0|nativeAfterFinalizeRssKb=0|nativeAfterReleaseRssKb=0";
+            "|nativeExportStartRssKb=0|nativeAfterSetupRssKb=0|nativeAfterLayersRssKb=0|nativeAfterFooterRssKb=0"
+            "|nativeAfterGenerationRssKb=0|nativeAfterFinalizeRssKb=0|nativeAfterReleaseRssKb=0";
 #endif
         const long summary_parse_ms = elapsed_ms_since(summary_parse_start);
         const float normal_print_time = gcode_result.print_statistics
