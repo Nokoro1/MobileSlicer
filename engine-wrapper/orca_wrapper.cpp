@@ -4076,7 +4076,12 @@ extern "C" int orca_slice(OrcaEngine* engine)
         const bool exact_preview_cache_eligible =
             processor_moves_available &&
             gcode_result.moves.size() * static_cast<size_t>(2) <= static_cast<size_t>(kMaxCachedPreviewVertices);
-        if (exact_preview_cache_eligible) {
+        const bool processor_layer_counts_available =
+            !gcode_result.mobile_preview_layer_vertex_counts.empty();
+        if (processor_layer_counts_available) {
+            engine->impl.cached_preview_layer_counts = gcode_result.mobile_preview_layer_vertex_counts;
+            engine->impl.cached_preview_layer_counts_source_size = static_cast<size_t>(gcode_size);
+        } else if (exact_preview_cache_eligible) {
             engine->impl.cached_preview_layer_counts = count_preview_vertices_by_layer_from_processor_result(gcode_result);
             engine->impl.cached_preview_layer_counts_source_size = static_cast<size_t>(gcode_size);
         } else {
@@ -4125,6 +4130,7 @@ extern "C" int orca_slice(OrcaEngine* engine)
             "|processorMoveBytes=" + std::to_string(processor_move_bytes) +
             "|processorLineEndBytes=" + std::to_string(processor_line_end_bytes) +
             "|previewLayerCountBytes=" + std::to_string(engine->impl.cached_preview_layer_counts.size() * sizeof(size_t)) +
+            "|previewLayerCountsFromProcessor=" + std::string(processor_layer_counts_available ? "1" : "0") +
             "|exactPreviewCacheEligible=" + std::string(exact_preview_cache_eligible ? "1" : "0") +
             "|processorMovesReleasedDuringExport=" + std::string(gcode_result.released_move_bytes > 0 ? "1" : "0") +
             "|nativeExportStartRssKb=" + std::to_string(gcode_result.mobile_export_start_rss_kb) +

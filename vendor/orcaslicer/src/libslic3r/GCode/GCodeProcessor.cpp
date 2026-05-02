@@ -1586,6 +1586,7 @@ void GCodeProcessorResult::reset() {
     move_time_summary_valid = false;
     move_role_times.clear();
     move_type_times.clear();
+    mobile_preview_layer_vertex_counts.clear();
     released_move_count = 0;
     released_move_bytes = 0;
     released_line_end_count = 0;
@@ -2652,8 +2653,55 @@ void GCodeProcessor::capture_move_time_summary()
     m_result.move_time_summary_valid = !m_result.move_role_times.empty() || !m_result.move_type_times.empty();
 }
 
+static bool mobile_preview_move_may_start_path(Slic3r::EMoveType type)
+{
+    return type == Slic3r::EMoveType::Noop ||
+        type == Slic3r::EMoveType::Travel ||
+        type == Slic3r::EMoveType::Wipe ||
+        type == Slic3r::EMoveType::Extrude;
+}
+
+static std::vector<size_t> mobile_preview_layer_vertex_counts(
+    const std::vector<Slic3r::GCodeProcessorResult::MoveVertex>& moves)
+{
+    if (moves.size() < 2) {
+        return {};
+    }
+
+    std::vector<size_t> layer_vertices;
+    auto add_vertex = [&layer_vertices](uint32_t layer_id) {
+        if (layer_vertices.size() <= layer_id) {
+            layer_vertices.resize(static_cast<size_t>(layer_id) + 1, 0);
+        }
+        ++layer_vertices[static_cast<size_t>(layer_id)];
+    };
+
+    for (size_t i = 1; i < moves.size(); ++i) {
+        const Slic3r::GCodeProcessorResult::MoveVertex& current = moves[i];
+        if (current.type == Slic3r::EMoveType::Count) {
+            continue;
+        }
+
+        const Slic3r::GCodeProcessorResult::MoveVertex& previous = moves[i - 1];
+        if (
+            mobile_preview_move_may_start_path(current.type) &&
+            (
+                layer_vertices.empty() ||
+                previous.type != current.type ||
+                previous.extrusion_role != current.extrusion_role ||
+                previous.mm3_per_mm != current.mm3_per_mm
+            )
+        ) {
+            add_vertex(static_cast<uint32_t>(current.layer_id));
+        }
+        add_vertex(static_cast<uint32_t>(current.layer_id));
+    }
+    return layer_vertices;
+}
+
 void GCodeProcessor::release_preview_storage()
 {
+    m_result.mobile_preview_layer_vertex_counts = mobile_preview_layer_vertex_counts(m_result.moves);
     m_result.released_move_count = m_result.moves.size();
     m_result.released_move_bytes = m_result.moves.size() * sizeof(GCodeProcessorResult::MoveVertex);
     m_result.released_line_end_count = m_result.lines_ends.size();
