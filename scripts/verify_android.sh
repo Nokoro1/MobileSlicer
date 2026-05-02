@@ -523,6 +523,32 @@ device_meminfo() {
   adb_device "$serial" shell dumpsys meminfo "$PACKAGE_NAME" 2>/dev/null
 }
 
+capture_device_command() {
+  local serial="$1"
+  local output_path="$2"
+  shift 2
+  {
+    printf '$'
+    printf ' %q' "$@"
+    printf '\n\n'
+    adb_device "$serial" shell "$@" 2>&1 || true
+  } > "$output_path"
+}
+
+capture_perf_device_state() {
+  local serial="$1"
+  local output_dir="$2"
+  local label="$3"
+  mkdir -p "$output_dir"
+  capture_device_command "$serial" "$output_dir/$label-battery.txt" dumpsys battery
+  capture_device_command "$serial" "$output_dir/$label-thermalservice.txt" dumpsys thermalservice
+  capture_device_command "$serial" "$output_dir/$label-cpuinfo.txt" dumpsys cpuinfo
+  capture_device_command "$serial" "$output_dir/$label-top.txt" top -b -n 1 -o PID,USER,PR,NI,VIRT,RES,SHR,S,%CPU,%MEM,TIME+,ARGS
+  capture_device_command "$serial" "$output_dir/$label-getprop.txt" getprop
+  capture_device_command "$serial" "$output_dir/$label-thermal-zones.txt" sh -c 'for zone in /sys/class/thermal/thermal_zone*; do [ -r "$zone/type" ] || continue; printf "%s " "$zone"; cat "$zone/type"; [ -r "$zone/temp" ] && printf "temp=" && cat "$zone/temp"; done'
+  capture_device_command "$serial" "$output_dir/$label-cpufreq.txt" sh -c 'for cpu in /sys/devices/system/cpu/cpu[0-9]*; do printf "%s " "$cpu"; for file in scaling_governor scaling_cur_freq scaling_min_freq scaling_max_freq cpuinfo_cur_freq cpuinfo_min_freq cpuinfo_max_freq online; do [ -r "$cpu/cpufreq/$file" ] && printf "%s=" "$file" && cat "$cpu/cpufreq/$file"; [ -r "$cpu/$file" ] && printf "%s=" "$file" && cat "$cpu/$file"; done; done'
+}
+
 meminfo_app_summary_kb() {
   local meminfo="$1"
   local label="$2"
@@ -951,10 +977,12 @@ run_performance_gate() {
   local records_path="$artifact_dir/records.jsonl"
   local report_json="$artifact_dir/report.json"
   local report_md="$artifact_dir/report.md"
+  local device_state_dir="$artifact_dir/device-state"
   PERF_CURRENT_MEMINFO_DIR="$artifact_dir/meminfo"
-  mkdir -p "$PERF_CURRENT_MEMINFO_DIR"
+  mkdir -p "$PERF_CURRENT_MEMINFO_DIR" "$device_state_dir"
 
   log "Running non-UI performance gate on $serial"
+  capture_perf_device_state "$serial" "$device_state_dir" "before"
   if [[ "$heavy_only" != "1" ]]; then
     local startup_output startup_ms startup_meminfo startup_pss_kb startup_java_heap_kb startup_native_heap_kb startup_graphics_kb startup_private_other_kb startup_system_kb
     startup_output="$(launch_app_for_perf "$serial")"
@@ -998,6 +1026,7 @@ run_performance_gate() {
       log "Skipping stress-temperature-tower; set MOBILE_SLICER_PERF_INCLUDE_STRESS=1 to include the 10MB stress fixture."
     fi
   done
+  capture_perf_device_state "$serial" "$device_state_dir" "after"
 
   local baseline_args=()
   local default_baseline="$ROOT_DIR/performance-baselines/perf-heavy-device-baseline.json"

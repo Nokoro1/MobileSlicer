@@ -61,7 +61,10 @@ then runs app-private automation slices for the small cube, bridge/support, and
 small-perimeter-array fixtures plus medium and complex calibration STLs. Reports are written under
 `artifacts/performance/<timestamp>/` with `report.json`, `report.md`, and a
 `latest` symlink. Raw peak/final `dumpsys meminfo` snapshots are saved under the
-run's `meminfo/` directory.
+run's `meminfo/` directory. Device condition snapshots are saved under
+`device-state/`, including battery, thermal service, thermal zones, CPU
+frequency, CPU load, top processes, and `getprop` output before and after the
+run.
 
 Default hard budgets are intentionally broad enough for normal phone variance:
 
