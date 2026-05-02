@@ -36,6 +36,10 @@ internal object NativeConfigKeys {
 
     object PrimeTower {
         const val Enable = "enable_prime_tower"
+        const val Width = "prime_tower_width"
+        const val PrimeVolume = "prime_volume"
+        const val OozePrevention = "ooze_prevention"
+        const val WipeTowerWallType = "wipe_tower_wall_type"
         const val Purge = "purge_in_prime_tower"
         const val SingleExtruderMultiMaterial = "single_extruder_multi_material"
         const val SingleExtruderMultiMaterialPriming = "single_extruder_multi_material_priming"

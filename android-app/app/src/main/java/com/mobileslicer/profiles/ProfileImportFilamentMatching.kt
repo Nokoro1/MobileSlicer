@@ -153,7 +153,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal fun findInheritedOrcaFilamentBundle(context: Context, json: JSONObject): OrcaFilamentImportBundle? {
-    val inherited = json.optString("inherits").takeIf { it.isNotBlank() } ?: return null
+    val inherited = json.optString(NativeConfigKeys.Printer.Inherits).takeIf { it.isNotBlank() } ?: return null
     val inheritedKeys = listOf(
         inherited,
         inherited.substringBefore('@').trim()
@@ -171,10 +171,10 @@ internal fun findMobileSlicerFilamentBaseline(
     displayName: String
 ): JSONObject? {
     val materialHints = listOf(
-        json.profileConfigString("filament_type"),
-        json.optString("filament_settings_id"),
-        json.optString("name"),
-        json.optString("inherits"),
+        json.profileConfigString(NativeConfigKeys.Filament.Type),
+        json.optString(NativeConfigKeys.Filament.SettingsId),
+        json.optString(NativeConfigKeys.Printer.Name),
+        json.optString(NativeConfigKeys.Printer.Inherits),
         displayName
     ).mapNotNull { it.detectFilamentMaterial() }
     val printerFilaments = currentStore.visibleFilamentsForSelectedPrinter()
@@ -191,18 +191,18 @@ internal fun findMobileSlicerFilamentBaseline(
 }
 
 internal fun FilamentProfile.toOrcaBaselineJson(): JSONObject = JSONObject()
-    .put("filament_type", materialType)
+    .put(NativeConfigKeys.Filament.Type, materialType)
     .put("filament_vendor", vendor)
     .put("filament_soluble", soluble)
     .put("filament_is_support", supportMaterial)
-    .put("filament_extruder_variant", filamentExtruderVariant)
-    .put("filament_self_index", filamentSelfIndex)
+    .put(NativeConfigKeys.Filament.ExtruderVariant, filamentExtruderVariant)
+    .put(NativeConfigKeys.Filament.SelfIndex, filamentSelfIndex)
     .put("filament_change_length", filamentChangeLengthMm)
     .put("required_nozzle_HRC", requiredNozzleHrc)
-    .put("default_filament_colour", defaultFilamentColor)
+    .put(NativeConfigKeys.Filament.DefaultColor, defaultFilamentColor)
     .put("filament_diameter", diameterMm)
     .put("filament_adhesiveness_category", adhesivenessCategory)
-    .put("filament_density", densityGPerCm3)
+    .put(NativeConfigKeys.Filament.Density, densityGPerCm3)
     .put("filament_shrink", shrinkageXyPercent)
     .put("filament_shrinkage_compensation_z", shrinkageZPercent)
     .put("filament_cost", costPerKg)
@@ -212,18 +212,18 @@ internal fun FilamentProfile.toOrcaBaselineJson(): JSONObject = JSONObject()
     .put("nozzle_temperature_range_high", nozzleTemperatureRangeHighC)
     .put("filament_flow_ratio", flowRatio)
     .put("enable_pressure_advance", pressureAdvanceEnabled)
-    .put("pressure_advance", pressureAdvance)
-    .put("filament_max_volumetric_speed", maxVolumetricSpeedMm3PerSec)
+    .put(NativeConfigKeys.Filament.PressureAdvance, pressureAdvance)
+    .put(NativeConfigKeys.Filament.MaxVolumetricSpeed, maxVolumetricSpeedMm3PerSec)
     .put("filament_adaptive_volumetric_speed", adaptiveVolumetricSpeedEnabled)
     .put("volumetric_speed_coefficients", volumetricSpeedCoefficients)
     .put("nozzle_temperature_initial_layer", nozzleTemperatureInitialLayerC)
     .put("nozzle_temperature", nozzleTemperatureC)
     .put("chamber_temperature", chamberTemperatureC)
     .put("activate_chamber_temp_control", activateChamberTemperatureControl)
-    .put("hot_plate_temp_initial_layer", bedTemperatureInitialLayerC)
-    .put("hot_plate_temp", bedTemperatureC)
-    .put("bed_temperature_initial_layer", bedTemperatureInitialLayerC)
-    .put("bed_temperature", bedTemperatureC)
+    .put(NativeConfigKeys.Temperature.HotPlateInitialLayer, bedTemperatureInitialLayerC)
+    .put(NativeConfigKeys.Temperature.HotPlate, bedTemperatureC)
+    .put(NativeConfigKeys.Temperature.BedInitialLayer, bedTemperatureInitialLayerC)
+    .put(NativeConfigKeys.Temperature.Bed, bedTemperatureC)
     .put("fan_min_speed", minFanSpeedPercent)
     .put("fan_max_speed", coolingPercent)
     .put("close_fan_the_first_x_layers", noCoolingFirstLayers)
@@ -567,7 +567,7 @@ internal fun FilamentProfile.isPlainGenericMaterialProfile(): Boolean {
 private fun FilamentProfile.resolvedFilamentSettingsId(): String {
     if (orcaResolvedFilamentJson.isBlank()) return ""
     return runCatching {
-        JSONObject(orcaResolvedFilamentJson).optString("filament_settings_id")
+        JSONObject(orcaResolvedFilamentJson).optString(NativeConfigKeys.Filament.SettingsId)
     }.getOrDefault("")
 }
 
@@ -666,10 +666,10 @@ private fun PrinterProfile.filamentPickerMatchKeys(): Set<String> =
         add(printerModel)
         add(orcaFamily)
         addAll(orcaResolvedSourceChains)
-        runCatching { JSONObject(orcaResolvedMachineJson) }.getOrNull()?.let { resolved ->
-            add(resolved.optString("name"))
-            add(resolved.optString("printer_model"))
-            add(resolved.optString("inherits"))
+        jsonObjectOrNull(orcaResolvedMachineJson)?.let { resolved ->
+            add(resolved.optString(NativeConfigKeys.Printer.Name))
+            add(resolved.optString(NativeConfigKeys.Printer.Model))
+            add(resolved.optString(NativeConfigKeys.Printer.Inherits))
         }
     }.map { it.cleanProfileMatchKey() }
         .filter { it.isNotBlank() }

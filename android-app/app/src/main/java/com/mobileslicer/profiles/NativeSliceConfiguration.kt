@@ -220,6 +220,7 @@ private fun JSONObject.applyNativeFinalOverridesAndNormalization(
         filamentOverridesJson = profileJsons.filamentOverridesJson,
         processOverridesJson = profileJsons.processOverridesJson
     )
+    normalizeManualBrimWidthOverride(profileJsons.processOverridesJson)
     val nativeToolCount = if (optInt(NativeConfigKeys.Printer.ExtrudersCount, 0) == 1) 1 else resolvedNativeToolCount
     normalizeNativeScalarListStrings()
     normalizeNativePointStrings()
@@ -236,6 +237,15 @@ private fun JSONObject.applyExplicitOrcaOverrideLayers(
     mergeJsonObject(printerOverridesJson)
     mergeJsonObject(filamentOverridesJson)
     mergeJsonObject(processOverridesJson)
+}
+
+private fun JSONObject.normalizeManualBrimWidthOverride(processOverridesJson: JSONObject?) {
+    if (processOverridesJson?.has("brim_width") == true &&
+        optString("brim_type") == BrimType.Auto.configValue &&
+        optDouble("brim_width", 0.0) > 0.0
+    ) {
+        put("brim_type", BrimType.OuterOnly.configValue)
+    }
 }
 
 private fun elapsedRealtimeForConfigTiming(): Long =

@@ -73,6 +73,89 @@ class NativeSliceConfigTest {
     }
 
     @Test
+    fun positiveBrimWidthUsesManualOuterBrimForNativeSliceConfig() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_brim_width")
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_brim_width",
+            printerProfileId = printer.id
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_brim_width",
+            1 to "Manual Brim Width",
+            200 to 8f,
+            259 to printer.id
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals("outer_only", nativeConfig.optString("brim_type"))
+        assertEquals(8.0, nativeConfig.optDouble("brim_width"), 0.0001)
+    }
+
+    @Test
+    fun positiveOrcaBrimWidthOverrideUsesManualOuterBrim() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(
+            id = "printer_orca_brim_width",
+            profileSource = "orca",
+            orcaResolvedMachineJson = """{"printer_settings_id":"Brim Width Printer"}"""
+        )
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_orca_brim_width",
+            printerProfileId = printer.id,
+            profileSource = "orca",
+            orcaResolvedFilamentJson = """{"filament_settings_id":"Brim Width PLA"}"""
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_orca_brim_width",
+            1 to "Orca Manual Brim Width",
+            259 to printer.id,
+            265 to """{"print_settings_id":"Orca Manual Brim Width","brim_type":"auto_brim","brim_width":0}""",
+            267 to """{"brim_width":8}"""
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals("outer_only", nativeConfig.optString("brim_type"))
+        assertEquals(8.0, nativeConfig.optDouble("brim_width"), 0.0001)
+    }
+
+    @Test
+    fun coreSlicingRegressionParametersReachNativeConfig() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_core_regression")
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_core_regression",
+            printerProfileId = printer.id,
+            nozzleTemperatureInitialLayerC = 215,
+            nozzleTemperatureC = 225,
+            bedTemperatureInitialLayerC = 55,
+            bedTemperatureC = 60
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_core_regression",
+            1 to "Core Regression",
+            124 to 4,
+            125 to 35,
+            133 to true,
+            199 to 3,
+            200 to 6f,
+            259 to printer.id
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals(215, nativeConfig.optInt("nozzle_temperature_initial_layer"))
+        assertEquals(225, nativeConfig.optInt("nozzle_temperature"))
+        assertEquals(55, nativeConfig.optInt("bed_temperature_initial_layer"))
+        assertEquals(60, nativeConfig.optInt("bed_temperature"))
+        assertEquals(4, nativeConfig.optInt("wall_loops"))
+        assertEquals(35, nativeConfig.optInt("sparse_infill_density"))
+        assertTrue(nativeConfig.optBoolean("enable_support", false))
+        assertEquals(3, nativeConfig.optInt("skirts"))
+        assertEquals("outer_only", nativeConfig.optString("brim_type"))
+        assertEquals(6.0, nativeConfig.optDouble("brim_width"), 0.0001)
+    }
+
+    @Test
     fun nativeSliceConfigCacheCanonicalizesEquivalentResolvedJson() {
         NativeSliceConfigCache.clear()
         val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(
@@ -329,6 +412,19 @@ class NativeSliceConfigTest {
         assertEquals("Bambu PLA Basic", nativeConfig.optString("filament_settings_id"))
         assertEquals("GFA00", nativeConfig.optString("filament_ids"))
         assertEquals("Textured PEI Plate", nativeConfig.optString("curr_bed_type"))
+        assertCriticalNativeConfigContains(
+            nativeConfig,
+            mapOf(
+                "printer_settings_id" to "Bambu Lab P1S 0.4 nozzle",
+                "filament_settings_id" to "Bambu PLA Basic",
+                "filament_ids" to "GFA00",
+                "filament_type" to "PLA",
+                "print_settings_id" to "0.20mm Standard @BBL P1S",
+                "curr_bed_type" to "Textured PEI Plate",
+                "enable_prime_tower" to false,
+                "purge_in_prime_tower" to false
+            )
+        )
     }
 
     @Test
@@ -372,6 +468,60 @@ class NativeSliceConfigTest {
         assertJsonArrayEquals(listOf("Bambu PLA 1", "Bambu PLA 2"), result.getJSONArray("filament_settings_id"))
         assertJsonArrayEquals(listOf(1, 2), result.getJSONArray("filament_self_index"))
         assertJsonArrayEquals(listOf(1, 1), result.getJSONArray("filament_map"))
+        assertCriticalNativeConfigContains(
+            result,
+            mapOf(
+                "filament_settings_id" to listOf("Bambu PLA 1", "Bambu PLA 2"),
+                "filament_ids" to listOf("filament_bambu_multi_1", "filament_bambu_multi_2"),
+                "filament_type" to listOf("PLA", "PLA"),
+                "enable_prime_tower" to true,
+                "purge_in_prime_tower" to true,
+                "mobile_slicer_active_filament_slot_count" to 2
+            )
+        )
+    }
+
+    @Test
+    fun plateFilamentSlotApplicationStaysBoundedForManyObjects() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_many_slots")
+        val filaments = (1..8).map { index ->
+            ProfileStoreRepository.fallbackFilamentProfile().copy(
+                id = "filament_many_$index",
+                name = "Many PLA $index",
+                printerProfileId = printer.id,
+                profileSource = "orca",
+                materialType = "PLA",
+                defaultFilamentColor = "#11223$index",
+                orcaResolvedFilamentJson = """
+                    {
+                      "filament_settings_id":"Many PLA $index",
+                      "filament_id":"MANY0$index",
+                      "filament_type":"PLA"
+                    }
+                """.trimIndent()
+            )
+        }
+        val slots = filaments.mapIndexed { index, filament -> filament.toPlateFilamentSlot(index + 1) }
+        val plateObjects = (1L..96L).map { id ->
+            testPlateObject(id = id, filamentSlotIndex = ((id - 1L) % slots.size + 1L).toInt())
+        }
+
+        val startedAtNs = System.nanoTime()
+        val result = JSONObject(
+            applyPlateFilamentSlotsToNativeConfig(
+                configJson = "{}",
+                slots = slots,
+                plateObjects = plateObjects,
+                filaments = filaments,
+                flushVolumes = null
+            )
+        )
+        val elapsedMs = (System.nanoTime() - startedAtNs) / 1_000_000.0
+
+        assertTrue("plate filament slot application exceeded smoke-test budget: $elapsedMs ms", elapsedMs < 5_000.0)
+        assertEquals(8, result.optInt("mobile_slicer_active_filament_slot_count"))
+        assertEquals(8, result.getJSONArray("filament_settings_id").length())
+        assertTrue(result.optBoolean("enable_prime_tower", false))
     }
 
     @Test
@@ -1185,6 +1335,17 @@ class NativeSliceConfigTest {
         assertFalse(nativeConfig.has("filament_long_retractions_when_cut"))
         assertFalse(nativeConfig.has("filament_retraction_distances_when_cut"))
         assertEquals("auto", nativeConfig.optString("wall_direction"))
+        assertCriticalNativeConfigContains(
+            nativeConfig,
+            mapOf(
+                "printer_settings_id" to "Bambu Lab H2S 0.4 nozzle",
+                "filament_settings_id" to listOf("Bambu PLA Basic @BBL H2S"),
+                "filament_ids" to "GFA00",
+                "filament_type" to listOf("PLA"),
+                "print_settings_id" to "0.20mm Standard @BBL H2S",
+                "curr_bed_type" to "Textured PEI Plate"
+            )
+        )
     }
 
     @Test
@@ -1412,6 +1573,16 @@ class NativeSliceConfigTest {
         assertEquals("auto", nativeConfig.optString("wall_direction"))
         assertEquals(0.5, nativeConfig.optDouble("filter_out_gap_fill"), 0.0001)
         assertEquals(0, nativeConfig.optInt("gcode_label_objects"))
+        assertCriticalNativeConfigContains(
+            nativeConfig,
+            mapOf(
+                "printer_settings_id" to "Flashforge Adventurer 5M 0.4 Nozzle",
+                "filament_settings_id" to "Flashforge Generic PLA",
+                "filament_ids" to "FFG01",
+                "filament_type" to "PLA",
+                "print_settings_id" to "0.20mm Standard @Flashforge AD5M 0.4 Nozzle"
+            )
+        )
     }
 
     @Test
@@ -1473,6 +1644,16 @@ class NativeSliceConfigTest {
         assertEquals(80, nativeConfig.optInt("fan_max_speed"))
         assertEquals(700.0, nativeConfig.optDouble("travel_acceleration"), 0.0001)
         assertEquals("auto", nativeConfig.optString("wall_direction"))
+        assertCriticalNativeConfigContains(
+            nativeConfig,
+            mapOf(
+                "printer_settings_id" to "Creality CR-10 Max 0.4 nozzle",
+                "filament_settings_id" to "Creality Generic ABS",
+                "filament_ids" to "GFB99",
+                "filament_type" to "ABS",
+                "print_settings_id" to "0.20mm Standard @Creality CR10Max"
+            )
+        )
     }
 
     private fun testPlateObject(id: Long, filamentSlotIndex: Int): PlateObject =
@@ -1531,4 +1712,11 @@ class NativeSliceConfigTest {
                 else -> value
             }
         }
+
+    private fun assertCriticalNativeConfigContains(nativeConfig: JSONObject, expected: Map<String, Any?>) {
+        val snapshot = criticalNativeConfigSnapshot(nativeConfig)
+        expected.forEach { (key, value) ->
+            assertEquals("critical native config mismatch for $key", value, snapshot[key])
+        }
+    }
 }

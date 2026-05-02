@@ -1,7 +1,6 @@
 package com.mobileslicer.profiles
 
 import android.content.Context
-import org.json.JSONObject
 
 internal fun ProfileStore.withOrcaProfileFallbacks(context: Context): ProfileStore =
     withSystemGenericOrcaFilamentFallback(context)
@@ -84,7 +83,4 @@ private fun OrcaProcessPresetBundle.matchKeys(): Set<String> =
     ).map { it.cleanProfileMatchKey() }.filter { it.isNotBlank() }.toSet()
 
 private fun ProcessProfile.readPrintSettingsId(): String =
-    runCatching { JSONObject(orcaRawProcessJson).optString("print_settings_id") }.getOrDefault("")
-
-private fun String.orcaProfileNameFromPath(): String =
-    substringAfterLast('/').substringBeforeLast('.').trim()
+    jsonObjectOrNull(orcaRawProcessJson)?.optString(NativeConfigKeys.Process.SettingsId).orEmpty()

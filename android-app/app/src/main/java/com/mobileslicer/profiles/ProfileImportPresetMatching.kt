@@ -157,7 +157,7 @@ internal fun findInheritedOrcaProcessPresetBundle(
     currentStore: ProfileStore,
     json: JSONObject
 ): OrcaProcessPresetBundle? {
-    val inherited = json.optString("inherits").takeIf { it.isNotBlank() } ?: return null
+    val inherited = json.optString(NativeConfigKeys.Printer.Inherits).takeIf { it.isNotBlank() } ?: return null
     val printer = currentStore.printers.firstOrNull { it.id == currentStore.selectedPrinterId } ?: return null
     val inheritedKeys = listOf(
         inherited,
@@ -176,8 +176,8 @@ internal fun findInheritedOrcaProcessPresetBundle(
 
 internal fun findLinkedOrcaPrinterPreset(context: Context, json: JSONObject, displayName: String): OrcaPrinterPreset? {
     val candidates = listOf(
-        json.optString("printer_model"),
-        json.optString("inherits").removeNozzleSuffix(),
+        json.optString(NativeConfigKeys.Printer.Model),
+        json.optString(NativeConfigKeys.Printer.Inherits).removeNozzleSuffix(),
         displayName.removeNozzleSuffix()
     ).map { it.cleanProfileMatchKey() }.filter { it.isNotBlank() }
     return loadOrcaPrinterPresets(context).firstOrNull { preset ->

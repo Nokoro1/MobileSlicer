@@ -215,12 +215,12 @@ internal fun parseProfilePayloadText(
 }
 
 internal fun JSONObject.isOrcaPrinterPresetJson(): Boolean =
-    has("printable_area") && has("printable_height") && has("nozzle_diameter") &&
-        (has("printer_model") || has("machine_start_gcode") || has("gcode_flavor"))
+    has(NativeConfigKeys.Bed.PrintableArea) && has("printable_height") && has(NativeConfigKeys.Printer.NozzleDiameter) &&
+        (has(NativeConfigKeys.Printer.Model) || has("machine_start_gcode") || has("gcode_flavor"))
 
 internal fun JSONObject.isOrcaFilamentPresetJson(): Boolean =
-    has("filament_type") || has("nozzle_temperature") || has("filament_flow_ratio") ||
-        has("hot_plate_temp") || has("bed_temperature")
+    has(NativeConfigKeys.Filament.Type) || has("nozzle_temperature") || has("filament_flow_ratio") ||
+        has(NativeConfigKeys.Temperature.HotPlate) || has(NativeConfigKeys.Temperature.Bed)
 
 internal fun JSONObject.isOrcaProcessPresetJson(): Boolean =
     has("layer_height") || has("wall_loops") || has("sparse_infill_density") ||

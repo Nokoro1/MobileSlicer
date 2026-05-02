@@ -286,7 +286,7 @@ internal fun JSONObject.putNativeProcessConfiguration(process: ProcessProfile): 
             .put("skirt_height", process.skirtHeightLayers)
             .put("draft_shield", process.draftShield.configValue)
             .put("single_loop_draft_shield", process.singleLoopDraftShield)
-            .put("brim_type", process.brimType.configValue)
+            .put("brim_type", process.nativeBrimTypeConfigValue())
             .put("brim_width", process.brimWidthMm.toDouble())
             .put("brim_object_gap", process.brimObjectGapMm.toDouble())
             .put("brim_use_efc_outline", process.brimUseEfcOutline)
@@ -325,6 +325,12 @@ internal fun JSONObject.putNativeProcessConfiguration(process: ProcessProfile): 
             .put("fuzzy_skin_octaves", process.fuzzySkinOctaves)
             .put("fuzzy_skin_persistence", process.fuzzySkinPersistence.toDouble())
 }
+
+private fun ProcessProfile.nativeBrimTypeConfigValue(): String =
+    when {
+        brimType == BrimType.Auto && brimWidthMm > 0f -> BrimType.OuterOnly.configValue
+        else -> brimType.configValue
+    }
 
 internal fun String.asNativeConfigJsonObjectOrNull(): JSONObject? =
     takeIf { it.isNotBlank() }?.let { raw -> runCatching { JSONObject(raw) }.getOrNull() }

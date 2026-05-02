@@ -153,18 +153,21 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal fun JSONObject.toImportedDeviceOrcaPrinterProfile(context: Context, sourceName: String): PrinterProfile {
-    val prettyName = optString("name").ifBlank {
+    val prettyName = optString(NativeConfigKeys.Printer.Name).ifBlank {
         sourceName.substringAfterLast('/').removeSuffix(".json").removeSuffix(".JSON")
     }.ifBlank { "Imported Printer" }
     val linkedPreset = findLinkedOrcaPrinterPreset(context, this, prettyName)
-    val bedBounds = parseOrcaPrintableAreaBounds(opt("printable_area"))
-    val nozzle = profileConfigFloat("nozzle_diameter", optString("printer_variant").toFloatOrNull() ?: 0.4f)
-    val nozzles = opt("nozzle_diameter").orcaFloatList().ifEmpty { listOf(nozzle) }
+    val bedBounds = parseOrcaPrintableAreaBounds(opt(NativeConfigKeys.Bed.PrintableArea))
+    val nozzle = profileConfigFloat(
+        NativeConfigKeys.Printer.NozzleDiameter,
+        optString(NativeConfigKeys.Printer.Variant).toFloatOrNull() ?: 0.4f
+    )
+    val nozzles = opt(NativeConfigKeys.Printer.NozzleDiameter).orcaFloatList().ifEmpty { listOf(nozzle) }
     val machineJson = toString()
     val sourcePath = "device://${sourceName}#${machineJson.hashCode().toUInt().toString(16)}"
     val preset = OrcaPrinterPreset(
         name = prettyName,
-        family = optString("printer_model").ifBlank { "Device Import" },
+        family = optString(NativeConfigKeys.Printer.Model).ifBlank { "Device Import" },
         searchText = prettyName.lowercase(Locale.US),
         nozzleDiameters = nozzles.joinToString(";") { formatNozzle(it) },
         profilePath = sourcePath,
@@ -179,7 +182,7 @@ internal fun JSONObject.toImportedDeviceOrcaPrinterProfile(context: Context, sou
         nozzleMachinePaths = listOf(sourcePath),
         resolvedSourceChains = listOf(
             listOfNotNull(
-                optString("inherits").takeIf { it.isNotBlank() },
+                optString(NativeConfigKeys.Printer.Inherits).takeIf { it.isNotBlank() },
                 prettyName
             ).joinToString(" -> ")
         )
@@ -201,7 +204,7 @@ internal fun JSONObject.toImportedDeviceOrcaFilamentProfile(
 ): FilamentProfile {
     val printer = currentStore.printers.firstOrNull { it.id == currentStore.selectedPrinterId }
         ?: error("Select a printer before importing an Orca filament preset.")
-    val prettyName = optString("name").ifBlank {
+    val prettyName = optString(NativeConfigKeys.Printer.Name).ifBlank {
         sourceName.substringAfterLast('/').removeSuffix(".json").removeSuffix(".JSON")
     }.ifBlank { "Imported Filament" }
     val printerBaseline = findMobileSlicerFilamentBaseline(currentStore, this, prettyName)
@@ -215,7 +218,7 @@ internal fun JSONObject.toImportedDeviceOrcaFilamentProfile(
         parentJson != null -> parentJson.copyWithOverlay(this)
         else -> error("Select or create a ${prettyName.detectFilamentMaterial() ?: "base"} filament for ${printer.name} before importing this partial Orca filament preset.")
     }
-    val material = resolved.profileConfigString("filament_type", prettyName)
+    val material = resolved.profileConfigString(NativeConfigKeys.Filament.Type, prettyName)
     val sourcePath = "device://${sourceName}#${toString().hashCode().toUInt().toString(16)}"
     val preset = OrcaFilamentPreset(
         name = prettyName.removePrefix("Generic ").ifBlank { material },
@@ -223,7 +226,7 @@ internal fun JSONObject.toImportedDeviceOrcaFilamentProfile(
         family = resolved.optString("filament_vendor").ifBlank { "Device Import" },
         materialType = material,
         vendor = resolved.optString("filament_vendor").ifBlank { "(Undefined)" },
-        defaultFilamentColor = resolved.profileConfigString("default_filament_colour"),
+        defaultFilamentColor = resolved.profileConfigString(NativeConfigKeys.Filament.DefaultColor),
         profilePath = sourcePath,
         importBundleAssetPath = "",
         compatiblePrinters = emptyList(),
@@ -236,7 +239,7 @@ internal fun JSONObject.toImportedDeviceOrcaFilamentProfile(
             rawFilamentJson = toString(),
             resolvedFilamentJson = resolved.toString(),
             resolvedSourceChain = parentBundle?.resolvedSourceChain.orEmpty() +
-                listOfNotNull(optString("inherits").takeIf { it.isNotBlank() }, prettyName)
+                listOfNotNull(optString(NativeConfigKeys.Printer.Inherits).takeIf { it.isNotBlank() }, prettyName)
         ),
         printer = printer
     )
@@ -250,7 +253,7 @@ internal fun JSONObject.toImportedDeviceOrcaProcessProfile(
     val printer = currentStore.printers.firstOrNull { it.id == currentStore.selectedPrinterId }
         ?: error("Select a printer before importing an Orca process preset.")
     val nozzle = printer?.nozzleDiameterMm ?: 0.4f
-    val prettyName = optString("name").ifBlank {
+    val prettyName = optString(NativeConfigKeys.Printer.Name).ifBlank {
         sourceName.substringAfterLast('/').removeSuffix(".json").removeSuffix(".JSON")
     }.ifBlank { "Imported Process" }
     val sourcePath = "device://${sourceName}#${toString().hashCode().toUInt().toString(16)}"
@@ -260,8 +263,9 @@ internal fun JSONObject.toImportedDeviceOrcaProcessProfile(
         ?.let { runCatching { JSONObject(it) }.getOrNull() }
         ?.copyWithOverlay(this)
         ?: this
+    val resolvedMachine = jsonObjectOrNull(printer.orcaResolvedMachineJson)
     return OrcaProcessPresetBundle(
-        machineName = runCatching { JSONObject(printer?.orcaResolvedMachineJson.orEmpty()).profileConfigString("name") }.getOrDefault(""),
+        machineName = resolvedMachine?.profileConfigString(NativeConfigKeys.Printer.Name).orEmpty(),
         nozzleDiameterMm = nozzle,
         name = prettyName,
         rawName = prettyName,
@@ -269,7 +273,7 @@ internal fun JSONObject.toImportedDeviceOrcaProcessProfile(
         rawProcessJson = toString(),
         resolvedProcessJson = resolved.toString(),
         resolvedSourceChain = parentBundle?.resolvedSourceChain.orEmpty() +
-            listOfNotNull(optString("inherits").takeIf { it.isNotBlank() }, prettyName)
+            listOfNotNull(optString(NativeConfigKeys.Printer.Inherits).takeIf { it.isNotBlank() }, prettyName)
     ).toImportedProcessProfile(
         printer
     )
