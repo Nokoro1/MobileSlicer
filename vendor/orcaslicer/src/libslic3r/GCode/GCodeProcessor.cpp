@@ -5547,9 +5547,9 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
         m_pressure_advance,
         { 0.0f, 0.0f }, // time
         static_cast<float>(m_layer_id), //layer_duration: set later
-        std::max<unsigned int>(1, m_layer_id) - 1,
+        static_cast<uint16_t>(std::min<unsigned int>(std::max<unsigned int>(1, m_layer_id) - 1, UINT16_MAX)),
         internal_only,
-        m_object_label_id,
+        static_cast<int16_t>(std::clamp(m_object_label_id, static_cast<int>(INT16_MIN), static_cast<int>(INT16_MAX))),
         m_print_z
     });
 

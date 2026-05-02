@@ -188,11 +188,11 @@ class Print;
             float pressure_advance{ 0.0f };
             std::array<float, static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count)> time{ 0.0f, 0.0f }; // s
             float layer_duration{ 0.0f }; // s
-            unsigned int layer_id{ 0 };
+            uint16_t layer_id{ 0 };
             bool internal_only{ false };
 
             //BBS
-            int  object_label_id{-1};
+            int16_t  object_label_id{-1};
             float print_z{0.0f};
 
             float volumetric_rate() const { return feedrate * mm3_per_mm; }
