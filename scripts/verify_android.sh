@@ -80,6 +80,7 @@ Usage:
   scripts/verify_android.sh slice-lifecycle [serial]
   scripts/verify_android.sh slice-regression [serial]
   scripts/verify_android.sh profile-ui [serial]
+  scripts/verify_android.sh responsiveness [serial]
   scripts/verify_android.sh perf [serial]
   scripts/verify_android.sh perf-heavy [serial]
   scripts/verify_android.sh benchy <local-stl-path> [serial]
@@ -114,6 +115,10 @@ Modes:
   profile-ui
           Build, install, cold-launch, and assert the process stays alive with
           an empty crash buffer. Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  responsiveness
+          Build, install, cold-launch, time representative UI navigation steps,
+          and capture MobileSlicerPerf logcat events under artifacts/responsiveness.
+          Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   perf    Build/install perfDebug, run non-UI startup and slicing benchmarks,
           write reports under artifacts/performance, and fail on hard budgets
           or optional baseline regressions. Requires
@@ -490,6 +495,77 @@ run_profile_ui_smoke() {
   adb_device "$serial" shell input keyevent KEYCODE_BACK
   sleep 1
   assert_no_crash_after_launch "$serial"
+}
+
+measure_responsiveness_step() {
+  local timings_path="$1"
+  local step_name="$2"
+  shift 2
+  local started_ms
+  local ended_ms
+  local elapsed_ms
+  started_ms="$(date +%s%3N)"
+  "$@"
+  ended_ms="$(date +%s%3N)"
+  elapsed_ms=$((ended_ms - started_ms))
+  printf '{"name":"%s","elapsed_ms":%s}\n' "$step_name" "$elapsed_ms" >> "$timings_path"
+  log "Responsiveness step $step_name: ${elapsed_ms}ms"
+}
+
+run_responsiveness_profile() {
+  local serial="$1"
+  require_device_automation
+  local artifact_root="$ROOT_DIR/artifacts/responsiveness"
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  local artifact_dir="$artifact_root/$stamp"
+  local timings_path="$artifact_dir/ui-timings.jsonl"
+  mkdir -p "$artifact_dir"
+
+  install_apk "$serial"
+  measure_responsiveness_step "$timings_path" "cold_launch" launch_app "$serial"
+  assert_device_unlocked_for_ui "$serial"
+  measure_responsiveness_step "$timings_path" "home_visible" ensure_home_visible "$serial"
+  measure_responsiveness_step "$timings_path" "tap_open_profiles" tap_text "$serial" "Open Profiles"
+  measure_responsiveness_step "$timings_path" "profiles_visible" assert_text_visible "$serial" "Profiles"
+  measure_responsiveness_step "$timings_path" "tap_process_tab" tap_text "$serial" "Process"
+  measure_responsiveness_step "$timings_path" "process_profiles_visible" assert_text_visible "$serial" "Process Profiles"
+  measure_responsiveness_step "$timings_path" "tap_edit_process_profile" tap_text "$serial" "Edit / Rename"
+  measure_responsiveness_step "$timings_path" "process_quality_visible" assert_text_visible "$serial" "Quality"
+  measure_responsiveness_step "$timings_path" "layer_height_visible" assert_text_visible "$serial" "Layer height"
+  measure_responsiveness_step "$timings_path" "tap_strength_tab" tap_text_after_horizontal_swipe "$serial" "Strength"
+  measure_responsiveness_step "$timings_path" "strength_visible" assert_text_visible "$serial" "Top/bottom shells"
+  adb_device "$serial" shell input keyevent KEYCODE_BACK
+  sleep 1
+  assert_no_crash_after_launch "$serial"
+
+  adb_device "$serial" logcat -d -v time > "$artifact_dir/logcat.txt" 2>&1 || true
+  grep -E 'MobileSlicerPerf|workspace_responsiveness' "$artifact_dir/logcat.txt" > "$artifact_dir/responsiveness-logcat.txt" || true
+  adb_device "$serial" logcat -b crash -d -v time > "$artifact_dir/crash-logcat.txt" 2>&1 || true
+  {
+    printf '# MobileSlicer Responsiveness Profile\n\n'
+    printf -- '- serial: %s\n' "$serial"
+    printf -- '- captured_at: %s\n\n' "$stamp"
+    printf '## UI Steps\n\n'
+    python3 - "$timings_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    if not line.strip():
+        continue
+    record = json.loads(line)
+    print(f"- {record['name']}: {record['elapsed_ms']} ms")
+PY
+    printf '\n## App Timing Events\n\n'
+    if [[ -s "$artifact_dir/responsiveness-logcat.txt" ]]; then
+      sed 's/^/- /' "$artifact_dir/responsiveness-logcat.txt"
+    else
+      printf 'No MobileSlicerPerf events were captured during this UI-only run.\n'
+    fi
+  } > "$artifact_dir/report.md"
+  log "Responsiveness profile artifacts: $artifact_dir"
 }
 
 stage_app_private_file() {
@@ -1381,6 +1457,9 @@ case "$mode" in
     ;;
   profile-ui)
     run_profile_ui_smoke "$(device_serial "${2:-}")"
+    ;;
+  responsiveness)
+    run_responsiveness_profile "$(device_serial "${2:-}")"
     ;;
   perf)
     run_performance_gate "$(device_serial "${2:-}")"

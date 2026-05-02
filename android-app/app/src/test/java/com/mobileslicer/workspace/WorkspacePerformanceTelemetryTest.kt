@@ -64,4 +64,37 @@ class WorkspacePerformanceTelemetryTest {
         assertTrue(snapshot.warnings.contains("Slice slow"))
         assertEquals("Prepare: 15.0 seconds • Slice: 120.0 seconds • Prepare slow • Slice slow", snapshot.compactSummary())
     }
+
+    @Test
+    fun emitsStructuredResponsivenessLogLineWithoutUiText() {
+        val line = workspaceResponsivenessLogLine(
+            eventName = "workspace first visible frame",
+            importTiming = ModelImportTiming(stagingMs = 100L, nativeLoadMs = 200L),
+            workspacePreparationTiming = WorkspacePreparationTiming(
+                viewerMeshPrepMs = 300L,
+                cacheHit = true,
+                sourceTriangleCount = 1000,
+                displayTriangleCount = 250,
+                reducedForDisplay = true
+            ),
+            firstVisibleWorkspaceFrameMs = 700L,
+            firstVisiblePreviewFrameMs = 50L,
+            sliceTiming = SlicePipelineTiming(
+                modelReloadMs = 1L,
+                configMs = 2L,
+                nativeSliceMs = 3L,
+                writeGcodeMs = 4L,
+                summaryMs = 5L,
+                totalMs = 15L
+            )
+        )
+
+        assertTrue(line.startsWith("workspace_responsiveness "))
+        assertTrue(line.contains("event=workspace_first_visible_frame"))
+        assertTrue(line.contains("importTotalMs=300"))
+        assertTrue(line.contains("workspaceMeshCacheHit=true"))
+        assertTrue(line.contains("firstWorkspaceFrameMs=700"))
+        assertTrue(line.contains("firstPreviewFrameMs=50"))
+        assertTrue(line.contains("sliceTotalMs=15"))
+    }
 }

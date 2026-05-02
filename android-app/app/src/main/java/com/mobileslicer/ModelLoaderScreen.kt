@@ -30,6 +30,7 @@ import com.mobileslicer.workspace.WorkspacePreparationResult
 import com.mobileslicer.workspace.WorkspaceScreen
 import com.mobileslicer.workspace.WorkspaceSessionViewModel
 import com.mobileslicer.workspace.defaultViewerModelTransform
+import com.mobileslicer.workspace.workspaceResponsivenessLogLine
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -665,6 +666,20 @@ internal fun ModelLoaderScreen(
         plateObjects.firstOrNull { it.id == selectedPlateObjectId }?.let { syncSelectedObjectToLegacyState(it) }
     }
 
+    fun logResponsivenessEvent(eventName: String) {
+        Log.i(
+            "MobileSlicerPerf",
+            workspaceResponsivenessLogLine(
+                eventName = eventName,
+                importTiming = currentImportTiming,
+                workspacePreparationTiming = currentWorkspacePreparationTiming,
+                firstVisibleWorkspaceFrameMs = firstVisibleWorkspaceFrameMs,
+                firstVisiblePreviewFrameMs = firstVisiblePreviewFrameMs,
+                sliceTiming = currentSliceTiming
+            )
+        )
+    }
+
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val importStartState = planModelImportStart()
@@ -714,6 +729,7 @@ internal fun ModelLoaderScreen(
                     currentModelBounds = legacyState.modelBounds
                     currentModelFormatName = legacyState.modelFormatName
                 }
+                logResponsivenessEvent("model_import_completed")
                 workspaceStatus = importApplication.statusMessage
                 val completionPlan = planModelImportCompletionUi(importApplication)
                 importInProgress = completionPlan.importInProgress
@@ -791,6 +807,7 @@ internal fun ModelLoaderScreen(
             application.statusMessage?.let { statusMessage ->
                 workspaceStatus = statusMessage
             }
+            logResponsivenessEvent("workspace_mesh_prepared")
         } finally {
             workspacePreparationTargetKey = clearedWorkspacePreparationTarget(
                 currentTargetKey = workspacePreparationTargetKey,
@@ -1041,6 +1058,7 @@ internal fun ModelLoaderScreen(
                             val firstFrameMs = SystemClock.elapsedRealtime() - startedAt
                             firstVisibleWorkspaceFrameMs = firstFrameMs
                             workspaceStatus = firstVisibleWorkspaceFrameStatus(workspaceStatus, firstFrameMs)
+                            logResponsivenessEvent("workspace_first_visible_frame")
                         }
                     }
                 },
@@ -1048,6 +1066,7 @@ internal fun ModelLoaderScreen(
                     if (firstVisiblePreviewFrameMs == null) {
                         previewStartedAtMs?.let { startedAt ->
                             firstVisiblePreviewFrameMs = SystemClock.elapsedRealtime() - startedAt
+                            logResponsivenessEvent("preview_first_visible_frame")
                         }
                     }
                 },
@@ -1130,6 +1149,7 @@ internal fun ModelLoaderScreen(
                                 workspaceStatus = completionPlan.statusMessage
                                 sliceInProgress = false
                                 sliceCompletionResult = completionPlan.completionResult
+                                logResponsivenessEvent("slice_completed")
                             }
                         }
                     }

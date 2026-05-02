@@ -14,6 +14,52 @@ internal data class WorkspacePerformanceSnapshot(
     }.joinToString(" • ")
 }
 
+internal fun workspaceResponsivenessLogLine(
+    eventName: String,
+    importTiming: ModelImportTiming?,
+    workspacePreparationTiming: WorkspacePreparationTiming?,
+    firstVisibleWorkspaceFrameMs: Long?,
+    firstVisiblePreviewFrameMs: Long?,
+    sliceTiming: SlicePipelineTiming?
+): String {
+    val snapshot = workspacePerformanceSnapshot(
+        importTiming = importTiming,
+        workspacePreparationTiming = workspacePreparationTiming,
+        firstVisibleWorkspaceFrameMs = firstVisibleWorkspaceFrameMs,
+        sliceTiming = sliceTiming
+    )
+    return buildList {
+        add("event=${eventName.logValue()}")
+        importTiming?.let {
+            add("importStagingMs=${it.stagingMs}")
+            add("importNativeLoadMs=${it.nativeLoadMs}")
+            add("importTotalMs=${it.stagingMs + it.nativeLoadMs}")
+        }
+        workspacePreparationTiming?.let {
+            add("workspaceMeshPrepMs=${it.viewerMeshPrepMs}")
+            add("workspaceMeshCacheHit=${it.cacheHit}")
+            it.sourceTriangleCount?.let { triangleCount -> add("sourceTriangles=$triangleCount") }
+            it.displayTriangleCount?.let { triangleCount -> add("displayTriangles=$triangleCount") }
+            add("displayReduced=${it.reducedForDisplay}")
+        }
+        firstVisibleWorkspaceFrameMs?.let { add("firstWorkspaceFrameMs=$it") }
+        firstVisiblePreviewFrameMs?.let { add("firstPreviewFrameMs=$it") }
+        snapshot.prepareDurationMs?.let { add("prepareMs=$it") }
+        sliceTiming?.let {
+            add("sliceModelReloadMs=${it.modelReloadMs}")
+            add("sliceConfigMs=${it.configMs}")
+            add("sliceNativeMs=${it.nativeSliceMs}")
+            add("sliceWriteGcodeMs=${it.writeGcodeMs}")
+            add("sliceSummaryMs=${it.summaryMs}")
+            if (it.thumbnailMs > 0L) add("sliceThumbnailMs=${it.thumbnailMs}")
+            add("sliceTotalMs=${it.totalMs}")
+        }
+        snapshot.warnings.forEachIndexed { index, warning ->
+            add("warning$index=${warning.logValue()}")
+        }
+    }.joinToString(separator = " ", prefix = "workspace_responsiveness ")
+}
+
 internal fun workspacePerformanceSnapshot(
     importTiming: ModelImportTiming?,
     workspacePreparationTiming: WorkspacePreparationTiming?,
@@ -60,3 +106,8 @@ private fun workspacePerformanceWarnings(
         add("Slice slow")
     }
 }
+
+private fun String.logValue(): String =
+    trim()
+        .ifBlank { "unknown" }
+        .replace(Regex("[^A-Za-z0-9_.-]"), "_")
