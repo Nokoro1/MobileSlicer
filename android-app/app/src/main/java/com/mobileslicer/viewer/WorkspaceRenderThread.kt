@@ -1155,6 +1155,10 @@ internal class WorkspaceRenderThread(
         modelUpload?.let(::deleteTriangleUpload)
         modelUpload = null
         objectUploadManager.clear()
+        GLES20.glUseProgram(0)
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+        GLES20.glFinish()
         appliedMeshVersion = -1L
         appliedPlateObjectsVersion = -1L
         appliedPlateObjectTransformVersion = -1L
@@ -1163,6 +1167,7 @@ internal class WorkspaceRenderThread(
         appliedModelTransformVersion = -1L
         appliedAppearanceVersion = -1L
         renderedReadyMeshVersion = -1L
+        firstFrameCleared = false
     }
 
     private fun destroyGl() {
