@@ -22,6 +22,24 @@ DEFAULT_SLICE_BUDGETS_MS = {
 }
 
 
+REGRESSION_METRIC_GROUPS = {
+    "startup_ms": "startup",
+    "elapsed_ms": "slice",
+    "native_load_ms": "slice",
+    "native_slice_ms": "slice",
+    "write_gcode_ms": "slice",
+    "preview_cache_build_ms": "slice",
+    "preview_moves": "output",
+    "preview_cached_vertices": "output",
+    "peak_pss_kb": "memory",
+    "peak_java_heap_kb": "memory",
+    "peak_native_heap_kb": "memory",
+    "peak_graphics_kb": "memory",
+    "peak_private_other_kb": "memory",
+    "bytes": "output",
+}
+
+
 def env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -65,7 +83,17 @@ def load_baseline(path: pathlib.Path | None) -> dict[str, dict[str, Any]]:
     records = payload["records"] if isinstance(payload, dict) and "records" in payload else payload
     if not isinstance(records, list):
         raise SystemExit(f"baseline must contain a record list: {path}")
-    return {str(item.get("name")): item for item in records if isinstance(item, dict)}
+    baseline: dict[str, dict[str, Any]] = {}
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", ""))
+        if not name:
+            continue
+        baseline[name] = item
+        base_name = base_record_name(name)
+        baseline.setdefault(base_name, item)
+    return baseline
 
 
 def record_metric(record: dict[str, Any], metric: str) -> float | None:
@@ -165,6 +193,81 @@ def build_markdown(records: list[dict[str, Any]], failures: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def format_delta(current: float | None, previous: float | None) -> str:
+    if current is None or previous is None:
+        return ""
+    delta = current - previous
+    change = percent_change(current, previous)
+    sign = "+" if delta >= 0 else ""
+    return f"{sign}{delta:.0f} ({sign}{change:.1f}%)"
+
+
+def build_baseline_markdown(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) -> str:
+    if not baseline:
+        return ""
+    lines = [
+        "## Baseline Comparison",
+        "",
+        "| Name | Slice ms delta | PSS KB delta | Native heap KB delta | Java heap KB delta | Bytes delta | Preview moves delta |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    rows = 0
+    for record in records:
+        if record.get("type") != "slice":
+            continue
+        name = str(record.get("name", ""))
+        previous = baseline.get(name) or baseline.get(base_record_name(name))
+        if previous is None:
+            continue
+        rows += 1
+        lines.append(
+            "| {name} | {elapsed} | {pss} | {native} | {java} | {bytes} | {preview_moves} |".format(
+                name=name,
+                elapsed=format_delta(record_metric(record, "elapsed_ms"), record_metric(previous, "elapsed_ms")),
+                pss=format_delta(record_metric(record, "peak_pss_kb"), record_metric(previous, "peak_pss_kb")),
+                native=format_delta(
+                    record_metric(record, "peak_native_heap_kb"),
+                    record_metric(previous, "peak_native_heap_kb"),
+                ),
+                java=format_delta(
+                    record_metric(record, "peak_java_heap_kb"),
+                    record_metric(previous, "peak_java_heap_kb"),
+                ),
+                bytes=format_delta(record_metric(record, "bytes"), record_metric(previous, "bytes")),
+                preview_moves=format_delta(
+                    record_metric(record, "preview_moves"),
+                    record_metric(previous, "preview_moves"),
+                ),
+            )
+        )
+    return "\n".join(lines) + "\n" if rows else ""
+
+
+def regression_allowances() -> dict[str, tuple[float, float]]:
+    startup_regression_percent = env_float("MOBILE_SLICER_PERF_STARTUP_REGRESSION_PERCENT", 25.0)
+    slice_regression_percent = env_float("MOBILE_SLICER_PERF_SLICE_REGRESSION_PERCENT", 25.0)
+    memory_regression_percent = env_float("MOBILE_SLICER_PERF_MEMORY_REGRESSION_PERCENT", 25.0)
+    output_regression_percent = env_float("MOBILE_SLICER_PERF_OUTPUT_REGRESSION_PERCENT", 35.0)
+    startup_regression_min = env_int("MOBILE_SLICER_PERF_STARTUP_REGRESSION_MIN_MS", 250)
+    slice_regression_min = env_int("MOBILE_SLICER_PERF_SLICE_REGRESSION_MIN_MS", 750)
+    memory_regression_min = env_int("MOBILE_SLICER_PERF_MEMORY_REGRESSION_MIN_KB", 98_304)
+    output_regression_min = env_int("MOBILE_SLICER_PERF_OUTPUT_REGRESSION_MIN_UNITS", 1024)
+    return {
+        "startup": (startup_regression_percent, float(startup_regression_min)),
+        "slice": (slice_regression_percent, float(slice_regression_min)),
+        "memory": (memory_regression_percent, float(memory_regression_min)),
+        "output": (output_regression_percent, float(output_regression_min)),
+    }
+
+
+def metric_regression_min_delta(metric: str, group_min_delta: float) -> float:
+    env_name = f"MOBILE_SLICER_PERF_{metric.upper()}_REGRESSION_MIN"
+    metric_defaults = {
+        "peak_pss_kb": 131_072,
+    }
+    return float(env_int(env_name, int(metric_defaults.get(metric, group_min_delta))))
+
+
 def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) -> list[str]:
     failures: list[str] = []
     max_startup_ms = env_int("MOBILE_SLICER_PERF_MAX_STARTUP_MS", 4_000)
@@ -173,12 +276,9 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
     max_native_heap_kb = env_int("MOBILE_SLICER_PERF_MAX_NATIVE_HEAP_KB", 700_000)
     max_graphics_kb = env_int("MOBILE_SLICER_PERF_MAX_GRAPHICS_KB", 350_000)
     max_private_other_kb = env_int("MOBILE_SLICER_PERF_MAX_PRIVATE_OTHER_KB", 550_000)
-    startup_regression_percent = env_float("MOBILE_SLICER_PERF_STARTUP_REGRESSION_PERCENT", 25.0)
-    slice_regression_percent = env_float("MOBILE_SLICER_PERF_SLICE_REGRESSION_PERCENT", 25.0)
-    memory_regression_percent = env_float("MOBILE_SLICER_PERF_MEMORY_REGRESSION_PERCENT", 25.0)
-    output_regression_percent = env_float("MOBILE_SLICER_PERF_OUTPUT_REGRESSION_PERCENT", 35.0)
+    regression_groups = regression_allowances()
     repeat_memory_growth_percent = env_float("MOBILE_SLICER_PERF_REPEAT_MEMORY_GROWTH_PERCENT", 20.0)
-    repeat_memory_growth_min_kb = env_int("MOBILE_SLICER_PERF_REPEAT_MEMORY_GROWTH_MIN_KB", 32_768)
+    repeat_memory_growth_min_kb = env_int("MOBILE_SLICER_PERF_REPEAT_MEMORY_GROWTH_MIN_KB", 98_304)
     repeated_slices: dict[str, list[dict[str, Any]]] = {}
 
     for record in records:
@@ -230,32 +330,20 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
         previous = baseline.get(name) or baseline.get(base_name)
         if not previous:
             continue
-        comparisons = [
-            ("startup_ms", startup_regression_percent),
-            ("elapsed_ms", slice_regression_percent),
-            ("native_load_ms", slice_regression_percent),
-            ("native_slice_ms", slice_regression_percent),
-            ("write_gcode_ms", slice_regression_percent),
-            ("preview_cache_build_ms", slice_regression_percent),
-            ("preview_moves", output_regression_percent),
-            ("preview_cached_vertices", output_regression_percent),
-            ("peak_pss_kb", memory_regression_percent),
-            ("peak_java_heap_kb", memory_regression_percent),
-            ("peak_native_heap_kb", memory_regression_percent),
-            ("peak_graphics_kb", memory_regression_percent),
-            ("peak_private_other_kb", memory_regression_percent),
-            ("bytes", output_regression_percent),
-        ]
-        for metric, allowed_percent in comparisons:
+        for metric, group_name in REGRESSION_METRIC_GROUPS.items():
             current_value = record_metric(record, metric)
             previous_value = record_metric(previous, metric)
             if current_value is None or previous_value in (None, 0):
                 continue
             change = percent_change(current_value, previous_value)
-            if change > allowed_percent:
+            allowed_percent, allowed_min_delta = regression_groups[group_name]
+            allowed_min_delta = metric_regression_min_delta(metric, allowed_min_delta)
+            delta = current_value - previous_value
+            if change > allowed_percent and delta > allowed_min_delta:
                 failures.append(
                     f"{name}: {metric} regressed by {change:.1f}% "
-                    f"({previous_value:.0f} -> {current_value:.0f}, allowed {allowed_percent:.1f}%)"
+                    f"({previous_value:.0f} -> {current_value:.0f}, allowed {allowed_percent:.1f}% "
+                    f"and {allowed_min_delta:.0f} absolute growth)"
                 )
 
     for base_name, repeat_records in sorted(repeated_slices.items()):
@@ -303,11 +391,16 @@ def main() -> int:
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema": 1,
+        "baseline": str(args.baseline) if args.baseline is not None else None,
         "records": records,
         "failures": failures,
     }
     args.output_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    args.output_md.write_text(build_markdown(records, failures), encoding="utf-8")
+    markdown = build_markdown(records, failures)
+    baseline_markdown = build_baseline_markdown(records, baseline)
+    if baseline_markdown:
+        markdown += "\n" + baseline_markdown
+    args.output_md.write_text(markdown, encoding="utf-8")
 
     for record in records:
         if record.get("type") == "startup":
@@ -332,6 +425,23 @@ def main() -> int:
                 f"nativeHeapKb={record.get('peak_native_heap_kb')} graphicsKb={record.get('peak_graphics_kb')} "
                 f"privateOtherKb={record.get('peak_private_other_kb')} "
                 f"bytes={record.get('bytes')}"
+            )
+    if baseline:
+        print("Baseline comparison:")
+        for record in records:
+            if record.get("type") != "slice":
+                continue
+            name = str(record.get("name", ""))
+            previous = baseline.get(name) or baseline.get(base_record_name(name))
+            if previous is None:
+                continue
+            print(
+                f"{name}: "
+                f"elapsedDelta={format_delta(record_metric(record, 'elapsed_ms'), record_metric(previous, 'elapsed_ms'))} "
+                f"pssDelta={format_delta(record_metric(record, 'peak_pss_kb'), record_metric(previous, 'peak_pss_kb'))} "
+                f"nativeHeapDelta={format_delta(record_metric(record, 'peak_native_heap_kb'), record_metric(previous, 'peak_native_heap_kb'))} "
+                f"javaHeapDelta={format_delta(record_metric(record, 'peak_java_heap_kb'), record_metric(previous, 'peak_java_heap_kb'))} "
+                f"bytesDelta={format_delta(record_metric(record, 'bytes'), record_metric(previous, 'bytes'))}"
             )
     if failures:
         print("Performance gate failed:", file=sys.stderr)

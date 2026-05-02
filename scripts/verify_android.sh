@@ -104,7 +104,8 @@ Modes:
           Run the same measurement stack on only the medium, complex, and stress
           fixtures. Intended for memory-pressure optimization checks. Set
           MOBILE_SLICER_PERF_REPEAT_COUNT to repeat each slice and check
-          cross-run memory growth.
+          cross-run memory growth. Uses performance-baselines/perf-heavy-device-baseline.json
+          by default when present; set MOBILE_SLICER_PERF_BASELINE=none to disable.
   benchy  Build, install, stage an STL app-private, and run automation slicing.
           Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   all     Run local checks and install the debug APK.
@@ -208,6 +209,7 @@ run_script_tests() {
   log "Running verification script syntax checks"
   bash -n "$ROOT_DIR/scripts/verify_android.sh"
   python3 -m py_compile "$ROOT_DIR"/scripts/*.py
+  (cd "$ROOT_DIR" && python3 scripts/test_analyze_mobile_performance.py)
 }
 
 run_asset_generator_tests() {
@@ -948,8 +950,18 @@ run_performance_gate() {
   done
 
   local baseline_args=()
-  if [[ -n "${MOBILE_SLICER_PERF_BASELINE:-}" ]]; then
-    baseline_args=(--baseline "$MOBILE_SLICER_PERF_BASELINE")
+  local default_baseline="$ROOT_DIR/performance-baselines/perf-heavy-device-baseline.json"
+  local perf_baseline="${MOBILE_SLICER_PERF_BASELINE:-}"
+  if [[ -z "$perf_baseline" && "$heavy_only" == "1" && -f "$default_baseline" ]]; then
+    perf_baseline="$default_baseline"
+    log "Using default heavy performance baseline: $perf_baseline"
+  elif [[ "$perf_baseline" =~ ^(none|NONE|off|OFF|0)$ ]]; then
+    perf_baseline=""
+    log "Performance baseline comparison disabled by MOBILE_SLICER_PERF_BASELINE."
+  fi
+  if [[ -n "$perf_baseline" ]]; then
+    [[ -f "$perf_baseline" ]] || fail "Performance baseline does not exist: $perf_baseline"
+    baseline_args=(--baseline "$perf_baseline")
   fi
   "$ROOT_DIR/scripts/analyze_mobile_performance.py" \
     --input "$records_path" \

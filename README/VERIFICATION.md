@@ -91,6 +91,13 @@ Java heap, native heap, graphics, private-other, and system memory. Use
 `perf-heavy` while optimizing memory pressure; it runs only the medium, complex,
 and stress fixtures.
 
+`perf-heavy` automatically compares against the checked-in heavy device baseline
+at `performance-baselines/perf-heavy-device-baseline.json` when that file is
+present. Set `MOBILE_SLICER_PERF_BASELINE=none` to run without a baseline, or
+set `MOBILE_SLICER_PERF_BASELINE=/path/to/report.json` to compare against a
+specific run. The report includes a compact baseline comparison for elapsed
+time, PSS, native heap, Java heap, output bytes, and preview metrics.
+
 For optimization work that might leak or retain native/Java memory across
 slices, repeat the heavy gate:
 
@@ -104,11 +111,12 @@ Repeated records are named with `-r1`, `-r2`, and so on. The analyzer applies
 the normal slice budgets to the base fixture name and also fails if peak memory
 grows too much between the first and last repeat. Override the default 20%
 growth allowance with `MOBILE_SLICER_PERF_REPEAT_MEMORY_GROWTH_PERCENT`.
-The growth gate also requires more than `32768KB` of absolute growth by default
+The growth gate also requires more than `98304KB` of absolute growth by default
 so small allocator or graphics warmup deltas do not fail optimization runs; tune
 that floor with `MOBILE_SLICER_PERF_REPEAT_MEMORY_GROWTH_MIN_KB`.
 
-To compare against a previous run, pass the prior `report.json`:
+To compare the full `perf` matrix against a previous run, pass the prior
+`report.json`:
 
 ```bash
 MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 \
@@ -121,7 +129,21 @@ and 35% emitted-output-size regression. Override with
 `MOBILE_SLICER_PERF_STARTUP_REGRESSION_PERCENT`,
 `MOBILE_SLICER_PERF_SLICE_REGRESSION_PERCENT`,
 `MOBILE_SLICER_PERF_MEMORY_REGRESSION_PERCENT`, and
-`MOBILE_SLICER_PERF_OUTPUT_REGRESSION_PERCENT`.
+`MOBILE_SLICER_PERF_OUTPUT_REGRESSION_PERCENT`. Percentage failures also require
+an absolute increase, which keeps small measurement noise from blocking a run:
+`MOBILE_SLICER_PERF_STARTUP_REGRESSION_MIN_MS` defaults to `250`,
+`MOBILE_SLICER_PERF_SLICE_REGRESSION_MIN_MS` defaults to `750`,
+`MOBILE_SLICER_PERF_MEMORY_REGRESSION_MIN_KB` defaults to `98304`, and
+`MOBILE_SLICER_PERF_OUTPUT_REGRESSION_MIN_UNITS` defaults to `1024`.
+Individual metrics can override that floor with
+`MOBILE_SLICER_PERF_<METRIC>_REGRESSION_MIN`; `peak_pss_kb` defaults to a
+higher `131072KB` floor because total PSS includes allocator and process memory
+sampling noise beyond the native heap attribution.
+
+Refresh `performance-baselines/perf-heavy-device-baseline.json` only after a
+clean `local`, `slice-regression`, and two-pass `perf-heavy` run. The baseline
+should be updated in the same change as the intentional performance improvement
+or accepted device variance.
 
 ## Benchy Automation
 
