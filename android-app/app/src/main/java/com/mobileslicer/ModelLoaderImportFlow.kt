@@ -47,9 +47,22 @@ internal data class ModelLoaderPreparedLegacyState(
     val workspacePreparationTiming: WorkspacePreparationTiming?
 )
 
+internal data class ModelLoaderImportStartState(
+    val importInProgress: Boolean = true,
+    val currentCalibrationJobCleared: Boolean = true,
+    val statusMessage: String = "Loading model",
+    val clearGeneratedPreviewState: Boolean = true,
+    val clearPreparedMeshState: Boolean = true,
+    val clearFirstFrameTimings: Boolean = true,
+    val clearWorkspacePreparationTarget: Boolean = true
+)
+
 internal fun modelLoadResultLabel(result: ModelLoadResult): String =
     result.message.lineSequence().drop(1).firstOrNull()?.ifBlank { "No model imported" }
         ?: if (result.loaded) "Model ready" else "No model imported"
+
+internal fun planModelImportStart(): ModelLoaderImportStartState =
+    ModelLoaderImportStartState()
 
 internal fun planModelImportApplication(
     result: ModelLoadResult,
@@ -166,6 +179,16 @@ internal fun preparedLegacyState(
         modelBounds = result.preparedMesh?.bounds ?: currentModelBounds,
         viewerPreparationError = result.viewerPreparationError,
         workspacePreparationTiming = result.timing
+    )
+
+internal fun legacyStateForPlateObject(objectOnPlate: PlateObject?): ModelLoaderLegacyModelState =
+    ModelLoaderLegacyModelState(
+        modelLoaded = objectOnPlate != null,
+        modelLabel = objectOnPlate?.label ?: "No model imported",
+        modelFilePath = objectOnPlate?.filePath,
+        importTiming = objectOnPlate?.importTiming,
+        modelBounds = objectOnPlate?.mesh?.bounds ?: objectOnPlate?.bounds,
+        modelFormatName = objectOnPlate?.format?.name
     )
 
 internal fun applyWorkspacePreparationToPlateObject(

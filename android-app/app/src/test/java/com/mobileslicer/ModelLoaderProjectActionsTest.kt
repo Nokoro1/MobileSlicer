@@ -69,6 +69,35 @@ class ModelLoaderProjectActionsTest {
     }
 
     @Test
+    fun savePlatePromptFailsForEmptyPlateAndSuggestsProjectNameForObjects() {
+        val emptyPlan = planSavePlatePrompt(emptyList(), currentModelLabel = "Fallback Model")
+        assertEquals(ModelLoaderSavePlatePromptPlan.Fail("No plate to save"), emptyPlan)
+
+        val singlePlan = planSavePlatePrompt(
+            plateObjects = listOf(plateObjectForPrompt("Cube")),
+            currentModelLabel = "Fallback Model"
+        )
+        assertEquals(ModelLoaderSavePlatePromptPlan.Prompt("Cube"), singlePlan)
+
+        val multiPlan = planSavePlatePrompt(
+            plateObjects = listOf(plateObjectForPrompt("Cube"), plateObjectForPrompt("Sphere")),
+            currentModelLabel = "Fallback Model"
+        )
+        assertEquals(ModelLoaderSavePlatePromptPlan.Prompt("Cube + 1"), multiPlan)
+    }
+
+    @Test
+    fun savedProjectLoadedStatusIncludesNativeReloadWarningOnlyWhenNeeded() {
+        val project = savedProject(id = "project_status").copy(name = "Fixture Plate")
+
+        assertEquals("Project loaded\nFixture Plate", savedProjectLoadedStatus(project, nativeWarmLoadSucceeded = true))
+        assertEquals(
+            "Project loaded\nFixture Plate\nNative model will reload on first slice.",
+            savedProjectLoadedStatus(project, nativeWarmLoadSucceeded = false)
+        )
+    }
+
+    @Test
     fun openSavedProjectStateLoadsObjectsAndFallsBackToActiveFilamentSlot() {
         val file = File.createTempFile("mobileslicer-project-open-", ".stl")
         try {
@@ -132,6 +161,16 @@ class ModelLoaderProjectActionsTest {
                 minZ = 0f,
                 maxZ = 1f
             ),
+            transform = ViewerModelTransform(centerXmm = 5f, centerYmm = 5f)
+        )
+
+    private fun plateObjectForPrompt(label: String): com.mobileslicer.workspace.PlateObject =
+        com.mobileslicer.workspace.PlateObject(
+            id = label.hashCode().toLong(),
+            label = label,
+            filePath = "/tmp/$label.stl",
+            format = ImportedModelFormat.Stl,
+            importTiming = null,
             transform = ViewerModelTransform(centerXmm = 5f, centerYmm = 5f)
         )
 

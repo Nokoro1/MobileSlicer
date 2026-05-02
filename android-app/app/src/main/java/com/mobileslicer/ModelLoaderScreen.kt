@@ -372,21 +372,18 @@ internal fun ModelLoaderScreen(
     }
 
     fun syncSelectedObjectToLegacyState(objectOnPlate: PlateObject?) {
+        val legacyState = legacyStateForPlateObject(objectOnPlate)
         selectedPlateObjectId = objectOnPlate?.id
-        modelLoaded = objectOnPlate != null
-        currentModelLabel = objectOnPlate?.label ?: "No model imported"
-        currentModelFilePath = objectOnPlate?.filePath
+        modelLoaded = legacyState.modelLoaded
+        currentModelLabel = legacyState.modelLabel
+        currentModelFilePath = legacyState.modelFilePath
         currentPreparedMesh = objectOnPlate?.mesh
-        currentModelBounds = objectOnPlate?.mesh?.bounds ?: objectOnPlate?.bounds
+        currentModelBounds = legacyState.modelBounds
         currentViewerPreparationError = objectOnPlate?.viewerPreparationError
-        currentImportTiming = objectOnPlate?.importTiming
+        currentImportTiming = legacyState.importTiming
         currentWorkspacePreparationTiming = objectOnPlate?.workspacePreparationTiming
-        currentModelFormatName = objectOnPlate?.format?.name
+        currentModelFormatName = legacyState.modelFormatName
         currentModelTransform = objectOnPlate?.transform
-    }
-
-    fun savedProjectName(): String {
-        return suggestedSavedProjectName(plateObjects = plateObjects, currentModelLabel = currentModelLabel)
     }
 
     fun saveCurrentPlate(projectName: String, thumbnailBitmap: Bitmap?) {
@@ -397,7 +394,7 @@ internal fun ModelLoaderScreen(
         val project = buildSavedProject(
             currentSavedProjectId = currentSavedProjectId,
             projectName = projectName,
-            projectNameFallback = savedProjectName(),
+            projectNameFallback = suggestedSavedProjectName(plateObjects = plateObjects, currentModelLabel = currentModelLabel),
             savedProjectRootDir = savedProjectRootDir,
             profileStore = profileStore,
             plateObjects = plateObjects.toList(),
@@ -441,13 +438,7 @@ internal fun ModelLoaderScreen(
             val nativeWarmLoadSucceeded = withContext(Dispatchers.IO) {
                 onSavedProjectNativeLoadRequested(openedProject.plateObjects, openedProject.printerBed)
             }
-            workspaceStatus = buildString {
-                append("Project loaded\n")
-                append(project.name)
-                if (!nativeWarmLoadSucceeded) {
-                    append("\nNative model will reload on first slice.")
-                }
-            }
+            workspaceStatus = savedProjectLoadedStatus(project, nativeWarmLoadSucceeded)
             importInProgress = false
             currentScreen = AppScreen.Workspace
         }
@@ -469,21 +460,13 @@ internal fun ModelLoaderScreen(
     }
 
     fun effectiveGcodeFileName(): String {
-        currentCalibrationJob?.let { return it.gcodeFileName() }
-        return suggestExportGcodeFileName(
-            plateObjects = plateObjects,
+        return effectiveGcodeFileName(
+            calibrationJob = currentCalibrationJob,
+            plateObjects = plateObjects.toList(),
             summary = currentSliceSummary,
             filamentMaterial = selectedFilament.materialType,
             fallbackName = currentGcodeFileName
         )
-    }
-
-    fun effectiveGcodeFileNameForFile(gcodeFilePath: String): String {
-        currentCalibrationJob?.let {
-            detectCalibrationGcodeFileName(gcodeFilePath)?.let { detected -> return detected }
-            return it.gcodeFileName()
-        }
-        return effectiveGcodeFileName()
     }
 
     fun slicerFootprintClearanceMm(): Float = generatedFootprintClearanceMm(activeConfiguration.process)
@@ -688,19 +671,22 @@ internal fun ModelLoaderScreen(
 
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
+            val importStartState = planModelImportStart()
             importStartedAtMs = SystemClock.elapsedRealtime()
-            importInProgress = true
-            currentCalibrationJob = null
-            workspaceStatus = "Loading model"
-            workspaceSession.clearGeneratedPreviewState()
-            currentPreparedMesh = null
-            currentModelBounds = null
-            currentViewerPreparationError = null
-            currentImportTiming = null
-            currentWorkspacePreparationTiming = null
-            firstVisibleWorkspaceFrameMs = null
-            currentModelTransform = null
-            workspacePreparationTargetKey = null
+            importInProgress = importStartState.importInProgress
+            if (importStartState.currentCalibrationJobCleared) currentCalibrationJob = null
+            workspaceStatus = importStartState.statusMessage
+            if (importStartState.clearGeneratedPreviewState) workspaceSession.clearGeneratedPreviewState()
+            if (importStartState.clearPreparedMeshState) {
+                currentPreparedMesh = null
+                currentModelBounds = null
+                currentViewerPreparationError = null
+                currentImportTiming = null
+                currentWorkspacePreparationTiming = null
+                currentModelTransform = null
+            }
+            if (importStartState.clearFirstFrameTimings) firstVisibleWorkspaceFrameMs = null
+            if (importStartState.clearWorkspacePreparationTarget) workspacePreparationTargetKey = null
             coroutineScope.launch {
                 val result = withContext(Dispatchers.Default) {
                     onModelSelected(uri)
@@ -1039,11 +1025,12 @@ internal fun ModelLoaderScreen(
                     currentScreen = AppScreen.Profiles
                 },
                 onSavePlate = {
-                    if (plateObjects.isEmpty()) {
-                        workspaceStatus = "No plate to save"
-                    } else {
-                        savePlateThumbnail = it
-                        savePlateNamePrompt = savedProjectName()
+                    when (val savePlan = planSavePlatePrompt(plateObjects, currentModelLabel)) {
+                        is ModelLoaderSavePlatePromptPlan.Fail -> workspaceStatus = savePlan.statusMessage
+                        is ModelLoaderSavePlatePromptPlan.Prompt -> {
+                            savePlateThumbnail = it
+                            savePlateNamePrompt = savePlan.suggestedName
+                        }
                     }
                 },
                 onBack = { handleBackNavigation() },
@@ -1070,101 +1057,108 @@ internal fun ModelLoaderScreen(
                     }
                 },
                 onSlice = {
-                    if (modelLoaded && !sliceInProgress && !sendToPrinterInProgress) {
-                        if (!normalizeGeneratedFootprintBeforeSlice()) {
-                            sliceCompletionResult = SliceResult(
-                                "Slice failed\nPrintable volume exceeded.\nThe model fits, but generated skirt, brim, or purge geometry cannot fit inside the current printer bed.",
-                                sliced = false
+                    val sliceStartPlan =
+                        if (!canRequestModelLoaderSlice(modelLoaded, sliceInProgress, sendToPrinterInProgress)) {
+                            ModelLoaderSliceStartPlan.Ignore
+                        } else {
+                            val generatedFootprintFits = normalizeGeneratedFootprintBeforeSlice()
+                            planModelLoaderSliceStart(
+                                modelLoaded = modelLoaded,
+                                sliceInProgress = sliceInProgress,
+                                sendToPrinterInProgress = sendToPrinterInProgress,
+                                generatedFootprintFits = generatedFootprintFits,
+                                printableVolumePreflightFailure = if (generatedFootprintFits) printableVolumePreflightFailure() else null,
+                                nativeSliceTitle = activeConfiguration.nativeSliceTitle()
                             )
-                            return@WorkspaceScreen
                         }
-                        val preflightFailure = printableVolumePreflightFailure()
-                        if (preflightFailure != null) {
-                            sliceCompletionResult = SliceResult(preflightFailure, sliced = false)
-                            return@WorkspaceScreen
+                    when (sliceStartPlan) {
+                        ModelLoaderSliceStartPlan.Ignore -> Unit
+                        is ModelLoaderSliceStartPlan.Fail -> {
+                            sliceCompletionResult = sliceStartPlan.result
                         }
-                        sliceInProgress = true
-                        currentGcodeFilePath = null
-                        currentSliceSummary = null
-                        currentSliceTiming = null
-                        currentSlicePreviewKey = 0L
-                        previewStartedAtMs = null
-                        firstVisiblePreviewFrameMs = null
-                        workspaceMode = WorkspaceMode.Prepare
-                        workspaceStatus = "Slice in progress\nNative slice inputs: ${activeConfiguration.nativeSliceTitle()}"
-                        coroutineScope.launch {
-                            val sliceConfiguration = activeConfiguration
-                            val sliceCalibrationJob = currentCalibrationJob
-                            val slicePlateObjects = plateObjects.toList()
-                            val sliceProfileFilaments = sliceReadyProfileStore.filaments
-                            val slicePrinter = selectedPrinter
-                            val sliceModelFilePath = currentModelFilePath
-                            val slicePreparedMesh = currentPreparedMesh
-                            val sliceModelBounds = currentModelBounds
-                            val sliceModelTransform = currentModelTransform
-                            val sliceGcodeFileName = effectiveGcodeFileName()
-                            val activePlateSlots = plateFilamentSlots.toList().ifEmpty {
-                                listOf(selectedFilament.toPlateFilamentSlot(index = 1))
-                            }
-                            val preparedResult = withContext(Dispatchers.Default) {
-                                runModelLoaderSlice(
-                                    context = context.applicationContext,
-                                    configuration = sliceConfiguration,
-                                    calibrationJob = sliceCalibrationJob,
-                                    plateObjects = slicePlateObjects,
-                                    profileFilaments = sliceProfileFilaments,
-                                    activePlateSlots = activePlateSlots,
-                                    flushVolumes = plateFlushVolumes,
-                                    printer = slicePrinter,
-                                    modelFilePath = sliceModelFilePath,
-                                    preparedMesh = slicePreparedMesh,
-                                    modelBounds = sliceModelBounds,
-                                    modelTransform = sliceModelTransform,
-                                    gcodeFileName = sliceGcodeFileName,
-                                    onSliceRequested = onSliceRequested
-                                )
-                            }
-                            currentGcodeFilePath = preparedResult.gcodeFilePath
-                            currentSliceSummary = preparedResult.summary
-                            currentSliceTiming = preparedResult.timing
-                            currentGcodeFileName = currentCalibrationJob
-                                ?.let { job ->
-                                    preparedResult.gcodeFilePath?.let { detectCalibrationGcodeFileName(it) }
-                                        ?: job.gcodeFileName()
+                        is ModelLoaderSliceStartPlan.Start -> {
+                            sliceInProgress = true
+                            currentGcodeFilePath = null
+                            currentSliceSummary = null
+                            currentSliceTiming = null
+                            currentSlicePreviewKey = 0L
+                            previewStartedAtMs = null
+                            firstVisiblePreviewFrameMs = null
+                            workspaceMode = WorkspaceMode.Prepare
+                            workspaceStatus = sliceStartPlan.statusMessage
+                            coroutineScope.launch {
+                                val sliceConfiguration = activeConfiguration
+                                val sliceCalibrationJob = currentCalibrationJob
+                                val slicePlateObjects = plateObjects.toList()
+                                val sliceProfileFilaments = sliceReadyProfileStore.filaments
+                                val slicePrinter = selectedPrinter
+                                val sliceModelFilePath = currentModelFilePath
+                                val slicePreparedMesh = currentPreparedMesh
+                                val sliceModelBounds = currentModelBounds
+                                val sliceModelTransform = currentModelTransform
+                                val sliceGcodeFileName = effectiveGcodeFileName()
+                                val activePlateSlots = plateFilamentSlots.toList().ifEmpty {
+                                    listOf(selectedFilament.toPlateFilamentSlot(index = 1))
                                 }
-                                ?: preparedResult.fileName
-                                ?: effectiveGcodeFileName()
-                            currentSlicePreviewKey = if (preparedResult.sliced && preparedResult.gcodeFilePath != null) {
-                                currentSlicePreviewKey + 1L
-                            } else {
-                                0L
+                                val preparedResult = withContext(Dispatchers.Default) {
+                                    runModelLoaderSlice(
+                                        context = context.applicationContext,
+                                        configuration = sliceConfiguration,
+                                        calibrationJob = sliceCalibrationJob,
+                                        plateObjects = slicePlateObjects,
+                                        profileFilaments = sliceProfileFilaments,
+                                        activePlateSlots = activePlateSlots,
+                                        flushVolumes = plateFlushVolumes,
+                                        printer = slicePrinter,
+                                        modelFilePath = sliceModelFilePath,
+                                        preparedMesh = slicePreparedMesh,
+                                        modelBounds = sliceModelBounds,
+                                        modelTransform = sliceModelTransform,
+                                        gcodeFileName = sliceGcodeFileName,
+                                        onSliceRequested = onSliceRequested
+                                    )
+                                }
+                                val completionPlan = planModelLoaderSliceCompletion(
+                                    result = preparedResult,
+                                    calibrationJob = sliceCalibrationJob,
+                                    fallbackFileName = sliceGcodeFileName,
+                                    previousPreviewKey = currentSlicePreviewKey
+                                )
+                                currentGcodeFilePath = completionPlan.gcodeFilePath
+                                currentSliceSummary = completionPlan.summary
+                                currentSliceTiming = completionPlan.timing
+                                currentGcodeFileName = completionPlan.gcodeFileName
+                                currentSlicePreviewKey = completionPlan.previewKey
+                                workspaceStatus = completionPlan.statusMessage
+                                sliceInProgress = false
+                                sliceCompletionResult = completionPlan.completionResult
                             }
-                            workspaceStatus = preparedResult.message
-                            sliceInProgress = false
-                            sliceCompletionResult = preparedResult
                         }
                     }
                 },
                 onExport = {
-                    currentGcodeFilePath?.let { gcodeFilePath ->
-                        val exportFileName = effectiveGcodeFileNameForFile(gcodeFilePath)
-                        currentGcodeFileName = exportFileName
-                        pendingExportGcodeFilePath = gcodeFilePath
-                        exportLauncher.launch(exportFileName)
+                    planGcodeFileAction(
+                        gcodeFilePath = currentGcodeFilePath,
+                        calibrationJob = currentCalibrationJob,
+                        plateObjects = plateObjects.toList(),
+                        summary = currentSliceSummary,
+                        filamentMaterial = selectedFilament.materialType,
+                        fallbackName = currentGcodeFileName
+                    )?.let { action ->
+                        currentGcodeFileName = action.fileName
+                        pendingExportGcodeFilePath = action.gcodeFilePath
+                        exportLauncher.launch(action.fileName)
                     }
                 },
                 onSendToPrinter = { uploadAction, remoteFileName ->
-                    val gcodeFilePath = currentGcodeFilePath
-                    if (gcodeFilePath != null && !sendToPrinterInProgress) {
-                        val effectiveRemoteFileName = currentCalibrationJob
-                            ?.let { detectCalibrationGcodeFileName(gcodeFilePath) ?: it.gcodeFileName() }
-                            ?: remoteFileName
-                        val request = PrinterUploadRequest(
-                            gcodeFilePath = gcodeFilePath,
-                            remoteFileName = effectiveRemoteFileName,
-                            printerProfile = selectedPrinter,
-                            uploadAction = uploadAction
-                        )
+                    planPrinterUploadRequest(
+                        gcodeFilePath = currentGcodeFilePath,
+                        sendToPrinterInProgress = sendToPrinterInProgress,
+                        calibrationJob = currentCalibrationJob,
+                        remoteFileName = remoteFileName,
+                        printerProfile = selectedPrinter,
+                        uploadAction = uploadAction
+                    )?.let { request ->
                         lastPrinterUploadRequest = request
                         printerUploadDialogCanRetry = false
                         startPrinterUploadRequest(
@@ -1190,21 +1184,28 @@ internal fun ModelLoaderScreen(
                     }
                 },
                 onOpenPrinter = {
-                    val url = printerWebUiUrl(selectedPrinter)
-                    if (url == null) {
-                        workspaceStatus = "Printer unavailable\nEnter a printer host or printer web UI URL in the profile."
-                    } else {
-                        printerBrowserUrl = url
-                        printerBrowserReturnScreenName = AppScreen.Workspace.name
-                        currentScreen = AppScreen.PrinterBrowser
-                    }
+                    printerOpenPlan(selectedPrinter)
+                        .onSuccess { url ->
+                            printerBrowserUrl = url
+                            printerBrowserReturnScreenName = AppScreen.Workspace.name
+                            currentScreen = AppScreen.PrinterBrowser
+                        }
+                        .onFailure { error ->
+                            workspaceStatus = error.message.orEmpty()
+                        }
                 },
                 onPrinterStatus = onPrinterStatusRequested,
                 onShare = {
-                    currentGcodeFilePath?.let { gcodeFilePath ->
-                        val exportFileName = effectiveGcodeFileNameForFile(gcodeFilePath)
-                        currentGcodeFileName = exportFileName
-                        workspaceStatus = onShareRequested(gcodeFilePath, exportFileName)
+                    planGcodeFileAction(
+                        gcodeFilePath = currentGcodeFilePath,
+                        calibrationJob = currentCalibrationJob,
+                        plateObjects = plateObjects.toList(),
+                        summary = currentSliceSummary,
+                        filamentMaterial = selectedFilament.materialType,
+                        fallbackName = currentGcodeFileName
+                    )?.let { action ->
+                        currentGcodeFileName = action.fileName
+                        workspaceStatus = onShareRequested(action.gcodeFilePath, action.fileName)
                     }
                 },
                 modifier = Modifier.padding(innerPadding)
@@ -1220,8 +1221,7 @@ internal fun ModelLoaderScreen(
                 onBrowsePrinterConnectionGroups = onBrowsePrinterConnectionGroupsRequested,
                 onSimplyPrintLogin = onSimplyPrintLoginRequested,
                 onOpenPrinterUi = { printer ->
-                    val url = printerWebUiUrl(printer)
-                    if (url != null) {
+                    printerOpenPlan(printer).onSuccess { url ->
                         printerBrowserUrl = url
                         printerBrowserReturnScreenName = AppScreen.Profiles.name
                         currentScreen = AppScreen.PrinterBrowser

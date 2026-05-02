@@ -105,6 +105,38 @@ class ModelLoaderImportFlowTest {
     }
 
     @Test
+    fun importStartPlanClearsStalePreparationAndPreviewState() {
+        val start = planModelImportStart()
+
+        assertTrue(start.importInProgress)
+        assertTrue(start.currentCalibrationJobCleared)
+        assertEquals("Loading model", start.statusMessage)
+        assertTrue(start.clearGeneratedPreviewState)
+        assertTrue(start.clearPreparedMeshState)
+        assertTrue(start.clearFirstFrameTimings)
+        assertTrue(start.clearWorkspacePreparationTarget)
+    }
+
+    @Test
+    fun legacyStateForPlateObjectMirrorsSelectedObjectAndClearsWhenNull() {
+        val objectOnPlate = plateObject(id = 9L, filePath = "/tmp/selected.stl")
+        val selectedState = legacyStateForPlateObject(objectOnPlate)
+
+        assertTrue(selectedState.modelLoaded)
+        assertEquals("selected.stl", selectedState.modelLabel)
+        assertEquals("/tmp/selected.stl", selectedState.modelFilePath)
+        assertEquals(ImportedModelFormat.Stl.name, selectedState.modelFormatName)
+        assertEquals(objectOnPlate.bounds, selectedState.modelBounds)
+
+        val emptyState = legacyStateForPlateObject(null)
+        assertFalse(emptyState.modelLoaded)
+        assertEquals("No model imported", emptyState.modelLabel)
+        assertNull(emptyState.modelFilePath)
+        assertNull(emptyState.modelBounds)
+        assertNull(emptyState.modelFormatName)
+    }
+
+    @Test
     fun workspacePreparationRequestUsesStableTargetKeyAndSkipsInProgressTarget() {
         val selected = plateObject(id = 3L, filePath = "/tmp/current.stl")
         val request = resolveWorkspacePreparationRequest(

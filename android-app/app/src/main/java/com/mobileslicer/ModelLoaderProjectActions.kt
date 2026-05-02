@@ -26,6 +26,11 @@ internal data class ModelLoaderSavedProjectOpenResult(
     val printerBed: PrinterBedSpec
 )
 
+internal sealed class ModelLoaderSavePlatePromptPlan {
+    data class Prompt(val suggestedName: String) : ModelLoaderSavePlatePromptPlan()
+    data class Fail(val statusMessage: String) : ModelLoaderSavePlatePromptPlan()
+}
+
 internal fun normalizedSavedProjects(projects: List<SavedProject>): List<SavedProject> =
     projects.sortedByDescending { it.updatedAtEpochMs }.take(MaxSavedProjects)
 
@@ -57,6 +62,30 @@ internal fun suggestedSavedProjectName(
         "$firstLabel + ${plateObjects.size - 1}"
     }
 }
+
+internal fun planSavePlatePrompt(
+    plateObjects: List<PlateObject>,
+    currentModelLabel: String
+): ModelLoaderSavePlatePromptPlan =
+    if (plateObjects.isEmpty()) {
+        ModelLoaderSavePlatePromptPlan.Fail("No plate to save")
+    } else {
+        ModelLoaderSavePlatePromptPlan.Prompt(
+            suggestedName = suggestedSavedProjectName(
+                plateObjects = plateObjects,
+                currentModelLabel = currentModelLabel
+            )
+        )
+    }
+
+internal fun savedProjectLoadedStatus(project: SavedProject, nativeWarmLoadSucceeded: Boolean): String =
+    buildString {
+        append("Project loaded\n")
+        append(project.name)
+        if (!nativeWarmLoadSucceeded) {
+            append("\nNative model will reload on first slice.")
+        }
+    }
 
 internal fun buildSavedProject(
     currentSavedProjectId: String?,
