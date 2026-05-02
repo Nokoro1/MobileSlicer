@@ -34,13 +34,15 @@ internal data class PreviewInteractionAutomationRequest(
     val intent: Intent,
     val modelPath: String,
     val statusPath: String,
-    val churnRequests: Int
+    val churnRequests: Int,
+    val lifecycleCycles: Int
 ) {
     companion object {
         const val ACTION_PROFILE_PREVIEW = "com.mobileslicer.action.PROFILE_PREVIEW_INTERACTION"
         const val EXTRA_MODEL_PATH = "preview_profile_model_path"
         const val EXTRA_STATUS_PATH = "preview_profile_status_path"
         const val EXTRA_CHURN_REQUESTS = "preview_profile_churn_requests"
+        const val EXTRA_LIFECYCLE_CYCLES = "preview_profile_lifecycle_cycles"
 
         fun fromIntent(intent: Intent): PreviewInteractionAutomationRequest? {
             val paths = pathsFromValues(
@@ -52,12 +54,16 @@ internal data class PreviewInteractionAutomationRequest(
                 intent = intent,
                 modelPath = paths.first,
                 statusPath = paths.second,
-                churnRequests = normalizeChurnRequests(intent.getIntExtra(EXTRA_CHURN_REQUESTS, 0))
+                churnRequests = normalizeChurnRequests(intent.getIntExtra(EXTRA_CHURN_REQUESTS, 0)),
+                lifecycleCycles = normalizeLifecycleCycles(intent.getIntExtra(EXTRA_LIFECYCLE_CYCLES, 0))
             )
         }
 
         fun normalizeChurnRequests(requests: Int): Int =
             requests.coerceIn(0, MaxPreviewChurnRequests)
+
+        fun normalizeLifecycleCycles(cycles: Int): Int =
+            cycles.coerceIn(0, MaxPreviewLifecycleCycles)
 
         fun pathsFromValues(
             action: String?,
@@ -204,6 +210,7 @@ private suspend fun MainActivity.runPreviewInteractionAutomation(
 
     var secondReady = true
     var churnReady = true
+    var lifecycleReadyCount = 0
     val churnRequests = request.churnRequests
     val secondRange = ranges.getOrNull(1)
     if (churnRequests > 0 && secondRange != null) {
@@ -228,6 +235,17 @@ private suspend fun MainActivity.runPreviewInteractionAutomation(
         delay(ProfileInteractionSettleMs)
     }
 
+    repeat(request.lifecycleCycles) {
+        nextReady = CompletableDeferred()
+        view.onPause()
+        delay(ProfileLifecyclePauseMs)
+        view.onResume()
+        if (waitForPreviewReady(nextReady)) {
+            lifecycleReadyCount++
+        }
+        delay(ProfileInteractionSettleMs)
+    }
+
     val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
     val maxFirstFrameMs = metrics.maxOfOrNull { it.firstFrameMs } ?: 0L
     val maxNativeLoadMs = metrics.maxOfOrNull { it.nativeLoadMs } ?: 0L
@@ -245,6 +263,8 @@ private suspend fun MainActivity.runPreviewInteractionAutomation(
             "secondReady=${if (secondReady) 1 else 0} " +
             "churnRequests=$churnRequests " +
             "churnReady=${if (churnReady) 1 else 0} " +
+            "lifecycleCycles=${request.lifecycleCycles} " +
+            "lifecycleReady=$lifecycleReadyCount " +
             "metrics=${metrics.size} " +
             "maxNativeLoadMs=$maxNativeLoadMs " +
             "maxFirstFrameMs=$maxFirstFrameMs " +
@@ -253,7 +273,11 @@ private suspend fun MainActivity.runPreviewInteractionAutomation(
             "renderedFrames=$maxRenderedFrames " +
             "elapsedMs=$elapsedMs"
     )
-    return firstReady && secondReady && churnReady && metrics.isNotEmpty()
+    return firstReady &&
+        secondReady &&
+        churnReady &&
+        lifecycleReadyCount == request.lifecycleCycles &&
+        metrics.isNotEmpty()
 }
 
 private data class PreviewProfileSlicePreparation(
@@ -356,5 +380,7 @@ private fun PreviewRangeSuggestion.layerCount(): Int =
 
 private const val ProfileInteractionSettleMs = 450L
 private const val ProfileChurnRequestSpacingMs = 20L
+private const val ProfileLifecyclePauseMs = 200L
 private const val ProfilePreviewReadyTimeoutMs = 15_000L
 private const val MaxPreviewChurnRequests = 40
+private const val MaxPreviewLifecycleCycles = 12

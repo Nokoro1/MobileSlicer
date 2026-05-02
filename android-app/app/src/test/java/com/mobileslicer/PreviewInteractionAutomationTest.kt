@@ -36,4 +36,11 @@ class PreviewInteractionAutomationTest {
         assertEquals(12, PreviewInteractionAutomationRequest.normalizeChurnRequests(12))
         assertEquals(40, PreviewInteractionAutomationRequest.normalizeChurnRequests(10_000))
     }
+
+    @Test
+    fun clampsPreviewLifecycleCycleCount() {
+        assertEquals(0, PreviewInteractionAutomationRequest.normalizeLifecycleCycles(-1))
+        assertEquals(6, PreviewInteractionAutomationRequest.normalizeLifecycleCycles(6))
+        assertEquals(12, PreviewInteractionAutomationRequest.normalizeLifecycleCycles(10_000))
+    }
 }

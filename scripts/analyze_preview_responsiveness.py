@@ -108,6 +108,8 @@ def analyze(status: dict[str, Any], events: list[dict[str, int]], profile: str) 
     rendered_frames = maybe_int(status.get("renderedFrames")) or last_metric(events, "frames")
     metric_count = maybe_int(status.get("metrics")) or len(events)
     churn_requests = maybe_int(status.get("churnRequests")) or 0
+    lifecycle_cycles = maybe_int(status.get("lifecycleCycles")) or 0
+    lifecycle_ready = maybe_int(status.get("lifecycleReady")) or 0
 
     summary: dict[str, Any] = {
         "schema": 1,
@@ -122,6 +124,8 @@ def analyze(status: dict[str, Any], events: list[dict[str, int]], profile: str) 
         "second_ready": maybe_int(status.get("secondReady")),
         "churn_requests": churn_requests,
         "churn_ready": maybe_int(status.get("churnReady")),
+        "lifecycle_cycles": lifecycle_cycles,
+        "lifecycle_ready": lifecycle_ready,
         "max_native_load_ms": max_native_load_ms,
         "max_native_selected_parse_ms": max_native_selected_parse_ms,
         "max_native_libvgcode_load_ms": max_native_libvgcode_load_ms,
@@ -155,6 +159,8 @@ def analyze(status: dict[str, Any], events: list[dict[str, int]], profile: str) 
         failures.append("first preview request did not render")
     if churn_requests > 0 and maybe_int(status.get("churnReady")) != 1:
         failures.append("newest churn preview request did not render")
+    if lifecycle_cycles > 0 and lifecycle_ready != lifecycle_cycles:
+        failures.append(f"lifecycle preview cycles rendered {lifecycle_ready} of {lifecycle_cycles}")
     if metric_count is None or metric_count < min_metrics:
         failures.append(f"captured metrics {metric_count or 0} below minimum {min_metrics}")
     if rendered_frames is None or rendered_frames < min_rendered_frames:
@@ -244,6 +250,8 @@ def build_markdown(summary: dict[str, Any]) -> str:
         f"- Second ready: `{summary.get('second_ready')}`",
         f"- Churn requests: `{summary.get('churn_requests')}`",
         f"- Churn ready: `{summary.get('churn_ready')}`",
+        f"- Lifecycle cycles: `{summary.get('lifecycle_cycles')}`",
+        f"- Lifecycle ready: `{summary.get('lifecycle_ready')}`",
         "",
         "## Budgets",
         "",

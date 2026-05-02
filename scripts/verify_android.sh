@@ -102,6 +102,7 @@ Usage:
   scripts/verify_android.sh responsiveness-heavy [serial]
   scripts/verify_android.sh preview-interaction [serial]
   scripts/verify_android.sh preview-churn [serial]
+  scripts/verify_android.sh preview-lifecycle [serial]
   scripts/verify_android.sh perf [serial]
   scripts/verify_android.sh perf-heavy [serial]
   scripts/verify_android.sh benchy <local-stl-path> [serial]
@@ -162,6 +163,11 @@ Modes:
           before waiting for the newest request to render. Captures artifacts
           under artifacts/preview-churn. Requires
           MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  preview-lifecycle
+          Build, install, slice the medium fixture, open the real G-code preview
+          renderer, then cycle viewer pause/resume teardown while sampling
+          device memory. Captures artifacts under artifacts/preview-lifecycle.
+          Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   perf    Build/install perfDebug, run non-UI startup and slicing benchmarks,
           write reports under artifacts/performance, and fail on hard budgets
           or optional baseline regressions. Requires
@@ -794,11 +800,14 @@ run_responsiveness_heavy_profile() {
 run_preview_interaction_profile() {
   local serial="$1"
   local churn_requests="${2:-0}"
+  local lifecycle_cycles="${3:-0}"
   require_device_automation
   require_automation_fixture "$MEDIUM_SLICE_PERF_STL" "medium performance STL"
   local profile_name="preview-interaction"
   if [[ "$churn_requests" != "0" ]]; then
     profile_name="preview-churn"
+  elif [[ "$lifecycle_cycles" != "0" ]]; then
+    profile_name="preview-lifecycle"
   fi
   local artifact_root="$ROOT_DIR/artifacts/$profile_name"
   local stamp
@@ -821,17 +830,30 @@ run_preview_interaction_profile() {
     --es preview_profile_model_path '$app_model_path' \
     --es preview_profile_status_path '$status_path' \
     --ei preview_profile_churn_requests '$churn_requests' \
+    --ei preview_profile_lifecycle_cycles '$lifecycle_cycles' \
     --es automation_config_json \"\$CONFIG\""
 
   local status
-  status="$(wait_for_status "$serial" "$status_path" 120 1)"
+  if [[ "$lifecycle_cycles" != "0" ]]; then
+    PERF_CURRENT_MEMINFO_DIR="$artifact_dir"
+    PERF_CURRENT_CASE="preview-lifecycle"
+    local lifecycle_status_tmp="$artifact_dir/status.wait.txt"
+    wait_for_status_with_memory "$serial" "$status_path" 120 1 > "$lifecycle_status_tmp"
+    status="$(cat "$lifecycle_status_tmp")"
+    rm -f "$lifecycle_status_tmp"
+    PERF_CURRENT_MEMINFO_DIR=""
+    PERF_CURRENT_CASE=""
+  else
+    status="$(wait_for_status "$serial" "$status_path" 120 1)"
+  fi
   printf '%s\n' "$status" > "$artifact_dir/status.txt"
   [[ "$status" == success:* ]] || fail "$profile_name profile did not report success."
-  local metric_count first_ready rendered_frames churn_ready
+  local metric_count first_ready rendered_frames churn_ready lifecycle_ready
   metric_count="$(status_metric "$status" "metrics")"
   first_ready="$(status_metric "$status" "firstReady")"
   rendered_frames="$(status_metric "$status" "renderedFrames")"
   churn_ready="$(status_metric "$status" "churnReady")"
+  lifecycle_ready="$(status_metric "$status" "lifecycleReady")"
   [[ "${metric_count:-0}" =~ ^[0-9]+$ && "$metric_count" -gt 0 ]] ||
     fail "$profile_name profile did not capture preview runtime metrics."
   [[ "$first_ready" == "1" ]] ||
@@ -839,6 +861,10 @@ run_preview_interaction_profile() {
   if [[ "$churn_requests" != "0" ]]; then
     [[ "$churn_ready" == "1" ]] ||
       fail "$profile_name profile did not render the newest churn preview request."
+  fi
+  if [[ "$lifecycle_cycles" != "0" ]]; then
+    [[ "$lifecycle_ready" == "$lifecycle_cycles" ]] ||
+      fail "$profile_name profile rendered $lifecycle_ready of $lifecycle_cycles lifecycle cycles."
   fi
   [[ "${rendered_frames:-0}" =~ ^[0-9]+$ && "$rendered_frames" -gt 0 ]] ||
     fail "$profile_name profile did not render preview frames."
@@ -862,7 +888,9 @@ run_preview_interaction_profile() {
     --output-md "$responsiveness_md" || responsiveness_status=$?
 
   {
-    if [[ "$churn_requests" == "0" ]]; then
+    if [[ "$lifecycle_cycles" != "0" ]]; then
+      printf '# MobileSlicer Preview Lifecycle Profile\n\n'
+    elif [[ "$churn_requests" == "0" ]]; then
       printf '# MobileSlicer Preview Interaction Profile\n\n'
     else
       printf '# MobileSlicer Preview Churn Profile\n\n'
@@ -878,12 +906,23 @@ run_preview_interaction_profile() {
     printf -- '- second_ready: %s\n' "$(status_metric "$status" "secondReady")"
     printf -- '- churn_requests: %s\n' "$(status_metric "$status" "churnRequests")"
     printf -- '- churn_ready: %s\n' "$churn_ready"
+    printf -- '- lifecycle_cycles: %s\n' "$(status_metric "$status" "lifecycleCycles")"
+    printf -- '- lifecycle_ready: %s\n' "$lifecycle_ready"
     printf -- '- metrics: %s\n' "$metric_count"
     printf -- '- max_native_load: %s ms\n' "$(status_metric "$status" "maxNativeLoadMs")"
     printf -- '- max_first_frame: %s ms\n' "$(status_metric "$status" "maxFirstFrameMs")"
     printf -- '- max_frame: %s ms\n' "$(status_metric "$status" "maxFrameMs")"
     printf -- '- slow_frames: %s\n' "$(status_metric "$status" "slowFrames")"
     printf -- '- rendered_frames: %s\n\n' "$rendered_frames"
+    if [[ "$lifecycle_cycles" != "0" ]]; then
+      printf '## Peak Memory\n\n'
+      printf -- '- peak_pss_kb: %s\n' "$PERF_LAST_PEAK_PSS_KB"
+      printf -- '- peak_java_heap_kb: %s\n' "$PERF_LAST_PEAK_JAVA_HEAP_KB"
+      printf -- '- peak_native_heap_kb: %s\n' "$PERF_LAST_PEAK_NATIVE_HEAP_KB"
+      printf -- '- peak_graphics_kb: %s\n' "$PERF_LAST_PEAK_GRAPHICS_KB"
+      printf -- '- peak_private_other_kb: %s\n' "$PERF_LAST_PEAK_PRIVATE_OTHER_KB"
+      printf -- '- peak_system_kb: %s\n\n' "$PERF_LAST_PEAK_SYSTEM_KB"
+    fi
     printf '## Responsiveness Gate\n\n'
     if [[ -s "$responsiveness_md" ]]; then
       sed 's/^/> /' "$responsiveness_md"
@@ -1865,6 +1904,9 @@ case "$mode" in
     ;;
   preview-churn)
     run_preview_interaction_profile "$(device_serial "${2:-}")" "12"
+    ;;
+  preview-lifecycle)
+    run_preview_interaction_profile "$(device_serial "${2:-}")" "0" "${MOBILE_SLICER_PREVIEW_LIFECYCLE_CYCLES:-6}"
     ;;
   perf)
     run_performance_gate "$(device_serial "${2:-}")"
