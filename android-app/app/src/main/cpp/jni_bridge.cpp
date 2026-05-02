@@ -472,6 +472,7 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeSlice(JNIEnv*, jclas
         return JNI_FALSE;
     }
 
+    trim_native_heap();
     const int result = orca_slice(engine_from_handle(handle));
     trim_native_heap();
     return jni_bool_from_result(result);
@@ -545,7 +546,9 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeWriteGcodeToFile(JNI
         return JNI_FALSE;
     }
 
-    return jni_bool_from_result(orca_write_gcode_to_file(engine_from_handle(handle), raw_path.get()));
+    const int result = orca_write_gcode_to_file(engine_from_handle(handle), raw_path.get());
+    trim_native_heap();
+    return jni_bool_from_result(result);
 }
 
 extern "C" JNIEXPORT jstring JNICALL

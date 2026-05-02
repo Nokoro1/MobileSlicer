@@ -4105,6 +4105,9 @@ extern "C" int orca_slice(OrcaEngine* engine)
         }
         log_stage_elapsed("summarize_gcode");
 
+        std::vector<Slic3r::GCodeProcessorResult::MoveVertex>().swap(gcode_result.moves);
+        std::vector<size_t>().swap(gcode_result.lines_ends);
+
         return ORCA_SUCCESS;
     } catch (const Slic3r::SlicingErrors& errors) {
         for (const auto& error : errors.errors_) {
