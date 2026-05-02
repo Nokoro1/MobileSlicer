@@ -4,17 +4,26 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANDROID_DIR="$ROOT_DIR/android-app"
 APK_PATH="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
+PERF_APK_PATH="$ANDROID_DIR/app/build/outputs/apk/perfDebug/app-perfDebug.apk"
 PACKAGE_NAME="com.mobileslicer"
 MAIN_ACTIVITY="com.mobileslicer/.MainActivity"
 AUTOMATION_ACTION="com.mobileslicer.action.AUTOMATE_SLICE"
 DEFAULT_SERIAL="RFCYA01ANVE"
 DEFAULT_SLICE_SMOKE_STL="$ROOT_DIR/mobileslicer_test_cube.stl"
 SUPPORT_SLICE_SMOKE_STL="$ROOT_DIR/proof-fixtures/stage2_bridge_speed_fixture.stl"
+PERIMETER_ARRAY_SLICE_SMOKE_STL="$ROOT_DIR/proof-fixtures/stage2_small_perimeter_array_fixture.stl"
 BENCHY_AUTOMATION_CONFIG='{"bed_width_mm":270,"bed_depth_mm":270,"max_height_mm":256,"nozzle_diameter":0.4000000059604645,"filament_diameter":1.75,"filament_type":"PLA","filament_max_volumetric_speed":50,"nozzle_temperature_initial_layer":210,"nozzle_temperature":210,"bed_temperature_initial_layer":60,"bed_temperature":60,"cooling_baseline":100,"close_fan_the_first_x_layers":1,"layer_height":0.20000000298023224,"first_layer_height":0.20000000298023224,"first_layer_print_speed":10,"first_layer_infill_speed":22.5,"initial_layer_travel_speed_percent":50,"slow_down_layers":0,"outer_wall_speed":30,"inner_wall_speed":30,"top_surface_speed":30,"travel_speed":120,"outer_wall_acceleration":500,"inner_wall_acceleration":10000,"top_surface_acceleration":500,"sparse_infill_acceleration":500,"bridge_speed":10,"small_perimeter_speed":15,"small_perimeter_threshold":0,"sparse_infill_speed":300,"internal_solid_infill_speed":30,"gap_infill_speed":15,"top_shell_layers":4,"bottom_shell_layers":3,"seam_position":"aligned","precise_outer_wall":true,"only_one_wall_top":true,"top_surface_pattern":"monotonicline","sparse_infill_density":15,"sparse_infill_pattern":"grid","wall_loops":2,"print_speed_baseline":60,"skirts":2,"brim_width":0}'
 CURRENT_AUTOMATION_SERIAL=""
 CURRENT_AUTOMATION_LABEL=""
 CURRENT_AUTOMATION_OUTPUT_PATH=""
 CURRENT_AUTOMATION_STATUS_PATH=""
+AUTOMATION_LAST_OUTPUT_PATH=""
+AUTOMATION_LAST_STATUS=""
+AUTOMATION_LAST_BYTES=""
+AUTOMATION_LAST_ELAPSED_MS=""
+AUTOMATION_LAST_PLACEMENT_MS=""
+AUTOMATION_LAST_PEAK_PSS_KB=""
+PERF_LAST_PEAK_PSS_KB=0
 
 usage() {
   cat <<'USAGE'
@@ -32,6 +41,7 @@ Usage:
   scripts/verify_android.sh device-automation [serial]
   scripts/verify_android.sh slice-regression [serial]
   scripts/verify_android.sh profile-ui [serial]
+  scripts/verify_android.sh perf [serial]
   scripts/verify_android.sh benchy <local-stl-path> [serial]
   scripts/verify_android.sh all [serial]
 
@@ -60,6 +70,10 @@ Modes:
   profile-ui
           Build, install, cold-launch, and assert the process stays alive with
           an empty crash buffer. Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  perf    Build/install perfDebug, run non-UI startup and slicing benchmarks,
+          write reports under artifacts/performance, and fail on hard budgets
+          or optional baseline regressions. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   benchy  Build, install, stage an STL app-private, and run automation slicing.
           Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   all     Run local checks and install the debug APK.
@@ -177,6 +191,13 @@ build_apk() {
   log "APK ready: $APK_PATH"
 }
 
+build_perf_apk() {
+  log "Building perf debug APK"
+  gradle assemblePerfDebug
+  [[ -f "$PERF_APK_PATH" ]] || fail "Perf debug APK missing after build: $PERF_APK_PATH"
+  log "Perf debug APK ready: $PERF_APK_PATH"
+}
+
 build_release_apk() {
   local signing_configured=0
   local version_name="${MOBILE_SLICER_VERSION_NAME:-0.1.0}"
@@ -242,6 +263,14 @@ install_apk() {
   adb_device "$serial" install -r "$APK_PATH"
 }
 
+install_perf_apk() {
+  local serial="$1"
+  build_perf_apk
+  require_device "$serial"
+  log "Installing perf debug APK on $serial"
+  adb_device "$serial" install -r "$PERF_APK_PATH"
+}
+
 launch_app() {
   local serial="$1"
   log "Cold-launching $PACKAGE_NAME on $serial"
@@ -250,6 +279,20 @@ launch_app() {
   adb_device "$serial" shell am start -W -n "$MAIN_ACTIVITY"
   log "Recent app logs"
   adb_device "$serial" logcat -d -v brief | grep -E 'MobileSlicer|AndroidRuntime|FATAL EXCEPTION' || true
+}
+
+launch_app_for_perf() {
+  local serial="$1"
+  log "Cold-launching $PACKAGE_NAME on $serial for performance measurement"
+  adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  adb_device "$serial" logcat -c
+  local output
+  output="$(adb_device "$serial" shell am start -W -n "$MAIN_ACTIVITY")"
+  printf '%s\n' "$output"
+  local startup_ms
+  startup_ms="$(printf '%s\n' "$output" | awk -F: '/TotalTime/ {gsub(/ /, "", $2); print $2; exit}')"
+  [[ "$startup_ms" =~ ^[0-9]+$ ]] || fail "Unable to parse startup TotalTime from am start output."
+  printf '%s\n' "$startup_ms"
 }
 
 assert_no_crash_after_launch() {
@@ -417,12 +460,60 @@ wait_for_status() {
   fail "Timed out waiting for automation status: $status_path"
 }
 
+device_pss_kb() {
+  local serial="$1"
+  adb_device "$serial" shell dumpsys meminfo "$PACKAGE_NAME" 2>/dev/null |
+    awk '/^[[:space:]]*TOTAL[[:space:]]/ {print $2; exit}'
+}
+
+wait_for_status_with_memory() {
+  local serial="$1"
+  local status_path="$2"
+  local attempts="${3:-120}"
+  local delay_seconds="${4:-1}"
+  PERF_LAST_PEAK_PSS_KB=0
+
+  for _ in $(seq 1 "$attempts"); do
+    local pss_kb
+    pss_kb="$(device_pss_kb "$serial" || true)"
+    if [[ "$pss_kb" =~ ^[0-9]+$ && "$pss_kb" -gt "$PERF_LAST_PEAK_PSS_KB" ]]; then
+      PERF_LAST_PEAK_PSS_KB="$pss_kb"
+    fi
+    if adb_device "$serial" shell run-as "$PACKAGE_NAME" test -f "$status_path"; then
+      local final_pss_kb
+      final_pss_kb="$(device_pss_kb "$serial" || true)"
+      if [[ "$final_pss_kb" =~ ^[0-9]+$ && "$final_pss_kb" -gt "$PERF_LAST_PEAK_PSS_KB" ]]; then
+        PERF_LAST_PEAK_PSS_KB="$final_pss_kb"
+      fi
+      adb_device "$serial" shell run-as "$PACKAGE_NAME" cat "$status_path"
+      return 0
+    fi
+    sleep "$delay_seconds"
+  done
+  fail "Timed out waiting for automation status: $status_path"
+}
+
+status_metric() {
+  local status="$1"
+  local metric="$2"
+  STATUS_PAYLOAD="$status" python3 - "$metric" <<'PY'
+import os
+import re
+import sys
+
+metric = re.escape(sys.argv[1])
+match = re.search(rf"(?:^|[ ,]){metric}=([0-9]+)", os.environ["STATUS_PAYLOAD"])
+print(match.group(1) if match else "")
+PY
+}
+
 run_automation_slice() {
   local local_stl="$1"
   local serial="$2"
   local label="$3"
   local should_install="${4:-1}"
   local config_json="${5:-$BENCHY_AUTOMATION_CONFIG}"
+  local collect_perf="${6:-0}"
   if [[ "$should_install" == "1" ]]; then
     install_apk "$serial"
   fi
@@ -449,7 +540,16 @@ run_automation_slice() {
 
   log "Automation status"
   local status
-  status="$(wait_for_status "$serial" "$status_path")"
+  if [[ "$collect_perf" == "1" ]]; then
+    local status_tmp
+    status_tmp="$(mktemp)"
+    wait_for_status_with_memory "$serial" "$status_path" > "$status_tmp"
+    status="$(cat "$status_tmp")"
+    rm -f "$status_tmp"
+  else
+    status="$(wait_for_status "$serial" "$status_path")"
+    PERF_LAST_PEAK_PSS_KB=0
+  fi
   printf '%s\n' "$status"
   [[ "$status" == success:* ]] || fail "Automation slice did not report success."
   log "Output file"
@@ -462,6 +562,9 @@ run_automation_slice() {
   AUTOMATION_LAST_OUTPUT_PATH="$output_path"
   AUTOMATION_LAST_STATUS="$status"
   AUTOMATION_LAST_BYTES="$output_bytes"
+  AUTOMATION_LAST_ELAPSED_MS="$(status_metric "$status" "elapsedMs")"
+  AUTOMATION_LAST_PLACEMENT_MS="$(status_metric "$status" "placementMs")"
+  AUTOMATION_LAST_PEAK_PSS_KB="$PERF_LAST_PEAK_PSS_KB"
   clear_current_automation_context
 }
 
@@ -484,6 +587,115 @@ run_benchy() {
   local serial="$2"
   require_device_automation
   run_automation_slice "$local_stl" "$serial" "benchy"
+}
+
+append_perf_record() {
+  local records_path="$1"
+  local name="$2"
+  local type="$3"
+  local startup_ms="$4"
+  local elapsed_ms="$5"
+  local placement_ms="$6"
+  local peak_pss_kb="$7"
+  local bytes="$8"
+  local device_output_path="$9"
+  python3 - "$records_path" "$name" "$type" "$startup_ms" "$elapsed_ms" "$placement_ms" "$peak_pss_kb" "$bytes" "$device_output_path" <<'PY'
+import json
+import sys
+
+path, name, record_type, startup_ms, elapsed_ms, placement_ms, peak_pss_kb, bytes_value, device_output_path = sys.argv[1:]
+
+def maybe_int(value):
+    return int(value) if value.isdigit() else None
+
+record = {
+    "name": name,
+    "type": record_type,
+}
+for key, value in [
+    ("startup_ms", startup_ms),
+    ("elapsed_ms", elapsed_ms),
+    ("placement_ms", placement_ms),
+    ("peak_pss_kb", peak_pss_kb),
+    ("bytes", bytes_value),
+]:
+    parsed = maybe_int(value)
+    if parsed is not None:
+        record[key] = parsed
+if device_output_path:
+    record["device_output_path"] = device_output_path
+with open(path, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(record, sort_keys=True) + "\n")
+PY
+}
+
+run_perf_slice_case() {
+  local records_path="$1"
+  local serial="$2"
+  local name="$3"
+  local fixture="$4"
+  local config_json="$5"
+  run_automation_slice "$fixture" "$serial" "perf-$name" "0" "$config_json" "1"
+  append_perf_record \
+    "$records_path" \
+    "$name" \
+    "slice" \
+    "" \
+    "$AUTOMATION_LAST_ELAPSED_MS" \
+    "$AUTOMATION_LAST_PLACEMENT_MS" \
+    "$AUTOMATION_LAST_PEAK_PSS_KB" \
+    "$AUTOMATION_LAST_BYTES" \
+    "$AUTOMATION_LAST_OUTPUT_PATH"
+}
+
+run_performance_gate() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "small cube performance STL"
+  require_automation_fixture "$SUPPORT_SLICE_SMOKE_STL" "bridge support performance STL"
+  require_automation_fixture "$PERIMETER_ARRAY_SLICE_SMOKE_STL" "perimeter array performance STL"
+  install_perf_apk "$serial"
+
+  local artifact_root="$ROOT_DIR/artifacts/performance"
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  local artifact_dir="$artifact_root/$stamp"
+  mkdir -p "$artifact_dir"
+  local records_path="$artifact_dir/records.jsonl"
+  local report_json="$artifact_dir/report.json"
+  local report_md="$artifact_dir/report.md"
+
+  log "Running non-UI performance gate on $serial"
+  local startup_output startup_ms startup_pss_kb
+  startup_output="$(launch_app_for_perf "$serial")"
+  printf '%s\n' "$startup_output"
+  startup_ms="$(printf '%s\n' "$startup_output" | tail -n 1)"
+  sleep 2
+  startup_pss_kb="$(device_pss_kb "$serial" || true)"
+  append_perf_record "$records_path" "cold-start" "startup" "$startup_ms" "" "" "${startup_pss_kb:-0}" "" ""
+  assert_no_crash_after_launch "$serial"
+
+  local default_config support_config perimeter_config
+  default_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
+  support_config="$(automation_config_with_overrides brim_width=0 enable_support=true support_type=normal\(auto\) support_style=default support_threshold_angle=10 support_on_build_plate_only=false)"
+  perimeter_config="$(automation_config_with_overrides brim_width=0 wall_loops=3 sparse_infill_density=20 enable_support=false small_perimeter_speed=20)"
+
+  run_perf_slice_case "$records_path" "$serial" "small-cube" "$DEFAULT_SLICE_SMOKE_STL" "$default_config"
+  run_perf_slice_case "$records_path" "$serial" "bridge-support" "$SUPPORT_SLICE_SMOKE_STL" "$support_config"
+  run_perf_slice_case "$records_path" "$serial" "perimeter-array" "$PERIMETER_ARRAY_SLICE_SMOKE_STL" "$perimeter_config"
+
+  local baseline_args=()
+  if [[ -n "${MOBILE_SLICER_PERF_BASELINE:-}" ]]; then
+    baseline_args=(--baseline "$MOBILE_SLICER_PERF_BASELINE")
+  fi
+  "$ROOT_DIR/scripts/analyze_mobile_performance.py" \
+    --input "$records_path" \
+    --output-json "$report_json" \
+    --output-md "$report_md" \
+    "${baseline_args[@]}"
+  ln -sfn "$artifact_dir" "$artifact_root/latest"
+  log "Performance artifacts: $artifact_dir"
+  assert_no_crash_after_launch "$serial"
 }
 
 pull_app_private_file() {
@@ -691,6 +903,9 @@ case "$mode" in
     ;;
   profile-ui)
     run_profile_ui_smoke "$(device_serial "${2:-}")"
+    ;;
+  perf)
+    run_performance_gate "$(device_serial "${2:-}")"
     ;;
   benchy)
     [[ $# -ge 2 ]] || {

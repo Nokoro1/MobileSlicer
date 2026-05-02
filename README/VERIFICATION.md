@@ -29,6 +29,7 @@ scripts/verify_android.sh device
 scripts/verify_android.sh device RFCYA01ANVE
 MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh device-automation RFCYA01ANVE
 MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh slice-regression RFCYA01ANVE
+MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh perf RFCYA01ANVE
 ```
 
 `device` builds and installs the debug APK only. `device-automation` builds, installs,
@@ -42,6 +43,42 @@ signals changed.
 If device automation fails after a slice starts, the script captures context,
 logcat, crash logcat, status text, and G-code head/tail snippets under
 `artifacts/device-automation/`.
+
+## Performance Gate
+
+```bash
+MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh perf RFCYA01ANVE
+```
+
+`perf` is developer/release tooling only; it does not add or expose benchmark UI
+inside the app. It builds and installs the `perfDebug` APK, measures cold startup,
+then runs app-private automation slices for the small cube, bridge/support, and
+small-perimeter-array fixtures. Reports are written under
+`artifacts/performance/<timestamp>/` with `report.json`, `report.md`, and a
+`latest` symlink.
+
+Default hard budgets are intentionally broad enough for normal phone variance:
+
+- cold startup: `MOBILE_SLICER_PERF_MAX_STARTUP_MS`, default `4000`
+- peak process PSS: `MOBILE_SLICER_PERF_MAX_PEAK_PSS_KB`, default `900000`
+- small cube slice: `MOBILE_SLICER_PERF_MAX_SMALL_CUBE_SLICE_MS`, default `120000`
+- bridge/support slice: `MOBILE_SLICER_PERF_MAX_BRIDGE_SUPPORT_SLICE_MS`, default `180000`
+- perimeter-array slice: `MOBILE_SLICER_PERF_MAX_PERIMETER_ARRAY_SLICE_MS`, default `180000`
+
+To compare against a previous run, pass the prior `report.json`:
+
+```bash
+MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 \
+MOBILE_SLICER_PERF_BASELINE=artifacts/performance/latest/report.json \
+scripts/verify_android.sh perf RFCYA01ANVE
+```
+
+Baseline comparison defaults allow 25% startup, slice-time, and memory regression,
+and 35% emitted-output-size regression. Override with
+`MOBILE_SLICER_PERF_STARTUP_REGRESSION_PERCENT`,
+`MOBILE_SLICER_PERF_SLICE_REGRESSION_PERCENT`,
+`MOBILE_SLICER_PERF_MEMORY_REGRESSION_PERCENT`, and
+`MOBILE_SLICER_PERF_OUTPUT_REGRESSION_PERCENT`.
 
 ## Benchy Automation
 
@@ -74,6 +111,8 @@ This runs JVM tests, builds the APK, installs it on the device, and launches the
   against the active Android Orca subset stub files and the Android Orca CMake
   target references.
 - `script-tests` runs shell syntax checks for verification/build scripts.
+- `perf` runs non-UI physical-device startup/slicing performance checks and writes
+  ignored reports under `artifacts/performance/`.
 - `apk` maps to `cd android-app && ./gradlew assembleDebug`.
 - `local` runs `script-tests`, `stubs`, `asset-tests`, `lint`, `unit`, and `apk`
   in that order.
