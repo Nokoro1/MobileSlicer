@@ -199,6 +199,22 @@ internal data class PrinterUploadRequest(
     val uploadAction: PrinterUploadAction
 )
 
+internal fun printerUploadStartStatus(request: PrinterUploadRequest): String =
+    when (request.uploadAction) {
+        PrinterUploadAction.UploadAndStart -> "Uploading and starting print\n${request.printerProfile.name}"
+        PrinterUploadAction.Queue -> "Uploading to queue\n${request.printerProfile.name}"
+        PrinterUploadAction.UploadOnly -> "Uploading to printer\n${request.printerProfile.name}"
+    }
+
+internal fun printerUploadProgressStatus(remoteFileName: String, progress: Int): String =
+    "Uploading $remoteFileName\n$progress%"
+
+internal fun canRetryPrinterUploadDialog(
+    dialogCanRetry: Boolean,
+    lastRequest: PrinterUploadRequest?
+): Boolean =
+    dialogCanRetry && lastRequest != null
+
 internal fun startPrinterUploadRequest(
     request: PrinterUploadRequest,
     coroutineScope: CoroutineScope,
@@ -214,13 +230,7 @@ internal fun startPrinterUploadRequest(
 ) {
     setSendInProgress(true)
     setProgress(0)
-    setWorkspaceStatus(
-        when (request.uploadAction) {
-            PrinterUploadAction.UploadAndStart -> "Uploading and starting print\n${request.printerProfile.name}"
-            PrinterUploadAction.Queue -> "Uploading to queue\n${request.printerProfile.name}"
-            PrinterUploadAction.UploadOnly -> "Uploading to printer\n${request.printerProfile.name}"
-        }
-    )
+    setWorkspaceStatus(printerUploadStartStatus(request))
     val uploadJob = coroutineScope.launch {
         try {
             Toast.makeText(context, "Upload started", Toast.LENGTH_SHORT).show()
@@ -231,7 +241,7 @@ internal fun startPrinterUploadRequest(
                 request.uploadAction
             ) { progress ->
                 setProgress(progress)
-                setWorkspaceStatus("Uploading ${request.remoteFileName}\n$progress%")
+                setWorkspaceStatus(printerUploadProgressStatus(request.remoteFileName, progress))
             }
             val resultMessage = result.userMessage()
             if (!isSendInProgress()) {
@@ -249,7 +259,7 @@ internal fun startPrinterUploadRequest(
             ).show()
             result.openUrl?.let(setBrowser)
         } catch (_: CancellationException) {
-            setWorkspaceStatus("Upload cancelled")
+            setWorkspaceStatus(uploadCancelledStatus())
             setProgress(null)
             setJob(null)
         } finally {

@@ -182,6 +182,36 @@ internal fun ModelLoaderScreen(
         workspaceMode = plan.workspaceMode
     }
 
+    fun openPrinterBrowserFromWorkspace(url: String) {
+        printerBrowserUrl = url
+        printerBrowserReturnScreenName = AppScreen.Workspace.name
+        currentScreen = AppScreen.PrinterBrowser
+    }
+
+    fun clearPrinterUploadDialog() {
+        printerUploadDialogMessage = null
+        printerUploadDialogCanRetry = false
+    }
+
+    fun startModelLoaderPrinterUpload(request: PrinterUploadRequest) {
+        startPrinterUploadRequest(
+            request = request,
+            coroutineScope = coroutineScope,
+            context = context,
+            onSendToPrinterRequested = onSendToPrinterRequested,
+            setSendInProgress = { sendToPrinterInProgress = it },
+            isSendInProgress = { sendToPrinterInProgress },
+            setProgress = { printerUploadProgressPercent = it },
+            setJob = { printerUploadJob = it },
+            setWorkspaceStatus = { workspaceStatus = it },
+            setDialogMessage = { text, canRetry ->
+                printerUploadDialogMessage = text
+                printerUploadDialogCanRetry = canRetry
+            },
+            setBrowser = ::openPrinterBrowserFromWorkspace
+        )
+    }
+
     missingProfileDialogMessage?.let { message ->
         ModelLoaderMissingProfileDialog(
             message = message,
@@ -192,35 +222,12 @@ internal fun ModelLoaderScreen(
     printerUploadDialogMessage?.let { message ->
         ModelLoaderPrinterUploadDialog(
             message = message,
-            canRetry = printerUploadDialogCanRetry && lastPrinterUploadRequest != null,
-            onDismiss = {
-                printerUploadDialogMessage = null
-                printerUploadDialogCanRetry = false
-            },
+            canRetry = canRetryPrinterUploadDialog(printerUploadDialogCanRetry, lastPrinterUploadRequest),
+            onDismiss = ::clearPrinterUploadDialog,
             onRetry = {
                 val request = lastPrinterUploadRequest ?: return@ModelLoaderPrinterUploadDialog
-                printerUploadDialogMessage = null
-                printerUploadDialogCanRetry = false
-                startPrinterUploadRequest(
-                    request = request,
-                    coroutineScope = coroutineScope,
-                    context = context,
-                    onSendToPrinterRequested = onSendToPrinterRequested,
-                    setSendInProgress = { sendToPrinterInProgress = it },
-                    isSendInProgress = { sendToPrinterInProgress },
-                    setProgress = { printerUploadProgressPercent = it },
-                    setJob = { printerUploadJob = it },
-                    setWorkspaceStatus = { workspaceStatus = it },
-                    setDialogMessage = { text, canRetry ->
-                        printerUploadDialogMessage = text
-                        printerUploadDialogCanRetry = canRetry
-                    },
-                    setBrowser = { url ->
-                        printerBrowserUrl = url
-                        printerBrowserReturnScreenName = AppScreen.Workspace.name
-                        currentScreen = AppScreen.PrinterBrowser
-                    }
-                )
+                clearPrinterUploadDialog()
+                startModelLoaderPrinterUpload(request)
             }
         )
     }
@@ -1142,26 +1149,7 @@ internal fun ModelLoaderScreen(
                     )?.let { request ->
                         lastPrinterUploadRequest = request
                         printerUploadDialogCanRetry = false
-                        startPrinterUploadRequest(
-                            request = request,
-                            coroutineScope = coroutineScope,
-                            context = context,
-                            onSendToPrinterRequested = onSendToPrinterRequested,
-                            setSendInProgress = { sendToPrinterInProgress = it },
-                            isSendInProgress = { sendToPrinterInProgress },
-                            setProgress = { printerUploadProgressPercent = it },
-                            setJob = { printerUploadJob = it },
-                            setWorkspaceStatus = { workspaceStatus = it },
-                            setDialogMessage = { text, canRetry ->
-                                printerUploadDialogMessage = text
-                                printerUploadDialogCanRetry = canRetry
-                            },
-                            setBrowser = { url ->
-                                printerBrowserUrl = url
-                                printerBrowserReturnScreenName = AppScreen.Workspace.name
-                                currentScreen = AppScreen.PrinterBrowser
-                            }
-                        )
+                        startModelLoaderPrinterUpload(request)
                     }
                 },
                 onOpenPrinter = {

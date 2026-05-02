@@ -11,6 +11,7 @@ import com.mobileslicer.workspace.ImportedModelFormat
 import com.mobileslicer.workspace.PlateObject
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -104,6 +105,15 @@ class ModelLoaderGcodeActionsTest {
 
         assertNotNull(request)
         assertEquals("remote.gcode", request?.remoteFileName)
+        checkNotNull(request)
+        assertEquals(
+            "Uploading to printer\n${printer.name}",
+            printerUploadStartStatus(request)
+        )
+        assertEquals("Uploading remote.gcode\n42%", printerUploadProgressStatus(request.remoteFileName, 42))
+        assertTrue(canRetryPrinterUploadDialog(dialogCanRetry = true, lastRequest = request))
+        assertFalse(canRetryPrinterUploadDialog(dialogCanRetry = false, lastRequest = request))
+        assertFalse(canRetryPrinterUploadDialog(dialogCanRetry = true, lastRequest = null))
         assertNull(
             planPrinterUploadRequest(
                 gcodeFilePath = "/tmp/output.gcode",
@@ -135,6 +145,34 @@ class ModelLoaderGcodeActionsTest {
         } finally {
             file.delete()
         }
+    }
+
+    @Test
+    fun uploadStartStatusMatchesUploadAction() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile()
+
+        assertEquals(
+            "Uploading and starting print\n${printer.name}",
+            printerUploadStartStatus(
+                PrinterUploadRequest(
+                    gcodeFilePath = "/tmp/output.gcode",
+                    remoteFileName = "remote.gcode",
+                    printerProfile = printer,
+                    uploadAction = PrinterUploadAction.UploadAndStart
+                )
+            )
+        )
+        assertEquals(
+            "Uploading to queue\n${printer.name}",
+            printerUploadStartStatus(
+                PrinterUploadRequest(
+                    gcodeFilePath = "/tmp/output.gcode",
+                    remoteFileName = "remote.gcode",
+                    printerProfile = printer,
+                    uploadAction = PrinterUploadAction.Queue
+                )
+            )
+        )
     }
 
     @Test
