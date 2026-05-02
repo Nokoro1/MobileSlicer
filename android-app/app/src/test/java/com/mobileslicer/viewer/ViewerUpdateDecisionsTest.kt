@@ -191,6 +191,42 @@ class ViewerUpdateDecisionsTest {
         assertFalse(inactiveDecision.shouldReloadPreview)
     }
 
+    @Test
+    fun gcodePreviewStateIsCurrentOnlyWhenAllPreviewVersionsMatch() {
+        val expected = GcodePreviewStateVersions(
+            previewVersion = 10L,
+            layerRangeVersion = 20L,
+            pathVisibilityVersion = 30L,
+            displayModeVersion = 40L
+        )
+
+        assertTrue(ViewerUpdateDecisions.isGcodePreviewStateCurrent(expected, expected))
+        assertFalse(
+            ViewerUpdateDecisions.isGcodePreviewStateCurrent(
+                expected,
+                expected.copy(previewVersion = 11L)
+            )
+        )
+        assertFalse(
+            ViewerUpdateDecisions.isGcodePreviewStateCurrent(
+                expected,
+                expected.copy(layerRangeVersion = 21L)
+            )
+        )
+        assertFalse(
+            ViewerUpdateDecisions.isGcodePreviewStateCurrent(
+                expected,
+                expected.copy(pathVisibilityVersion = 31L)
+            )
+        )
+        assertFalse(
+            ViewerUpdateDecisions.isGcodePreviewStateCurrent(
+                expected,
+                expected.copy(displayModeVersion = 41L)
+            )
+        )
+    }
+
     private fun testPlateObject(
         id: Long,
         mesh: StlMesh,

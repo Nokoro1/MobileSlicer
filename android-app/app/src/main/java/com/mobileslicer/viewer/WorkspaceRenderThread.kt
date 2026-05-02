@@ -487,8 +487,9 @@ internal class WorkspaceRenderThread(
 
             try {
                 ensureGlReady(targetSurface, targetWidth, targetHeight)
-                syncSceneState()
-                renderFrame(targetWidth, targetHeight)
+                if (syncSceneState()) {
+                    renderFrame(targetWidth, targetHeight)
+                }
             } catch (throwable: Throwable) {
                 fail(
                     title = "Workspace renderer failed",
@@ -504,7 +505,7 @@ internal class WorkspaceRenderThread(
         egl.ensureReady(surface, width, height, onSurfaceCreated = ::buildProgramsIfNeeded)
     }
 
-    private fun syncSceneState() {
+    private fun syncSceneState(): Boolean {
         val targetMeshVersion: Long
         val targetPlateObjectsVersion: Long
         val targetPlateObjectTransformVersion: Long
@@ -580,6 +581,15 @@ internal class WorkspaceRenderThread(
             val previewEngineHandle = activeGcodePreviewEngineHandle
             val previewKey = activeGcodePreviewKey
             if (previewEngineHandle != 0L && previewKey > 0L) {
+                if (!isPreviewStateCurrent(
+                        previewVersion = targetGcodePreviewVersion,
+                        layerRangeVersion = targetGcodeLayerRangeVersion,
+                        pathVisibilityVersion = targetGcodePathVisibilityVersion,
+                        displayModeVersion = targetGcodeDisplayModeVersion
+                    )
+                ) {
+                    return false
+                }
                 appliedGcodeLayerRangeVersion = -1L
                 val requestedLayerMin = activeGcodeLayerMin
                 val requestedLayerMax = activeGcodeLayerMax
@@ -601,6 +611,15 @@ internal class WorkspaceRenderThread(
                         detail = loadResult.statusMessage
                     )
                     throw IllegalStateException(loadResult.statusMessage)
+                }
+                if (!isPreviewStateCurrent(
+                        previewVersion = targetGcodePreviewVersion,
+                        layerRangeVersion = targetGcodeLayerRangeVersion,
+                        pathVisibilityVersion = targetGcodePathVisibilityVersion,
+                        displayModeVersion = targetGcodeDisplayModeVersion
+                    )
+                ) {
+                    return false
                 }
                 appliedGcodePathVisibilityVersion = -1L
                 appliedGcodeDisplayModeVersion = -1L
@@ -647,7 +666,36 @@ internal class WorkspaceRenderThread(
             }
             appliedCameraStateVersion = targetCameraStateVersion
         }
+        return true
     }
+
+    private fun isPreviewStateCurrent(
+        previewVersion: Long,
+        layerRangeVersion: Long,
+        pathVisibilityVersion: Long,
+        displayModeVersion: Long
+    ): Boolean =
+        synchronized(stateLock) {
+            val isCurrent = ViewerUpdateDecisions.isGcodePreviewStateCurrent(
+                expected = GcodePreviewStateVersions(
+                    previewVersion = previewVersion,
+                    layerRangeVersion = layerRangeVersion,
+                    pathVisibilityVersion = pathVisibilityVersion,
+                    displayModeVersion = displayModeVersion
+                ),
+                current = GcodePreviewStateVersions(
+                    previewVersion = gcodePreviewVersion,
+                    layerRangeVersion = gcodeLayerRangeVersion,
+                    pathVisibilityVersion = gcodePathVisibilityVersion,
+                    displayModeVersion = gcodeDisplayModeVersion
+                )
+            )
+            if (!isCurrent) {
+                dirty = true
+                stateLock.notifyAll()
+            }
+            isCurrent
+        }
 
     private fun renderFrame(width: Int, height: Int) {
         val frameStartedAtMs = SystemClock.elapsedRealtime()

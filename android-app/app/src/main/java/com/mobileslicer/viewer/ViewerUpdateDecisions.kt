@@ -17,6 +17,13 @@ internal data class GcodeLayerRangeUpdateDecision(
     val shouldReloadPreview: Boolean
 )
 
+internal data class GcodePreviewStateVersions(
+    val previewVersion: Long,
+    val layerRangeVersion: Long,
+    val pathVisibilityVersion: Long,
+    val displayModeVersion: Long
+)
+
 internal object ViewerUpdateDecisions {
     fun plateObjectsSignature(objects: List<ViewerPlateObject>): Long =
         objects.fold(FnvOffsetBasis) { acc, objectOnPlate ->
@@ -65,6 +72,11 @@ internal object ViewerUpdateDecisions {
             shouldReloadPreview = reloadChanged && activeEngineHandle != 0L && activePreviewKey > 0L
         )
     }
+
+    fun isGcodePreviewStateCurrent(
+        expected: GcodePreviewStateVersions,
+        current: GcodePreviewStateVersions
+    ): Boolean = expected == current
 
     private fun samePlateObjectGeometry(
         previous: List<ViewerPlateObject>,
