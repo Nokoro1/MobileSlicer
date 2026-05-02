@@ -46,6 +46,18 @@ class AutomationConfigResolverTest {
     }
 
     @Test
+    fun automationPrinterFilamentDiameterUpdatesActiveFilamentConfig() {
+        val resolved = resolver().resolve(
+            mapInput(
+                "automation_filament_diameter_mm" to 2.85f
+            )
+        )
+        val nativeConfig = JSONObject(resolved)
+
+        assertEquals(2.85, nativeConfig.optDouble("filament_diameter"), 0.0001)
+    }
+
+    @Test
     fun appliesProcessAndBridgeOverridesToNativeConfig() {
         val store = resolver().resolveProfileStore(
             mapInput(

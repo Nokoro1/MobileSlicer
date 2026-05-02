@@ -408,7 +408,11 @@ internal class AutomationConfigResolver(
             val dependentFilament = active.filament.copy(
                 id = "${active.filament.id}_$printerId",
                 builtIn = false,
-                printerProfileId = printerId
+                printerProfileId = printerId,
+                diameterMm = nextFilamentDiameter,
+                orcaResolvedFilamentJson = active.filament.orcaResolvedFilamentJson.withJsonOverrides(
+                    "filament_diameter" to nextFilamentDiameter
+                )
             )
             val dependentProcess = active.process.withValues(
                 "id" to "${active.process.id}_$printerId",

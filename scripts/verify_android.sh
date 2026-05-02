@@ -548,6 +548,16 @@ capture_device_command() {
   } > "$output_path"
 }
 
+capture_device_shell_command() {
+  local serial="$1"
+  local output_path="$2"
+  local command="$3"
+  {
+    printf '$ adb shell %s\n\n' "$command"
+    adb_device "$serial" shell "$command" 2>&1 || true
+  } > "$output_path"
+}
+
 capture_perf_device_state() {
   local serial="$1"
   local output_dir="$2"
@@ -558,8 +568,8 @@ capture_perf_device_state() {
   capture_device_command "$serial" "$output_dir/$label-cpuinfo.txt" dumpsys cpuinfo
   capture_device_command "$serial" "$output_dir/$label-top.txt" top -b -n 1 -o PID,USER,PR,NI,VIRT,RES,SHR,S,%CPU,%MEM,TIME+,ARGS
   capture_device_command "$serial" "$output_dir/$label-getprop.txt" getprop
-  capture_device_command "$serial" "$output_dir/$label-thermal-zones.txt" sh -c 'for zone in /sys/class/thermal/thermal_zone*; do [ -r "$zone/type" ] || continue; printf "%s " "$zone"; cat "$zone/type"; [ -r "$zone/temp" ] && printf "temp=" && cat "$zone/temp"; done'
-  capture_device_command "$serial" "$output_dir/$label-cpufreq.txt" sh -c 'for cpu in /sys/devices/system/cpu/cpu[0-9]*; do printf "%s " "$cpu"; for file in scaling_governor scaling_cur_freq scaling_min_freq scaling_max_freq cpuinfo_cur_freq cpuinfo_min_freq cpuinfo_max_freq online; do [ -r "$cpu/cpufreq/$file" ] && printf "%s=" "$file" && cat "$cpu/cpufreq/$file"; [ -r "$cpu/$file" ] && printf "%s=" "$file" && cat "$cpu/$file"; done; done'
+  capture_device_shell_command "$serial" "$output_dir/$label-thermal-zones.txt" 'for zone in /sys/class/thermal/thermal_zone*; do [ -r "$zone/type" ] || continue; printf "%s " "$zone"; cat "$zone/type"; [ -r "$zone/temp" ] && printf "temp=" && cat "$zone/temp"; done'
+  capture_device_shell_command "$serial" "$output_dir/$label-cpufreq.txt" 'for cpu in /sys/devices/system/cpu/cpu[0-9]*; do printf "%s " "$cpu"; for file in scaling_governor scaling_cur_freq scaling_min_freq scaling_max_freq cpuinfo_cur_freq cpuinfo_min_freq cpuinfo_max_freq online; do [ -r "$cpu/cpufreq/$file" ] && printf "%s=" "$file" && cat "$cpu/cpufreq/$file"; [ -r "$cpu/$file" ] && printf "%s=" "$file" && cat "$cpu/$file"; done; done'
 }
 
 meminfo_app_summary_kb() {
