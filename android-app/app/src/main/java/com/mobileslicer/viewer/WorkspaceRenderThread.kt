@@ -511,7 +511,7 @@ internal class WorkspaceRenderThread(
 
             if (shouldPause || targetSurface == null || !targetSurface.isValid) {
                 if (egl.hasWindowSurface) {
-                    releaseGcodeViewer()
+                    releaseGlResources()
                 }
                 destroyWindowSurface()
                 continue
@@ -1124,39 +1124,51 @@ internal class WorkspaceRenderThread(
         appliedGcodeDisplayModeVersion = -1L
     }
 
+    private fun releaseGlResources() {
+        releaseGcodeViewer()
+        if (triangleProgram != 0) {
+            GLES20.glDeleteProgram(triangleProgram)
+            triangleProgram = 0
+            triangleHandles = null
+        }
+        if (textureProgram != 0) {
+            GLES20.glDeleteProgram(textureProgram)
+            textureProgram = 0
+            textureHandles = null
+        }
+        bedSurfaceUpload?.let(::deleteTriangleUpload)
+        bedSurfaceUpload = null
+        bedModelUpload?.let(::deleteTriangleUpload)
+        bedModelUpload = null
+        bedModelUndersideUpload?.let(::deleteTriangleUpload)
+        bedModelUndersideUpload = null
+        bedTextureUpload?.let(::deleteTextureUpload)
+        bedTextureUpload = null
+        bedGridUpload?.let(::deleteTriangleUpload)
+        bedGridUpload = null
+        bedGridBoldUpload?.let(::deleteTriangleUpload)
+        bedGridBoldUpload = null
+        bedBorderUpload?.let(::deleteTriangleUpload)
+        bedBorderUpload = null
+        bedWallUpload?.let(::deleteTriangleUpload)
+        bedWallUpload = null
+        modelUpload?.let(::deleteTriangleUpload)
+        modelUpload = null
+        objectUploadManager.clear()
+        appliedMeshVersion = -1L
+        appliedPlateObjectsVersion = -1L
+        appliedPlateObjectTransformVersion = -1L
+        appliedPlateObjectSelectionVersion = -1L
+        appliedBedVersion = -1L
+        appliedModelTransformVersion = -1L
+        appliedAppearanceVersion = -1L
+        renderedReadyMeshVersion = -1L
+    }
+
     private fun destroyGl() {
         if (egl.hasDisplay) {
             if (egl.hasWindowSurface) {
-                releaseGcodeViewer()
-                if (triangleProgram != 0) {
-                    GLES20.glDeleteProgram(triangleProgram)
-                    triangleProgram = 0
-                    triangleHandles = null
-                }
-                if (textureProgram != 0) {
-                    GLES20.glDeleteProgram(textureProgram)
-                    textureProgram = 0
-                    textureHandles = null
-                }
-                bedSurfaceUpload?.let(::deleteTriangleUpload)
-                bedSurfaceUpload = null
-                bedModelUpload?.let(::deleteTriangleUpload)
-                bedModelUpload = null
-                bedModelUndersideUpload?.let(::deleteTriangleUpload)
-                bedModelUndersideUpload = null
-                bedTextureUpload?.let(::deleteTextureUpload)
-                bedTextureUpload = null
-                bedGridUpload?.let(::deleteTriangleUpload)
-                bedGridUpload = null
-                bedGridBoldUpload?.let(::deleteTriangleUpload)
-                bedGridBoldUpload = null
-                bedBorderUpload?.let(::deleteTriangleUpload)
-                bedBorderUpload = null
-                bedWallUpload?.let(::deleteTriangleUpload)
-                bedWallUpload = null
-                modelUpload?.let(::deleteTriangleUpload)
-                modelUpload = null
-                objectUploadManager.clear()
+                releaseGlResources()
                 destroyWindowSurface()
             }
             egl.destroyContext()

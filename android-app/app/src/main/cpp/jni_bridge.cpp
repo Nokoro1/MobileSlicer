@@ -592,6 +592,7 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeDestroyGcodeViewer(J
         return;
     }
     orca_gcode_viewer_destroy(viewer_from_handle(handle));
+    trim_native_heap();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -600,7 +601,9 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeShutdownGcodeViewer(
     if (handle == 0) {
         return JNI_TRUE;
     }
-    return jni_bool_from_result(orca_gcode_viewer_shutdown(viewer_from_handle(handle)));
+    const int result = orca_gcode_viewer_shutdown(viewer_from_handle(handle));
+    trim_native_heap();
+    return jni_bool_from_result(result);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
