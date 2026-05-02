@@ -57,6 +57,50 @@ class ModelLoaderImportFlowTest {
     }
 
     @Test
+    fun importCompletionUiPlanResetsImportStateAndOpensWorkspaceOnlyWhenNeeded() {
+        val openApplication = planModelImportApplication(
+            result = modelLoadResult(path = "/tmp/new.stl"),
+            currentScreen = AppScreen.Home,
+            existingPlateObjects = emptyList(),
+            appendRequested = false,
+            nextPlateObjectId = 1L,
+            defaultTransform = { ViewerModelTransform(centerXmm = 0f, centerYmm = 0f) }
+        )
+        assertEquals(
+            ModelLoaderImportCompletionUiPlan(
+                importInProgress = false,
+                appendNextImportToPlate = false,
+                clearGeneratedPreviewState = true,
+                screen = AppScreen.Workspace
+            ),
+            planModelImportCompletionUi(openApplication)
+        )
+
+        val stayApplication = planModelImportApplication(
+            result = ModelLoadResult(
+                message = "Import failed",
+                loaded = false,
+                stagedFilePath = null,
+                format = null
+            ),
+            currentScreen = AppScreen.Home,
+            existingPlateObjects = emptyList(),
+            appendRequested = true,
+            nextPlateObjectId = 1L,
+            defaultTransform = { ViewerModelTransform(centerXmm = 0f, centerYmm = 0f) }
+        )
+        assertEquals(
+            ModelLoaderImportCompletionUiPlan(
+                importInProgress = false,
+                appendNextImportToPlate = false,
+                clearGeneratedPreviewState = false,
+                screen = null
+            ),
+            planModelImportCompletionUi(stayApplication)
+        )
+    }
+
+    @Test
     fun appendImportReusesPreparedMeshForSameStagedFile() {
         val mesh = mesh(bounds = bounds(maxX = 2f))
         val existing = plateObject(
@@ -192,6 +236,12 @@ class ModelLoaderImportFlowTest {
     fun workspacePreparationResultOnlyAppliesToMatchingCurrentTarget() {
         val selected = plateObject(id = 5L, filePath = "/tmp/selected.stl")
         val other = plateObject(id = 6L, filePath = "/tmp/other.stl")
+        val request = ModelLoaderWorkspacePreparationRequest(
+            selectedObject = selected,
+            modelFilePath = selected.filePath,
+            targetKey = "5:/tmp/selected.stl",
+            importTiming = selected.importTiming
+        )
         val result = WorkspacePreparationResult(
             preparedMesh = mesh(bounds = bounds(maxX = 9f)),
             viewerPreparationError = null,
@@ -214,6 +264,30 @@ class ModelLoaderImportFlowTest {
                 modelFilePath = selected.filePath
             )
         )
+
+        val currentApplication = planWorkspacePreparationApplication(
+            request = request,
+            result = result,
+            selectedPlateObjectId = selected.id,
+            currentModelFilePath = selected.filePath,
+            currentModelBounds = selected.bounds
+        )
+        assertTrue(currentApplication.targetStillCurrent)
+        assertEquals(9f, currentApplication.legacyState?.modelBounds?.maxX)
+        assertTrue(currentApplication.statusMessage?.contains("Workspace mesh prepared") == true)
+
+        val staleApplication = planWorkspacePreparationApplication(
+            request = request,
+            result = result,
+            selectedPlateObjectId = other.id,
+            currentModelFilePath = selected.filePath,
+            currentModelBounds = selected.bounds
+        )
+        assertFalse(staleApplication.targetStillCurrent)
+        assertNull(staleApplication.legacyState)
+        assertNull(staleApplication.statusMessage)
+        assertNull(clearedWorkspacePreparationTarget(request.targetKey, request.targetKey))
+        assertEquals("other", clearedWorkspacePreparationTarget("other", request.targetKey))
 
         val updated = applyWorkspacePreparationToPlateObject(selected, selected.filePath, result)
         val unchanged = applyWorkspacePreparationToPlateObject(other, selected.filePath, result)

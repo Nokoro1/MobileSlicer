@@ -31,6 +31,13 @@ internal data class ModelLoaderImportApplication(
     val statusMessage: String
 )
 
+internal data class ModelLoaderImportCompletionUiPlan(
+    val importInProgress: Boolean,
+    val appendNextImportToPlate: Boolean,
+    val clearGeneratedPreviewState: Boolean,
+    val screen: AppScreen?
+)
+
 internal data class ModelLoaderWorkspacePreparationRequest(
     val selectedObject: PlateObject?,
     val modelFilePath: String,
@@ -45,6 +52,12 @@ internal data class ModelLoaderPreparedLegacyState(
     val modelBounds: MeshBounds?,
     val viewerPreparationError: String?,
     val workspacePreparationTiming: WorkspacePreparationTiming?
+)
+
+internal data class ModelLoaderWorkspacePreparationApplication(
+    val targetStillCurrent: Boolean,
+    val legacyState: ModelLoaderPreparedLegacyState?,
+    val statusMessage: String?
 )
 
 internal data class ModelLoaderSelectedObjectSyncPlan(
@@ -133,6 +146,14 @@ internal fun planModelImportApplication(
     )
 }
 
+internal fun planModelImportCompletionUi(application: ModelLoaderImportApplication): ModelLoaderImportCompletionUiPlan =
+    ModelLoaderImportCompletionUiPlan(
+        importInProgress = false,
+        appendNextImportToPlate = false,
+        clearGeneratedPreviewState = application.shouldOpenWorkspace,
+        screen = if (application.shouldOpenWorkspace) AppScreen.Workspace else null
+    )
+
 internal fun resolveWorkspacePreparationRequest(
     currentScreen: AppScreen,
     modelLoaded: Boolean,
@@ -189,6 +210,40 @@ internal fun preparedLegacyState(
         viewerPreparationError = result.viewerPreparationError,
         workspacePreparationTiming = result.timing
     )
+
+internal fun planWorkspacePreparationApplication(
+    request: ModelLoaderWorkspacePreparationRequest,
+    result: WorkspacePreparationResult,
+    selectedPlateObjectId: Long?,
+    currentModelFilePath: String?,
+    currentModelBounds: MeshBounds?
+): ModelLoaderWorkspacePreparationApplication {
+    val targetStillCurrent = workspacePreparationTargetStillCurrent(
+        targetObjectId = request.selectedObjectId,
+        selectedPlateObjectId = selectedPlateObjectId,
+        currentModelFilePath = currentModelFilePath,
+        modelFilePath = request.modelFilePath
+    )
+    return ModelLoaderWorkspacePreparationApplication(
+        targetStillCurrent = targetStillCurrent,
+        legacyState = if (targetStillCurrent && currentModelFilePath == request.modelFilePath) {
+            preparedLegacyState(result, currentModelBounds)
+        } else {
+            null
+        },
+        statusMessage = if (targetStillCurrent) {
+            workspaceMeshPreparedStatus(request.modelFilePath, request.importTiming, result)
+        } else {
+            null
+        }
+    )
+}
+
+internal fun clearedWorkspacePreparationTarget(
+    currentTargetKey: String?,
+    completedTargetKey: String
+): String? =
+    currentTargetKey.takeUnless { it == completedTargetKey }
 
 internal fun legacyStateForPlateObject(objectOnPlate: PlateObject?): ModelLoaderLegacyModelState =
     ModelLoaderLegacyModelState(

@@ -714,11 +714,14 @@ internal fun ModelLoaderScreen(
                     currentModelFormatName = legacyState.modelFormatName
                 }
                 workspaceStatus = importApplication.statusMessage
-                importInProgress = false
-                appendNextImportToPlate = false
-                if (importApplication.shouldOpenWorkspace) {
+                val completionPlan = planModelImportCompletionUi(importApplication)
+                importInProgress = completionPlan.importInProgress
+                appendNextImportToPlate = completionPlan.appendNextImportToPlate
+                if (completionPlan.clearGeneratedPreviewState) {
                     workspaceSession.clearGeneratedPreviewState()
-                    currentScreen = AppScreen.Workspace
+                }
+                completionPlan.screen?.let { screen ->
+                    currentScreen = screen
                 }
             }
         }
@@ -766,14 +769,14 @@ internal fun ModelLoaderScreen(
             val result = withContext(Dispatchers.Default) {
                 onWorkspaceMeshPreparationRequested(request.modelFilePath)
             }
-            val targetStillCurrent = workspacePreparationTargetStillCurrent(
-                targetObjectId = request.selectedObjectId,
+            val application = planWorkspacePreparationApplication(
+                request = request,
+                result = result,
                 selectedPlateObjectId = selectedPlateObjectId,
                 currentModelFilePath = currentModelFilePath,
-                modelFilePath = request.modelFilePath
+                currentModelBounds = currentModelBounds
             )
-            if (targetStillCurrent && currentModelFilePath == request.modelFilePath) {
-                val preparedState = preparedLegacyState(result, currentModelBounds)
+            application.legacyState?.let { preparedState ->
                 currentPreparedMesh = preparedState.preparedMesh
                 currentModelBounds = preparedState.modelBounds
                 currentViewerPreparationError = preparedState.viewerPreparationError
@@ -784,13 +787,14 @@ internal fun ModelLoaderScreen(
                     applyWorkspacePreparationToPlateObject(objectOnPlate, request.modelFilePath, result)
                 }
             }
-            if (targetStillCurrent) {
-                workspaceStatus = workspaceMeshPreparedStatus(request.modelFilePath, request.importTiming, result)
+            application.statusMessage?.let { statusMessage ->
+                workspaceStatus = statusMessage
             }
         } finally {
-            if (workspacePreparationTargetKey == request.targetKey) {
-                workspacePreparationTargetKey = null
-            }
+            workspacePreparationTargetKey = clearedWorkspacePreparationTarget(
+                currentTargetKey = workspacePreparationTargetKey,
+                completedTargetKey = request.targetKey
+            )
         }
     }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(GCODE_MIME_TYPE)) { uri ->
