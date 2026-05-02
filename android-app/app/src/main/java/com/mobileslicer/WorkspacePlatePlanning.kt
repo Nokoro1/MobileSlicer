@@ -36,6 +36,17 @@ internal data class PlateAutoArrangeResult(
     val centersSummary: String
 )
 
+private data class PlateOrientationCandidate(
+    val transform: ViewerModelTransform,
+    val width: Float,
+    val depth: Float,
+    val height: Float,
+    val area: Float,
+    val maxSide: Float,
+    val overflow: Float,
+    val bedAlignmentPenalty: Float
+)
+
 internal fun generatedFootprintClearanceMm(process: ProcessProfile): Float {
     val brimClearance = if (process.brimType == BrimType.NoBrim) 0f else process.brimWidthMm.coerceAtLeast(0f) + 2f
     val skirtClearance = if (process.skirts > 0) process.skirtDistanceMm.coerceAtLeast(0f) + 8f else 0f
@@ -106,6 +117,100 @@ internal fun nearestRightAngleDegrees(value: Float): Float {
     if (normalized > 180f) normalized -= 360f
     if (normalized <= -180f) normalized += 360f
     return normalized
+}
+
+private fun normalizedRightAngleDegrees(value: Float): Float {
+    var normalized = value % 360f
+    if (normalized > 180f) normalized -= 360f
+    if (normalized <= -180f) normalized += 360f
+    return nearestRightAngleDegrees(normalized)
+}
+
+private fun orientationCandidate(
+    bounds: MeshBounds,
+    transform: ViewerModelTransform,
+    bed: PrinterBedSpec
+): PlateOrientationCandidate {
+    val transformed = transformedObjectBoundsOnPlate(bounds, transform)
+    val width = (transformed.maxX - transformed.minX).coerceAtLeast(0f)
+    val depth = (transformed.maxY - transformed.minY).coerceAtLeast(0f)
+    val height = (transformed.maxZ - transformed.minZ).coerceAtLeast(0f)
+    val overflow = maxOf(0f, width - bed.widthMm) + maxOf(0f, depth - bed.depthMm)
+    val bedAlignmentPenalty = if (bed.widthMm >= bed.depthMm) {
+        maxOf(0f, depth - width)
+    } else {
+        maxOf(0f, width - depth)
+    }
+    return PlateOrientationCandidate(
+        transform = transform,
+        width = width,
+        depth = depth,
+        height = height,
+        area = width * depth,
+        maxSide = maxOf(width, depth),
+        overflow = overflow,
+        bedAlignmentPenalty = bedAlignmentPenalty
+    )
+}
+
+private fun bestAutoOrientTransform(
+    bounds: MeshBounds,
+    transform: ViewerModelTransform,
+    bed: PrinterBedSpec
+): ViewerModelTransform {
+    val snapped = transform.copy(
+        rotationXDegrees = nearestRightAngleDegrees(transform.rotationXDegrees),
+        rotationYDegrees = nearestRightAngleDegrees(transform.rotationYDegrees),
+        rotationZDegrees = nearestRightAngleDegrees(transform.rotationZDegrees)
+    )
+    val angles = listOf(0f, 90f, -90f, 180f)
+    return angles.flatMap { x ->
+        angles.flatMap { y ->
+            angles.map { z ->
+                orientationCandidate(
+                    bounds = bounds,
+                    transform = snapped.copy(
+                        rotationXDegrees = x,
+                        rotationYDegrees = y,
+                        rotationZDegrees = z
+                    ),
+                    bed = bed
+                )
+            }
+        }
+    }.minWith(
+        compareBy<PlateOrientationCandidate> { it.overflow }
+            .thenBy { it.height }
+            .thenBy { it.bedAlignmentPenalty }
+            .thenBy { it.maxSide }
+            .thenBy { it.area }
+    ).transform.copy(
+        centerXmm = transform.centerXmm,
+        centerYmm = transform.centerYmm,
+        uniformScale = transform.uniformScale
+    )
+}
+
+private fun bestArrangeTransform(
+    bounds: MeshBounds,
+    transform: ViewerModelTransform,
+    bed: PrinterBedSpec
+): PlateOrientationCandidate {
+    val snappedZ = nearestRightAngleDegrees(transform.rotationZDegrees)
+    val candidates = listOf(
+        transform.copy(rotationZDegrees = snappedZ),
+        transform.copy(rotationZDegrees = normalizedRightAngleDegrees(snappedZ + 90f))
+    ).distinctBy {
+        "${it.rotationXDegrees}:${it.rotationYDegrees}:${it.rotationZDegrees}:${it.uniformScale}"
+    }
+    return candidates.map { candidate ->
+        orientationCandidate(bounds, candidate, bed)
+    }.minWith(
+        compareBy<PlateOrientationCandidate> { it.overflow }
+            .thenBy { it.width }
+            .thenBy { it.maxSide }
+            .thenBy { it.area }
+    )
 }
 
 internal fun printableVolumePreflightFailure(
@@ -215,7 +320,8 @@ internal fun printableVolumePreflightFailure(
 
 internal fun planAutoOrientPlateObjects(
     plateObjects: List<PlateObject>,
-    selectedPlateObjectId: Long?
+    selectedPlateObjectId: Long?,
+    bed: PrinterBedSpec
 ): PlateAutoOrientResult? {
     if (plateObjects.isEmpty()) return null
     val selectedObject = selectedPlateObjectId?.let { selectedId ->
@@ -225,11 +331,16 @@ internal fun planAutoOrientPlateObjects(
     var changedCount = 0
     val updatedObjects = plateObjects.map { objectOnPlate ->
         if (objectOnPlate.id !in targetIds) return@map objectOnPlate
-        val nextTransform = objectOnPlate.transform.copy(
-            rotationXDegrees = nearestRightAngleDegrees(objectOnPlate.transform.rotationXDegrees),
-            rotationYDegrees = nearestRightAngleDegrees(objectOnPlate.transform.rotationYDegrees),
-            rotationZDegrees = nearestRightAngleDegrees(objectOnPlate.transform.rotationZDegrees)
-        )
+        val bounds = objectOnPlate.mesh?.bounds ?: objectOnPlate.bounds
+        val nextTransform = if (bounds != null) {
+            bestAutoOrientTransform(bounds, objectOnPlate.transform, bed)
+        } else {
+            objectOnPlate.transform.copy(
+                rotationXDegrees = nearestRightAngleDegrees(objectOnPlate.transform.rotationXDegrees),
+                rotationYDegrees = nearestRightAngleDegrees(objectOnPlate.transform.rotationYDegrees),
+                rotationZDegrees = nearestRightAngleDegrees(objectOnPlate.transform.rotationZDegrees)
+            )
+        }
         if (materiallyDifferentRotation(objectOnPlate.transform, nextTransform)) {
             changedCount++
         }
@@ -260,7 +371,8 @@ internal fun planAutoArrangePlateObjects(
         val width: Float,
         val depth: Float,
         val area: Float,
-        val maxSide: Float
+        val maxSide: Float,
+        val transform: ViewerModelTransform
     )
 
     fun ArrangeRect.intersects(other: ArrangeRect): Boolean =
@@ -324,13 +436,17 @@ internal fun planAutoArrangePlateObjects(
 
     val towerKeepout = estimatedPrimeTowerKeepout()
     val footprintList = plateObjects.map { objectOnPlate ->
-        val (width, depth) = objectFootprintOnPlate(objectOnPlate)
+        val bounds = objectOnPlate.mesh?.bounds ?: objectOnPlate.bounds
+        val arranged = bounds?.let { bestArrangeTransform(it, objectOnPlate.transform, bed) }
+        val width = arranged?.width ?: objectFootprintOnPlate(objectOnPlate).first
+        val depth = arranged?.depth ?: objectFootprintOnPlate(objectOnPlate).second
         ArrangeFootprint(
             objectId = objectOnPlate.id,
             width = width,
             depth = depth,
             area = width * depth,
-            maxSide = maxOf(width, depth)
+            maxSide = maxOf(width, depth),
+            transform = arranged?.transform ?: objectOnPlate.transform
         )
     }
     val footprints = footprintList.associateBy { it.objectId }
@@ -473,7 +589,9 @@ internal fun planAutoArrangePlateObjects(
     val centers = mutableListOf<String>()
     val updatedObjects = plateObjects.map { objectOnPlate ->
         val placement = placements[objectOnPlate.id] ?: return@map objectOnPlate
+        val plannedTransform = footprints[objectOnPlate.id]?.transform ?: objectOnPlate.transform
         val nextTransform = objectOnPlate.transform.copy(
+            rotationZDegrees = plannedTransform.rotationZDegrees,
             centerXmm = placement.first.coerceIn(0f, bed.widthMm),
             centerYmm = placement.second.coerceIn(0f, bed.depthMm)
         )

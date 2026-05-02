@@ -537,7 +537,8 @@ internal fun ModelLoaderScreen(
     fun autoOrientPlateObjects() {
         val result = planAutoOrientPlateObjects(
             plateObjects = plateObjects,
-            selectedPlateObjectId = selectedPlateObjectId
+            selectedPlateObjectId = selectedPlateObjectId,
+            bed = selectedPrinter.toBedSpec()
         )
         if (result == null) {
             workspaceStatus = autoOrientPlateObjectsUnavailableStatus()

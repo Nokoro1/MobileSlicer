@@ -20,10 +20,17 @@ Current production behavior:
 
 * The existing `WorkspaceTransformControls.kt` UI is preserved. The small icon
   buttons only select the tab. The large action row triggers the selected tool.
-* `AutoOrient` snaps the selected object's X/Y/Z rotations to the nearest
-  90-degree angles. If no object is selected, all plate objects are snapped.
+* `AutoOrient` evaluates right-angle X/Y/Z orientation candidates from the
+  object's available mesh bounds, prefers orientations that fit the active bed,
+  then chooses the lowest printable height with stable footprint tie-breakers.
+  If no bounds are available, it falls back to snapping the current X/Y/Z
+  rotations to the nearest 90-degree angles. If no object is selected, all
+  plate objects are evaluated.
 * `AutoArrange` computes each object's transformed footprint from STL bounds,
   current scale, and full X/Y/Z rotation.
+* `AutoArrange` may choose a 90-degree Z rotation for an object when that
+  produces a better packable footprint. It preserves X/Y rotations, scale,
+  material slot, and model identity.
 * `AutoArrange` now uses a centered cluster pass first: larger objects are
   placed from the bed center outward on concentric candidate rings, producing a
   more natural centered layout than lower-left shelf packing.
@@ -36,8 +43,9 @@ Current production behavior:
     full placed-object scan for every candidate
 * If the centered cluster cannot fit, `AutoArrange` falls back to centered-grid
   placement and then the restored shelf pass from the `/Games` state.
-* `AutoArrange` preserves each object's current rotation, scale, material slot,
-  and model identity. It only updates X/Y centers.
+* `AutoArrange` preserves each object's scale, material slot, and model
+  identity. It updates X/Y centers and may update Z rotation by a right-angle
+  increment when that helps the plate fit.
 * Z placement remains owned by the existing viewer/native placement contract:
   `ViewerModelTransform` stores X/Y center, rotations, and scale only, and both
   rendering and slicing compute `z = -rotatedMinZ`, so the transformed object

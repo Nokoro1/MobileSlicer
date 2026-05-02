@@ -144,6 +144,56 @@ class ModelLoaderPlateActionsTest {
         assertEquals("Object duplicated\n3 on plate", clonedPlateObjectStatus(3))
     }
 
+    @Test
+    fun autoOrientChoosesLowHeightRightAngleOrientationFromBounds() {
+        val bed = PrinterBedSpec(widthMm = 200f, depthMm = 200f, maxHeightMm = 180f)
+        val result = planAutoOrientPlateObjects(
+            plateObjects = listOf(
+                plateObject(
+                    id = 1L,
+                    bounds = MeshBounds(0f, 0f, 0f, 10f, 20f, 80f)
+                )
+            ),
+            selectedPlateObjectId = null,
+            bed = bed
+        )
+
+        checkNotNull(result)
+        val orientedBounds = transformedObjectBoundsOnPlate(
+            bounds = result.objects.single().bounds!!,
+            transform = result.objects.single().transform
+        )
+        assertTrue(result.changedCount > 0)
+        assertEquals(10f, orientedBounds.maxZ - orientedBounds.minZ, 0.001f)
+    }
+
+    @Test
+    fun autoArrangeMayRotateObjectsToFitPlate() {
+        val bed = PrinterBedSpec(widthMm = 200f, depthMm = 200f, maxHeightMm = 180f)
+        val result = planAutoArrangePlateObjects(
+            plateObjects = listOf(
+                plateObject(id = 1L, bounds = MeshBounds(0f, 0f, 0f, 120f, 80f, 10f)),
+                plateObject(id = 2L, bounds = MeshBounds(0f, 0f, 0f, 120f, 80f, 10f))
+            ),
+            bed = bed,
+            clearance = 0f,
+            materialSlotCount = 1,
+            singleExtruderMultiMaterial = false,
+            primeTowerWidthMm = 35f,
+            primeTowerBrimWidthMm = 0f
+        )
+
+        checkNotNull(result)
+        assertEquals(2, result.objects.size)
+        assertTrue(result.objects.any { kotlin.math.abs(it.transform.rotationZDegrees) == 90f })
+        val rects = result.objects.map { objectOnPlate ->
+            generatedFootprintRect(objectOnPlate.bounds!!, objectOnPlate.transform, clearance = 8f)
+        }
+        assertFalse(rects[0].minX < 0f || rects[0].maxX > bed.widthMm || rects[0].minY < 0f || rects[0].maxY > bed.depthMm)
+        assertFalse(rects[1].minX < 0f || rects[1].maxX > bed.widthMm || rects[1].minY < 0f || rects[1].maxY > bed.depthMm)
+        assertFalse(rects[0].minX < rects[1].maxX && rects[0].maxX > rects[1].minX && rects[0].minY < rects[1].maxY && rects[0].maxY > rects[1].minY)
+    }
+
     private fun slot(index: Int, physicalNozzleIndex: Int? = null): PlateFilamentSlot =
         PlateFilamentSlot(
             index = index,
@@ -158,7 +208,8 @@ class ModelLoaderPlateActionsTest {
         id: Long,
         filamentSlotIndex: Int = 1,
         centerX: Float = 100f,
-        centerY: Float = 100f
+        centerY: Float = 100f,
+        bounds: MeshBounds = MeshBounds(0f, 0f, 0f, 10f, 10f, 10f)
     ): PlateObject =
         PlateObject(
             id = id,
@@ -167,7 +218,7 @@ class ModelLoaderPlateActionsTest {
             filamentSlotIndex = filamentSlotIndex,
             format = ImportedModelFormat.Stl,
             importTiming = null,
-            bounds = MeshBounds(0f, 0f, 0f, 10f, 10f, 10f),
+            bounds = bounds,
             transform = ViewerModelTransform(centerXmm = centerX, centerYmm = centerY)
         )
 }
