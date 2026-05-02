@@ -26,6 +26,23 @@ internal data class ModelLoaderSavedProjectOpenResult(
     val printerBed: PrinterBedSpec
 )
 
+internal data class ModelLoaderSavedProjectsUpdate(
+    val projects: List<SavedProject>,
+    val currentSavedProjectId: String?
+)
+
+internal data class ModelLoaderSavedProjectOpenStartPlan(
+    val importInProgress: Boolean,
+    val firstVisibleWorkspaceFrameMs: Long?,
+    val firstVisiblePreviewFrameMs: Long?,
+    val statusMessage: String
+)
+
+internal data class ModelLoaderSavedProjectOpenMissingFilesPlan(
+    val importInProgress: Boolean,
+    val statusMessage: String
+)
+
 internal sealed class ModelLoaderSavePlatePromptPlan {
     data class Prompt(val suggestedName: String) : ModelLoaderSavePlatePromptPlan()
     data class Fail(val statusMessage: String) : ModelLoaderSavePlatePromptPlan()
@@ -50,6 +67,25 @@ internal fun deleteSavedProjectDirectory(
 ) {
     File(savedProjectRootDir, project.id).deleteRecursively()
 }
+
+internal fun savedProjectsAfterSave(
+    project: SavedProject,
+    existingProjects: List<SavedProject>
+): ModelLoaderSavedProjectsUpdate =
+    ModelLoaderSavedProjectsUpdate(
+        projects = normalizedSavedProjects(listOf(project) + existingProjects.filterNot { it.id == project.id }),
+        currentSavedProjectId = project.id
+    )
+
+internal fun savedProjectsAfterDelete(
+    project: SavedProject,
+    existingProjects: List<SavedProject>,
+    currentSavedProjectId: String?
+): ModelLoaderSavedProjectsUpdate =
+    ModelLoaderSavedProjectsUpdate(
+        projects = normalizedSavedProjects(existingProjects.filterNot { it.id == project.id }),
+        currentSavedProjectId = currentSavedProjectId.takeUnless { it == project.id }
+    )
 
 internal fun suggestedSavedProjectName(
     plateObjects: List<PlateObject>,
@@ -86,6 +122,20 @@ internal fun savedProjectOpeningStatus(project: SavedProject): String = "Opening
 
 internal fun savedProjectOpenMissingFilesStatus(): String =
     "Saved project could not be opened\nModel files are missing."
+
+internal fun planSavedProjectOpenStart(project: SavedProject): ModelLoaderSavedProjectOpenStartPlan =
+    ModelLoaderSavedProjectOpenStartPlan(
+        importInProgress = true,
+        firstVisibleWorkspaceFrameMs = null,
+        firstVisiblePreviewFrameMs = null,
+        statusMessage = savedProjectOpeningStatus(project)
+    )
+
+internal fun planSavedProjectOpenMissingFiles(): ModelLoaderSavedProjectOpenMissingFilesPlan =
+    ModelLoaderSavedProjectOpenMissingFilesPlan(
+        importInProgress = false,
+        statusMessage = savedProjectOpenMissingFilesStatus()
+    )
 
 internal fun savedProjectLoadedStatus(project: SavedProject, nativeWarmLoadSucceeded: Boolean): String =
     buildString {

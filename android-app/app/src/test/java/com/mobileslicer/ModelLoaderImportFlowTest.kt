@@ -137,6 +137,26 @@ class ModelLoaderImportFlowTest {
     }
 
     @Test
+    fun selectedObjectSyncPlanCarriesLegacyAndViewerState() {
+        val objectOnPlate = plateObject(id = 9L, filePath = "/tmp/selected.stl")
+        val syncPlan = planSelectedObjectSync(objectOnPlate)
+
+        assertEquals(9L, syncPlan.selectedPlateObjectId)
+        assertTrue(syncPlan.legacyState.modelLoaded)
+        assertEquals("selected.stl", syncPlan.legacyState.modelLabel)
+        assertEquals(objectOnPlate.mesh, syncPlan.preparedMesh)
+        assertEquals(objectOnPlate.viewerPreparationError, syncPlan.viewerPreparationError)
+        assertEquals(objectOnPlate.workspacePreparationTiming, syncPlan.workspacePreparationTiming)
+        assertEquals(objectOnPlate.transform, syncPlan.modelTransform)
+
+        val emptyPlan = planSelectedObjectSync(null)
+        assertNull(emptyPlan.selectedPlateObjectId)
+        assertFalse(emptyPlan.legacyState.modelLoaded)
+        assertNull(emptyPlan.preparedMesh)
+        assertNull(emptyPlan.modelTransform)
+    }
+
+    @Test
     fun workspacePreparationRequestUsesStableTargetKeyAndSkipsInProgressTarget() {
         val selected = plateObject(id = 3L, filePath = "/tmp/current.stl")
         val request = resolveWorkspacePreparationRequest(

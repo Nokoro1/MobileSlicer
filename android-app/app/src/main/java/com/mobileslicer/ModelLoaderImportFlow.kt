@@ -47,6 +47,15 @@ internal data class ModelLoaderPreparedLegacyState(
     val workspacePreparationTiming: WorkspacePreparationTiming?
 )
 
+internal data class ModelLoaderSelectedObjectSyncPlan(
+    val selectedPlateObjectId: Long?,
+    val legacyState: ModelLoaderLegacyModelState,
+    val preparedMesh: StlMesh?,
+    val viewerPreparationError: String?,
+    val workspacePreparationTiming: WorkspacePreparationTiming?,
+    val modelTransform: ViewerModelTransform?
+)
+
 internal data class ModelLoaderImportStartState(
     val importInProgress: Boolean = true,
     val currentCalibrationJobCleared: Boolean = true,
@@ -189,6 +198,16 @@ internal fun legacyStateForPlateObject(objectOnPlate: PlateObject?): ModelLoader
         importTiming = objectOnPlate?.importTiming,
         modelBounds = objectOnPlate?.mesh?.bounds ?: objectOnPlate?.bounds,
         modelFormatName = objectOnPlate?.format?.name
+    )
+
+internal fun planSelectedObjectSync(objectOnPlate: PlateObject?): ModelLoaderSelectedObjectSyncPlan =
+    ModelLoaderSelectedObjectSyncPlan(
+        selectedPlateObjectId = objectOnPlate?.id,
+        legacyState = legacyStateForPlateObject(objectOnPlate),
+        preparedMesh = objectOnPlate?.mesh,
+        viewerPreparationError = objectOnPlate?.viewerPreparationError,
+        workspacePreparationTiming = objectOnPlate?.workspacePreparationTiming,
+        modelTransform = objectOnPlate?.transform
     )
 
 internal fun applyWorkspacePreparationToPlateObject(

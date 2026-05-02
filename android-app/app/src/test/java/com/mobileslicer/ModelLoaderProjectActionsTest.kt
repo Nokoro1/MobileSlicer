@@ -58,6 +58,44 @@ class ModelLoaderProjectActionsTest {
     }
 
     @Test
+    fun savedProjectsAfterSaveNormalizesListAndSelectsSavedProject() {
+        val existing = listOf(
+            savedProject(id = "old", updatedAtEpochMs = 1L),
+            savedProject(id = "replace", updatedAtEpochMs = 2L)
+        )
+        val saved = savedProject(id = "replace", updatedAtEpochMs = 99L)
+
+        val update = savedProjectsAfterSave(saved, existing)
+
+        assertEquals("replace", update.currentSavedProjectId)
+        assertEquals(listOf("replace", "old"), update.projects.map { it.id })
+        assertEquals(99L, update.projects.first().updatedAtEpochMs)
+    }
+
+    @Test
+    fun savedProjectsAfterDeleteClearsCurrentProjectOnlyWhenDeleted() {
+        val existing = listOf(
+            savedProject(id = "keep", updatedAtEpochMs = 1L),
+            savedProject(id = "delete", updatedAtEpochMs = 2L)
+        )
+
+        val activeDeleted = savedProjectsAfterDelete(
+            project = existing[1],
+            existingProjects = existing,
+            currentSavedProjectId = "delete"
+        )
+        assertNull(activeDeleted.currentSavedProjectId)
+        assertEquals(listOf("keep"), activeDeleted.projects.map { it.id })
+
+        val inactiveDeleted = savedProjectsAfterDelete(
+            project = existing[1],
+            existingProjects = existing,
+            currentSavedProjectId = "keep"
+        )
+        assertEquals("keep", inactiveDeleted.currentSavedProjectId)
+    }
+
+    @Test
     fun openSavedProjectStateReturnsNullWhenModelFilesAreMissing() {
         val project = savedProject(
             plateObjects = listOf(
@@ -96,6 +134,22 @@ class ModelLoaderProjectActionsTest {
         assertEquals(
             "Saved project could not be opened\nModel files are missing.",
             savedProjectOpenMissingFilesStatus()
+        )
+        assertEquals(
+            ModelLoaderSavedProjectOpenStartPlan(
+                importInProgress = true,
+                firstVisibleWorkspaceFrameMs = null,
+                firstVisiblePreviewFrameMs = null,
+                statusMessage = "Opening saved project\nFixture Plate"
+            ),
+            planSavedProjectOpenStart(project)
+        )
+        assertEquals(
+            ModelLoaderSavedProjectOpenMissingFilesPlan(
+                importInProgress = false,
+                statusMessage = "Saved project could not be opened\nModel files are missing."
+            ),
+            planSavedProjectOpenMissingFiles()
         )
         assertEquals("Project loaded\nFixture Plate", savedProjectLoadedStatus(project, nativeWarmLoadSucceeded = true))
         assertEquals(

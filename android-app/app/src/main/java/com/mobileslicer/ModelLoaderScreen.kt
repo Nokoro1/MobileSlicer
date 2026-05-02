@@ -372,18 +372,19 @@ internal fun ModelLoaderScreen(
     }
 
     fun syncSelectedObjectToLegacyState(objectOnPlate: PlateObject?) {
-        val legacyState = legacyStateForPlateObject(objectOnPlate)
-        selectedPlateObjectId = objectOnPlate?.id
+        val syncPlan = planSelectedObjectSync(objectOnPlate)
+        val legacyState = syncPlan.legacyState
+        selectedPlateObjectId = syncPlan.selectedPlateObjectId
         modelLoaded = legacyState.modelLoaded
         currentModelLabel = legacyState.modelLabel
         currentModelFilePath = legacyState.modelFilePath
-        currentPreparedMesh = objectOnPlate?.mesh
+        currentPreparedMesh = syncPlan.preparedMesh
         currentModelBounds = legacyState.modelBounds
-        currentViewerPreparationError = objectOnPlate?.viewerPreparationError
+        currentViewerPreparationError = syncPlan.viewerPreparationError
         currentImportTiming = legacyState.importTiming
-        currentWorkspacePreparationTiming = objectOnPlate?.workspacePreparationTiming
+        currentWorkspacePreparationTiming = syncPlan.workspacePreparationTiming
         currentModelFormatName = legacyState.modelFormatName
-        currentModelTransform = objectOnPlate?.transform
+        currentModelTransform = syncPlan.modelTransform
     }
 
     fun saveCurrentPlate(projectName: String, thumbnailBitmap: Bitmap?) {
@@ -402,25 +403,28 @@ internal fun ModelLoaderScreen(
             plateFlushVolumes = plateFlushVolumes,
             thumbnailBitmap = thumbnailBitmap
         )
-        updateSavedProjects(listOf(project) + savedProjects.filterNot { it.id == project.id })
-        currentSavedProjectId = project.id
+        val update = savedProjectsAfterSave(project, savedProjects)
+        updateSavedProjects(update.projects)
+        currentSavedProjectId = update.currentSavedProjectId
         workspaceStatus = plateSavedStatus(project)
         sliceSuccessBanner = "Save Successful"
     }
 
     fun openSavedProject(project: SavedProject) {
         coroutineScope.launch {
-            importInProgress = true
+            val startPlan = planSavedProjectOpenStart(project)
+            importInProgress = startPlan.importInProgress
             importStartedAtMs = SystemClock.elapsedRealtime()
-            firstVisibleWorkspaceFrameMs = null
-            firstVisiblePreviewFrameMs = null
-            workspaceStatus = savedProjectOpeningStatus(project)
+            firstVisibleWorkspaceFrameMs = startPlan.firstVisibleWorkspaceFrameMs
+            firstVisiblePreviewFrameMs = startPlan.firstVisiblePreviewFrameMs
+            workspaceStatus = startPlan.statusMessage
             val openedProject = withContext(Dispatchers.Default) {
                 openSavedProjectState(project)
             }
             if (openedProject == null) {
-                importInProgress = false
-                workspaceStatus = savedProjectOpenMissingFilesStatus()
+                val failurePlan = planSavedProjectOpenMissingFiles()
+                importInProgress = failurePlan.importInProgress
+                workspaceStatus = failurePlan.statusMessage
                 return@launch
             }
             profileStore = project.profileStore
@@ -446,10 +450,9 @@ internal fun ModelLoaderScreen(
 
     fun deleteSavedProject(project: SavedProject) {
         deleteSavedProjectDirectory(savedProjectRootDir, project)
-        updateSavedProjects(savedProjects.filterNot { it.id == project.id })
-        if (currentSavedProjectId == project.id) {
-            currentSavedProjectId = null
-        }
+        val update = savedProjectsAfterDelete(project, savedProjects, currentSavedProjectId)
+        updateSavedProjects(update.projects)
+        currentSavedProjectId = update.currentSavedProjectId
     }
 
     fun defaultPlateObjectTransform(existingObjectCount: Int): ViewerModelTransform {
