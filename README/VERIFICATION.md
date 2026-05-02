@@ -1,6 +1,8 @@
 # Mobile Slicer Verification
 
 Use `scripts/verify_android.sh` for repeatable local, APK, device, and Benchy checks.
+Use `scripts/release_gate_android.sh` when you want the full release confidence
+sequence in one command.
 
 ## Quick Commands
 
@@ -11,6 +13,7 @@ scripts/verify_android.sh stubs
 scripts/verify_android.sh script-tests
 scripts/verify_android.sh apk
 scripts/verify_android.sh local
+scripts/release_gate_android.sh RFCYA01ANVE
 ```
 
 After large Kotlin file-boundary refactors, run at least:
@@ -49,6 +52,20 @@ preview info sheet. It also asks native preview range planning for an exact-prev
 range and records plan timing plus the selected preview layer range. Non-UI
 automation records OpenGL context unavailability instead of constructing the native
 viewer, because the real viewer load runs on the app render thread with GL active.
+
+## Release Gate
+
+```bash
+scripts/release_gate_android.sh RFCYA01ANVE
+```
+
+The release gate runs `local`, `slice-lifecycle`, `slice-regression`, and
+`perf-heavy` with `MOBILE_SLICER_PERF_REPEAT_COUNT` defaulting to `2`. It writes
+a timestamped report under `artifacts/release-gates/<timestamp>/` with per-step
+logs, git context, and a `summary.md`; `artifacts/release-gates/latest` points
+at the newest successful run. Set `MOBILE_SLICER_PERF_REPEAT_COUNT` or
+`MOBILE_SLICER_PERF_BASELINE` before invoking the script to override the heavy
+performance repeat count or baseline comparison.
 
 If device automation fails after a slice starts, the script captures context,
 logcat, crash logcat, status text, and G-code head/tail snippets under
