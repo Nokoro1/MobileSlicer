@@ -226,6 +226,21 @@ internal fun WorkspaceScreen(
     val activePreviewChunkBounds = autoPreviewRanges
         .getOrNull(autoPreviewRangeIndex)
         ?.let { it.startLayer..it.endLayer }
+    fun applyPreviewLayerSelection(selection: PreviewLayerSelection) {
+        if (autoPreviewRanges.isNotEmpty()) {
+            val nextIndex = previewRangeIndexForSelection(
+                selection = selection,
+                ranges = autoPreviewRanges,
+                currentIndex = autoPreviewRangeIndex,
+                layerCount = previewLayerCount
+            )
+            if (nextIndex != autoPreviewRangeIndex) {
+                autoPreviewRangeIndex = nextIndex
+                previewLayerReloadToken++
+            }
+        }
+        previewLayerSelection = selection
+    }
     LaunchedEffect(workspaceMode, previewSliceKey, previewLayerCount, previewEngineHandle, sliceSummary?.byteCount, exactPreviewVertexBudget) {
         if (workspaceMode != WorkspaceMode.Preview || previewSliceKey <= 0L || previewEngineHandle == 0L) {
             exactPreviewPlanReady = workspaceMode != WorkspaceMode.Preview
@@ -494,12 +509,12 @@ internal fun WorkspaceScreen(
                 modelTransform = effectiveModelTransform,
                 objectCount = plateObjects.size,
                 selectedObjectLabel = selectedPlateObject?.label,
-                onPreviewLayerSelectionChanged = { previewLayerSelection = it },
+                onPreviewLayerSelectionChanged = { applyPreviewLayerSelection(it) },
                 onPreviewLayerSelectionCommitted = {
                     // Range scrubbing must remain live. Commit records the final
                     // value only; rebuilding the native preview here makes
                     // bottom-to-top scrubbing visibly stall on large G-code.
-                    previewLayerSelection = it
+                    applyPreviewLayerSelection(it)
                 },
                 onPreviousPreviewRangeChunk = {
                     if (autoPreviewRanges.isNotEmpty()) {

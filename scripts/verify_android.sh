@@ -540,6 +540,51 @@ measure_responsiveness_step() {
   log "Responsiveness step $step_name: ${elapsed_ms}ms"
 }
 
+write_preview_runtime_summary() {
+  local log_path="$1"
+  if [[ ! -s "$log_path" ]]; then
+    printf 'No preview runtime events were captured.\n'
+    return
+  fi
+  python3 - "$log_path" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+events = []
+for line in Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines():
+    if "workspace_preview_runtime" not in line:
+        continue
+    fields = {
+        key: int(value)
+        for key, value in re.findall(r"([A-Za-z]+)=([0-9]+)", line)
+    }
+    if fields:
+        events.append(fields)
+
+if not events:
+    print("No preview runtime events were captured.")
+    raise SystemExit
+
+first_frames = [event["firstFrameMs"] for event in events if "firstFrameMs" in event]
+native_loads = [event["nativeLoadMs"] for event in events if "nativeLoadMs" in event]
+last_frames = [event["lastFrameMs"] for event in events if "lastFrameMs" in event]
+slow_frames = max((event.get("slowFrames", 0) for event in events), default=0)
+rendered_frames = max((event.get("frames", 0) for event in events), default=0)
+
+def stat_line(name, values):
+    if values:
+        print(f"- {name}: min={min(values)} ms max={max(values)} ms last={values[-1]} ms")
+
+print(f"- events: {len(events)}")
+stat_line("native_load", native_loads)
+stat_line("first_frame", first_frames)
+stat_line("frame_time", last_frames)
+print(f"- slow_frames: {slow_frames}")
+print(f"- rendered_frames: {rendered_frames}")
+PY
+}
+
 run_responsiveness_profile() {
   local serial="$1"
   require_device_automation
@@ -593,6 +638,8 @@ PY
     else
       printf 'No MobileSlicerPerf events were captured during this UI-only run.\n'
     fi
+    printf '\n## Preview Runtime Summary\n\n'
+    write_preview_runtime_summary "$artifact_dir/responsiveness-logcat.txt"
   } > "$artifact_dir/report.md"
   log "Responsiveness profile artifacts: $artifact_dir"
 }
@@ -667,6 +714,8 @@ write_responsiveness_slice_report() {
     else
       printf 'No timing events were captured.\n'
     fi
+    printf '\n## Preview Runtime Summary\n\n'
+    write_preview_runtime_summary "$artifact_dir/timing-logcat.txt"
   } > "$artifact_dir/report.md"
 }
 
