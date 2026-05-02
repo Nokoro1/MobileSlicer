@@ -54,8 +54,7 @@ libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
     size_t max_vertices = 1000000,
     bool* vertex_limit_reached = nullptr,
     const std::function<bool()>& should_cancel = {},
-    size_t expected_vertices = 0,
-    const std::vector<uint64_t>* layer_marker_offsets = nullptr);
+    size_t expected_vertices = 0);
 
 uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data);
 std::vector<size_t> count_preview_vertices_by_layer_from_processor_result(const Slic3r::GCodeProcessorResult& result);
@@ -67,7 +66,6 @@ size_t count_preview_vertices_in_layer_range(
     size_t max_vertices);
 std::vector<size_t> count_preview_vertices_by_layer_from_gcode_text(const std::string& gcode);
 std::vector<size_t> count_preview_vertices_by_layer_from_gcode_file(const std::filesystem::path& path);
-std::vector<uint64_t> gcode_layer_marker_offsets_from_file(const std::filesystem::path& path);
 
 std::string pack_preview_layer_ranges_from_counts(
     const std::vector<size_t>& counts,

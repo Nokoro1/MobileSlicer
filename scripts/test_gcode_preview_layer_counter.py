@@ -347,27 +347,6 @@ def single_pass_counts(gcode: str) -> list[int]:
     return marker_parser.counter.layer_vertices if saw_marker else no_marker_parser.counter.layer_vertices
 
 
-def seek_warmup_counts(gcode: str, min_layer: int, max_layer: int) -> list[int]:
-    lines = gcode.splitlines()
-    marker_line_indexes = [
-        index
-        for index, line in enumerate(lines)
-        if line.partition(";")[2].strip() in {"LAYER_CHANGE", "CHANGE_LAYER"}
-    ]
-    if min_layer > 0 and min_layer < len(marker_line_indexes):
-        warmup_layer = max(0, min_layer - 1)
-        start_line = marker_line_indexes[warmup_layer]
-    else:
-        warmup_layer = 0
-        start_line = 0
-
-    parser = LayerCountParser(True)
-    parser.layer_id = warmup_layer
-    for line in lines[start_line:]:
-        parser.process_line(line)
-    return parser.counter.layer_vertices[min_layer:max_layer + 1]
-
-
 def pack_ranges(counts: list[int], min_layer: int, max_layer: int, budget: int) -> str:
     capped_max = min(max_layer, len(counts) - 1)
     if capped_max < min_layer:
@@ -450,31 +429,6 @@ class GcodePreviewLayerCounterTest(unittest.TestCase):
     def test_range_packing_stays_stable_for_large_counts(self) -> None:
         counts = [100, 200, 300, 250, 250, 500]
         self.assertEqual("0-1;2-3;4-4;5-5", pack_ranges(counts, 0, 5, 600))
-
-    def test_seek_warmup_counts_match_full_marker_parse_for_middle_range(self) -> None:
-        gcode = """
-        G90
-        M82
-        ;TYPE:Inner wall
-        ;LAYER_CHANGE
-        G1 X0 Y0 Z0.2 F1200
-        G1 X10 Y0 E1
-        G1 X20 Y0 E2
-        ;LAYER_CHANGE
-        G1 X20 Y0 Z0.4
-        G1 X20 Y10 E3
-        G1 X20 Y20 E4
-        ;LAYER_CHANGE
-        G1 X20 Y20 Z0.6
-        G1 X10 Y20 E5
-        G1 X0 Y20 E6
-        ;LAYER_CHANGE
-        G1 X0 Y20 Z0.8
-        G1 X0 Y10 E7
-        G1 X0 Y0 E8
-        """
-        full_counts = single_pass_counts(gcode)
-        self.assertEqual(full_counts[2:4], seek_warmup_counts(gcode, 2, 3))
 
     def test_preserved_processor_counts_match_wrapper_processor_counts(self) -> None:
         moves = [

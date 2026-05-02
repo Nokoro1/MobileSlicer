@@ -57,7 +57,6 @@ static void log_native_info(const char*, const std::string&)
 #define count_preview_vertices_in_layer_range internal_count_preview_vertices_in_layer_range
 #define count_preview_vertices_by_layer_from_gcode_text internal_count_preview_vertices_by_layer_from_gcode_text
 #define count_preview_vertices_by_layer_from_gcode_file internal_count_preview_vertices_by_layer_from_gcode_file
-#define gcode_layer_marker_offsets_from_file internal_gcode_layer_marker_offsets_from_file
 #define pack_preview_layer_ranges_from_counts internal_pack_preview_layer_ranges_from_counts
 #define enrich_gcode_summary_from_preview_input internal_enrich_gcode_summary_from_preview_input
 
@@ -83,7 +82,6 @@ static void log_native_info(const char*, const std::string&)
 #undef count_preview_vertices_in_layer_range
 #undef count_preview_vertices_by_layer_from_gcode_text
 #undef count_preview_vertices_by_layer_from_gcode_file
-#undef gcode_layer_marker_offsets_from_file
 #undef pack_preview_layer_ranges_from_counts
 #undef enrich_gcode_summary_from_preview_input
 
@@ -162,8 +160,7 @@ libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
     size_t max_vertices,
     bool* vertex_limit_reached,
     const std::function<bool()>& should_cancel,
-    size_t expected_vertices,
-    const std::vector<uint64_t>* layer_marker_offsets)
+    size_t expected_vertices)
 {
     return internal_to_vgcode_input_data_from_generated_gcode_file(
         path,
@@ -172,8 +169,7 @@ libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
         max_vertices,
         vertex_limit_reached,
         should_cancel,
-        expected_vertices,
-        layer_marker_offsets);
+        expected_vertices);
 }
 
 uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data)
@@ -208,11 +204,6 @@ std::vector<size_t> count_preview_vertices_by_layer_from_gcode_text(const std::s
 std::vector<size_t> count_preview_vertices_by_layer_from_gcode_file(const std::filesystem::path& path)
 {
     return internal_count_preview_vertices_by_layer_from_gcode_file(path);
-}
-
-std::vector<uint64_t> gcode_layer_marker_offsets_from_file(const std::filesystem::path& path)
-{
-    return internal_gcode_layer_marker_offsets_from_file(path);
 }
 
 std::string pack_preview_layer_ranges_from_counts(

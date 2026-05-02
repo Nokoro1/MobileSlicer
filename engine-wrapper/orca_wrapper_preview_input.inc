@@ -746,8 +746,7 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_stream(
     size_t max_vertices = kMaxPreviewVertices,
     bool* vertex_limit_reached = nullptr,
     const std::function<bool()>& should_cancel = {},
-    size_t expected_vertices = 0,
-    uint32_t initial_layer_id = 0)
+    size_t expected_vertices = 0)
 {
     if (vertex_limit_reached != nullptr) {
         *vertex_limit_reached = false;
@@ -780,7 +779,7 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_stream(
     float width = 0.42f;
     bool absolute_xyz = true;
     bool absolute_e = true;
-    uint32_t layer_id = initial_layer_id;
+    uint32_t layer_id = 0;
     uint32_t line_id = 0;
     uint8_t current_extruder_id = 0;
     libvgcode::EGCodeExtrusionRole role = libvgcode::EGCodeExtrusionRole::Custom;
@@ -1085,53 +1084,6 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
         expected_vertices);
 }
 
-static std::vector<uint64_t> gcode_layer_marker_offsets_from_file(const std::filesystem::path& path)
-{
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream) {
-        return {};
-    }
-
-    stream.seekg(0, std::ios::end);
-    const std::streamoff file_size = stream.tellg();
-    if (file_size <= 0) {
-        return {};
-    }
-    stream.seekg(0, std::ios::beg);
-    std::string contents(static_cast<size_t>(file_size), '\0');
-    stream.read(contents.data(), static_cast<std::streamsize>(contents.size()));
-    if (!stream && stream.gcount() <= 0) {
-        return {};
-    }
-    contents.resize(static_cast<size_t>(stream.gcount()));
-
-    std::vector<uint64_t> offsets;
-    size_t line_start = 0;
-    for (size_t index = 0; index < contents.size(); ++index) {
-        if (contents[index] == ';') {
-            const std::string_view rest(contents.data() + index + 1, contents.size() - index - 1);
-            if (
-                starts_with_text(rest, "LAYER_CHANGE") ||
-                starts_with_text(rest, "CHANGE_LAYER")
-            ) {
-                const size_t marker_length = starts_with_text(rest, "LAYER_CHANGE") ? 12 : 12;
-                const size_t after_marker = index + 1 + marker_length;
-                if (
-                    after_marker >= contents.size() ||
-                    contents[after_marker] == '\n' ||
-                    contents[after_marker] == '\r'
-                ) {
-                    offsets.push_back(static_cast<uint64_t>(line_start));
-                }
-            }
-        }
-        if (contents[index] == '\n') {
-            line_start = index + 1;
-        }
-    }
-    return offsets;
-}
-
 static libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
     const std::filesystem::path& path,
     long min_layer,
@@ -1139,8 +1091,7 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
     size_t max_vertices = kMaxPreviewVertices,
     bool* vertex_limit_reached = nullptr,
     const std::function<bool()>& should_cancel = {},
-    size_t expected_vertices = 0,
-    const std::vector<uint64_t>* layer_marker_offsets = nullptr)
+    size_t expected_vertices = 0)
 {
     std::ifstream stream(path);
     if (!stream) {
@@ -1148,21 +1099,6 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
             *vertex_limit_reached = false;
         }
         return {};
-    }
-    uint32_t initial_layer_id = 0;
-    if (
-        min_layer > 0 &&
-        layer_marker_offsets != nullptr &&
-        static_cast<size_t>(min_layer) < layer_marker_offsets->size()
-    ) {
-        const long warmup_layer = std::max<long>(0L, min_layer - 1L);
-        stream.seekg(static_cast<std::streamoff>((*layer_marker_offsets)[static_cast<size_t>(warmup_layer)]));
-        if (stream) {
-            initial_layer_id = static_cast<uint32_t>(warmup_layer);
-        } else {
-            stream.clear();
-            stream.seekg(0);
-        }
     }
     return to_vgcode_input_data_from_gcode_stream(
         stream,
@@ -1172,8 +1108,7 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
         max_vertices,
         vertex_limit_reached,
         should_cancel,
-        expected_vertices,
-        initial_layer_id);
+        expected_vertices);
 }
 
 static uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data)

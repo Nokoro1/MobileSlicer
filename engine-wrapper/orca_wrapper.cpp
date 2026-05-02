@@ -87,8 +87,6 @@ struct OrcaEngineImpl {
     size_t cached_preview_source_size{0};
     std::vector<size_t> cached_preview_layer_counts;
     size_t cached_preview_layer_counts_source_size{0};
-    std::vector<uint64_t> cached_preview_layer_offsets;
-    size_t cached_preview_layer_offsets_source_size{0};
     bool cached_preview_valid{false};
     bool cached_preview_complete{false};
 #endif
@@ -2924,8 +2922,6 @@ static void clear_generated_gcode(OrcaEngine* engine)
     engine->impl.cached_preview_source_size = 0;
     engine->impl.cached_preview_layer_counts.clear();
     engine->impl.cached_preview_layer_counts_source_size = 0;
-    engine->impl.cached_preview_layer_offsets.clear();
-    engine->impl.cached_preview_layer_offsets_source_size = 0;
     engine->impl.cached_preview_valid = false;
     engine->impl.cached_preview_complete = false;
 #endif
@@ -4094,8 +4090,6 @@ extern "C" int orca_slice(OrcaEngine* engine)
             engine->impl.cached_preview_layer_counts.clear();
             engine->impl.cached_preview_layer_counts_source_size = 0;
         }
-        engine->impl.cached_preview_layer_offsets.clear();
-        engine->impl.cached_preview_layer_offsets_source_size = 0;
         engine->impl.cached_preview_valid = false;
         engine->impl.cached_preview_complete = false;
         const size_t preview_moves = processor_move_count;
@@ -4827,19 +4821,6 @@ extern "C" int orca_gcode_viewer_load_latest_slice(
                         source_size = static_cast<size_t>(file_size);
                     }
                 }
-                if (
-                    min_layer > 0 &&
-                    source_size > 0 &&
-                    (
-                        engine->impl.cached_preview_layer_offsets.empty() ||
-                        engine->impl.cached_preview_layer_offsets_source_size != source_size
-                    )
-                ) {
-                    engine->impl.cached_preview_layer_offsets =
-                        gcode_layer_marker_offsets_from_file(engine->impl.gcode_path);
-                    engine->impl.cached_preview_layer_offsets_source_size =
-                        engine->impl.cached_preview_layer_offsets.empty() ? 0 : source_size;
-                }
                 viewer->input_data = to_vgcode_input_data_from_generated_gcode_file(
                     engine->impl.gcode_path,
                     min_layer,
@@ -4847,10 +4828,7 @@ extern "C" int orca_gcode_viewer_load_latest_slice(
                     vertex_budget,
                     nullptr,
                     should_cancel,
-                    expected_vertices,
-                    engine->impl.cached_preview_layer_offsets.empty() ?
-                        nullptr :
-                        &engine->impl.cached_preview_layer_offsets);
+                    expected_vertices);
             } else {
                 if (!ensure_gcode_loaded_unlocked(engine)) {
                     viewer->last_error = "no generated G-code is available for preview.";
