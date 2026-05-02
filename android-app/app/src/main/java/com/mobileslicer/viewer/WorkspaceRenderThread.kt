@@ -590,6 +590,9 @@ internal class WorkspaceRenderThread(
                 ) {
                     return false
                 }
+                if (deferFreshPreviewReloadIfNeeded(activeGcodePreviewQueuedAtMs)) {
+                    return false
+                }
                 appliedGcodeLayerRangeVersion = -1L
                 val requestedLayerMin = activeGcodeLayerMin
                 val requestedLayerMax = activeGcodeLayerMax
@@ -696,6 +699,24 @@ internal class WorkspaceRenderThread(
             }
             isCurrent
         }
+
+    private fun deferFreshPreviewReloadIfNeeded(queuedAtMs: Long): Boolean {
+        val delayMs = ViewerUpdateDecisions.gcodePreviewReloadCoalesceDelayMs(
+            rendererActive = gcodePreviewRenderer.isActive,
+            queuedAtMs = queuedAtMs,
+            nowMs = SystemClock.elapsedRealtime(),
+            coalesceWindowMs = PreviewReloadCoalesceWindowMs
+        )
+        if (delayMs <= 0L) {
+            return false
+        }
+        Thread.sleep(delayMs)
+        synchronized(stateLock) {
+            dirty = true
+            stateLock.notifyAll()
+        }
+        return true
+    }
 
     private fun renderFrame(width: Int, height: Int) {
         val frameStartedAtMs = SystemClock.elapsedRealtime()
@@ -1103,5 +1124,6 @@ internal class WorkspaceRenderThread(
     private companion object {
         private const val PreviewSlowFrameThresholdMs = 32L
         private const val PreviewMetricsReportIntervalMs = 1_000L
+        private const val PreviewReloadCoalesceWindowMs = 40L
     }
 }

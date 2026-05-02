@@ -78,6 +78,18 @@ internal object ViewerUpdateDecisions {
         current: GcodePreviewStateVersions
     ): Boolean = expected == current
 
+    fun gcodePreviewReloadCoalesceDelayMs(
+        rendererActive: Boolean,
+        queuedAtMs: Long,
+        nowMs: Long,
+        coalesceWindowMs: Long
+    ): Long {
+        if (!rendererActive || queuedAtMs <= 0L || coalesceWindowMs <= 0L) {
+            return 0L
+        }
+        return (coalesceWindowMs - (nowMs - queuedAtMs)).coerceAtLeast(0L)
+    }
+
     private fun samePlateObjectGeometry(
         previous: List<ViewerPlateObject>,
         next: List<ViewerPlateObject>

@@ -227,6 +227,37 @@ class ViewerUpdateDecisionsTest {
         )
     }
 
+    @Test
+    fun gcodePreviewReloadCoalesceDelayOnlyAppliesToActiveFreshPreviewReloads() {
+        assertEquals(
+            0L,
+            ViewerUpdateDecisions.gcodePreviewReloadCoalesceDelayMs(
+                rendererActive = false,
+                queuedAtMs = 1_000L,
+                nowMs = 1_010L,
+                coalesceWindowMs = 40L
+            )
+        )
+        assertEquals(
+            30L,
+            ViewerUpdateDecisions.gcodePreviewReloadCoalesceDelayMs(
+                rendererActive = true,
+                queuedAtMs = 1_000L,
+                nowMs = 1_010L,
+                coalesceWindowMs = 40L
+            )
+        )
+        assertEquals(
+            0L,
+            ViewerUpdateDecisions.gcodePreviewReloadCoalesceDelayMs(
+                rendererActive = true,
+                queuedAtMs = 1_000L,
+                nowMs = 1_050L,
+                coalesceWindowMs = 40L
+            )
+        )
+    }
+
     private fun testPlateObject(
         id: Long,
         mesh: StlMesh,
