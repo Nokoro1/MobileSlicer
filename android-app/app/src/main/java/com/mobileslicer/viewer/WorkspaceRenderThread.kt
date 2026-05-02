@@ -596,10 +596,7 @@ internal class WorkspaceRenderThread(
             val previewKey = activeGcodePreviewKey
             if (previewEngineHandle != 0L && previewKey > 0L) {
                 if (!isPreviewStateCurrent(
-                        previewVersion = targetGcodePreviewVersion,
-                        layerRangeVersion = targetGcodeLayerRangeVersion,
-                        pathVisibilityVersion = targetGcodePathVisibilityVersion,
-                        displayModeVersion = targetGcodeDisplayModeVersion
+                        previewVersion = targetGcodePreviewVersion
                     )
                 ) {
                     return false
@@ -631,10 +628,7 @@ internal class WorkspaceRenderThread(
                     throw IllegalStateException(loadResult.statusMessage)
                 }
                 if (!isPreviewStateCurrent(
-                        previewVersion = targetGcodePreviewVersion,
-                        layerRangeVersion = targetGcodeLayerRangeVersion,
-                        pathVisibilityVersion = targetGcodePathVisibilityVersion,
-                        displayModeVersion = targetGcodeDisplayModeVersion
+                        previewVersion = targetGcodePreviewVersion
                     )
                 ) {
                     return false
@@ -687,26 +681,11 @@ internal class WorkspaceRenderThread(
         return true
     }
 
-    private fun isPreviewStateCurrent(
-        previewVersion: Long,
-        layerRangeVersion: Long,
-        pathVisibilityVersion: Long,
-        displayModeVersion: Long
-    ): Boolean =
+    private fun isPreviewStateCurrent(previewVersion: Long): Boolean =
         synchronized(stateLock) {
-            val isCurrent = ViewerUpdateDecisions.isGcodePreviewStateCurrent(
-                expected = GcodePreviewStateVersions(
-                    previewVersion = previewVersion,
-                    layerRangeVersion = layerRangeVersion,
-                    pathVisibilityVersion = pathVisibilityVersion,
-                    displayModeVersion = displayModeVersion
-                ),
-                current = GcodePreviewStateVersions(
-                    previewVersion = gcodePreviewVersion,
-                    layerRangeVersion = gcodeLayerRangeVersion,
-                    pathVisibilityVersion = gcodePathVisibilityVersion,
-                    displayModeVersion = gcodeDisplayModeVersion
-                )
+            val isCurrent = ViewerUpdateDecisions.isGcodePreviewLoadCurrent(
+                expectedPreviewVersion = previewVersion,
+                currentPreviewVersion = gcodePreviewVersion
             )
             if (!isCurrent) {
                 dirty = true

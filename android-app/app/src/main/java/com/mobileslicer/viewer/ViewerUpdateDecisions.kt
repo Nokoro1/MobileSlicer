@@ -78,6 +78,9 @@ internal object ViewerUpdateDecisions {
         current: GcodePreviewStateVersions
     ): Boolean = expected == current
 
+    fun isGcodePreviewLoadCurrent(expectedPreviewVersion: Long, currentPreviewVersion: Long): Boolean =
+        expectedPreviewVersion == currentPreviewVersion
+
     fun gcodePreviewReloadCoalesceDelayMs(
         rendererActive: Boolean,
         queuedAtMs: Long,
