@@ -168,6 +168,9 @@ import kotlinx.coroutines.withContext
 import com.mobileslicer.viewer.MeshBounds
 
 internal fun MainActivity.maybeRunAutomation(intent: Intent?): Boolean {
+        if (maybeRunPreviewInteractionAutomation(intent)) {
+            return true
+        }
         if (intent?.action != AutomationSliceRequest.ACTION_AUTOMATE_SLICE) {
             return false
         }

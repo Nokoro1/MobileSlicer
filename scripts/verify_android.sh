@@ -8,6 +8,7 @@ PERF_APK_PATH="$ANDROID_DIR/app/build/outputs/apk/perfDebug/app-perfDebug.apk"
 PACKAGE_NAME="com.mobileslicer"
 MAIN_ACTIVITY="com.mobileslicer/.MainActivity"
 AUTOMATION_ACTION="com.mobileslicer.action.AUTOMATE_SLICE"
+PREVIEW_INTERACTION_ACTION="com.mobileslicer.action.PROFILE_PREVIEW_INTERACTION"
 DEFAULT_SERIAL="RFCYA01ANVE"
 DEFAULT_SLICE_SMOKE_STL="$ROOT_DIR/mobileslicer_test_cube.stl"
 SUPPORT_SLICE_SMOKE_STL="$ROOT_DIR/proof-fixtures/stage2_bridge_speed_fixture.stl"
@@ -99,6 +100,7 @@ Usage:
   scripts/verify_android.sh responsiveness [serial]
   scripts/verify_android.sh responsiveness-slice [serial]
   scripts/verify_android.sh responsiveness-heavy [serial]
+  scripts/verify_android.sh preview-interaction [serial]
   scripts/verify_android.sh perf [serial]
   scripts/verify_android.sh perf-heavy [serial]
   scripts/verify_android.sh benchy <local-stl-path> [serial]
@@ -146,6 +148,12 @@ Modes:
           Build, install, run medium, complex, and stress fixture automation
           slices, and capture per-case responsiveness artifacts under
           artifacts/responsiveness-heavy. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  preview-interaction
+          Build, install, slice the medium fixture, open the real G-code preview
+          renderer, scrub inside a chunk, switch display modes, switch chunks
+          when available, and capture runtime preview frame metrics under
+          artifacts/preview-interaction. Requires
           MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   perf    Build/install perfDebug, run non-UI startup and slicing benchmarks,
           write reports under artifacts/performance, and fail on hard budgets
@@ -772,6 +780,84 @@ run_responsiveness_heavy_profile() {
     printf -- '- stress-temperature-tower: stress-temperature-tower/report.md\n'
   } > "$artifact_dir/report.md"
   log "Heavy responsiveness artifacts: $artifact_dir"
+}
+
+run_preview_interaction_profile() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$MEDIUM_SLICE_PERF_STL" "medium performance STL"
+  local artifact_root="$ROOT_DIR/artifacts/preview-interaction"
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  local artifact_dir="$artifact_root/$stamp"
+  mkdir -p "$artifact_dir"
+
+  install_apk "$serial"
+  local app_model_path
+  app_model_path="$(stage_app_private_file "$serial" "$MEDIUM_SLICE_PERF_STL" | tail -n 1)"
+  local status_path="/data/data/$PACKAGE_NAME/files/automation/preview-interaction-$stamp.status.txt"
+
+  log "Running preview interaction profile on $serial"
+  adb_device "$serial" shell run-as "$PACKAGE_NAME" rm -f "$status_path"
+  adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  adb_device "$serial" logcat -c
+  adb_device "$serial" shell "CONFIG='$BENCHY_AUTOMATION_CONFIG'; am start -W \
+    -a '$PREVIEW_INTERACTION_ACTION' \
+    -n '$MAIN_ACTIVITY' \
+    --es preview_profile_model_path '$app_model_path' \
+    --es preview_profile_status_path '$status_path' \
+    --es automation_config_json \"\$CONFIG\""
+
+  local status
+  status="$(wait_for_status "$serial" "$status_path" 120 1)"
+  printf '%s\n' "$status" > "$artifact_dir/status.txt"
+  [[ "$status" == success:* ]] || fail "Preview interaction profile did not report success."
+  local metric_count first_ready rendered_frames
+  metric_count="$(status_metric "$status" "metrics")"
+  first_ready="$(status_metric "$status" "firstReady")"
+  rendered_frames="$(status_metric "$status" "renderedFrames")"
+  [[ "${metric_count:-0}" =~ ^[0-9]+$ && "$metric_count" -gt 0 ]] ||
+    fail "Preview interaction profile did not capture preview runtime metrics."
+  [[ "$first_ready" == "1" ]] ||
+    fail "Preview interaction profile did not render the first preview frame."
+  [[ "${rendered_frames:-0}" =~ ^[0-9]+$ && "$rendered_frames" -gt 0 ]] ||
+    fail "Preview interaction profile did not render preview frames."
+
+  adb_device "$serial" logcat -d -v time > "$artifact_dir/logcat.txt" 2>&1 || true
+  grep -E 'MobileSlicerPerf|preview_profile:' "$artifact_dir/logcat.txt" > "$artifact_dir/timing-logcat.txt" || true
+  adb_device "$serial" logcat -b crash -d -v time > "$artifact_dir/crash-logcat.txt" 2>&1 || true
+  if [[ -s "$artifact_dir/crash-logcat.txt" ]]; then
+    cat "$artifact_dir/crash-logcat.txt" >&2
+    fail "Crash log buffer is not empty after preview interaction profile."
+  fi
+
+  {
+    printf '# MobileSlicer Preview Interaction Profile\n\n'
+    printf -- '- serial: %s\n' "$serial"
+    printf -- '- captured_at: %s\n' "$stamp"
+    printf -- '- fixture: %s\n\n' "$MEDIUM_SLICE_PERF_STL"
+    printf '## Status\n\n'
+    printf -- '- preview_ranges: %s\n' "$(status_metric "$status" "previewRanges")"
+    printf -- '- first_range_layers: %s\n' "$(status_metric "$status" "firstRangeLayers")"
+    printf -- '- second_range_layers: %s\n' "$(status_metric "$status" "secondRangeLayers")"
+    printf -- '- first_ready: %s\n' "$first_ready"
+    printf -- '- second_ready: %s\n' "$(status_metric "$status" "secondReady")"
+    printf -- '- metrics: %s\n' "$metric_count"
+    printf -- '- max_native_load: %s ms\n' "$(status_metric "$status" "maxNativeLoadMs")"
+    printf -- '- max_first_frame: %s ms\n' "$(status_metric "$status" "maxFirstFrameMs")"
+    printf -- '- max_frame: %s ms\n' "$(status_metric "$status" "maxFrameMs")"
+    printf -- '- slow_frames: %s\n' "$(status_metric "$status" "slowFrames")"
+    printf -- '- rendered_frames: %s\n\n' "$rendered_frames"
+    printf '## Preview Runtime Summary\n\n'
+    write_preview_runtime_summary "$artifact_dir/timing-logcat.txt"
+    printf '\n## Timing Events\n\n'
+    if [[ -s "$artifact_dir/timing-logcat.txt" ]]; then
+      sed 's/^/- /' "$artifact_dir/timing-logcat.txt"
+    else
+      printf 'No preview timing events were captured.\n'
+    fi
+  } > "$artifact_dir/report.md"
+  log "Preview interaction artifacts: $artifact_dir"
 }
 
 stage_app_private_file() {
@@ -1697,6 +1783,9 @@ case "$mode" in
     ;;
   responsiveness-heavy)
     run_responsiveness_heavy_profile "$(device_serial "${2:-}")"
+    ;;
+  preview-interaction)
+    run_preview_interaction_profile "$(device_serial "${2:-}")"
     ;;
   perf)
     run_performance_gate "$(device_serial "${2:-}")"
