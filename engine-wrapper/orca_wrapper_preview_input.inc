@@ -1334,10 +1334,14 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_text(const
     return counter.layer_vertices;
 }
 
-static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
-    std::istream& stream,
-    bool layer_markers_available)
-{
+struct PreviewLayerCountParser {
+    explicit PreviewLayerCountParser(bool layer_markers_available)
+        : layer_markers_available(layer_markers_available),
+          print_toolpath_started(!layer_markers_available),
+          preview_position_synced(!layer_markers_available)
+    {
+    }
+
     PreviewVertexCounter counter;
     double x = 0.0;
     double y = 0.0;
@@ -1348,23 +1352,24 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
     uint32_t layer_id = 0;
     libvgcode::EGCodeExtrusionRole role = libvgcode::EGCodeExtrusionRole::Custom;
     double last_extrusion_z = 0.0;
+    bool layer_markers_available = false;
     bool pending_layer_change = false;
     bool saw_layer_change_marker = false;
     bool first_marked_layer_started = false;
-    bool print_toolpath_started = !layer_markers_available;
-    bool preview_position_synced = !layer_markers_available;
+    bool print_toolpath_started = true;
+    bool preview_position_synced = true;
     bool extrusion_path_open = false;
     bool have_extrusion_z = false;
     GcodeMoveWords move_words;
 
-    std::string raw_line;
-    while (std::getline(stream, raw_line)) {
+    bool process_line(std::string_view raw_line)
+    {
         const size_t comment_pos = raw_line.find(';');
-        const std::string_view raw_line_view(raw_line);
-        const std::string_view command = trim_view(raw_line_view.substr(0, comment_pos));
+        const std::string_view command = trim_view(raw_line.substr(0, comment_pos));
         const std::string_view comment = comment_pos == std::string::npos ?
             std::string_view() :
-            trim_view(raw_line_view.substr(comment_pos + 1));
+            trim_view(raw_line.substr(comment_pos + 1));
+        bool line_has_layer_marker = false;
 
         if (!comment.empty()) {
             if (starts_with_text(comment, "TYPE:")) {
@@ -1380,6 +1385,7 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
                     preview_position_synced = false;
                 }
             } else if (comment == "LAYER_CHANGE" || comment == "CHANGE_LAYER") {
+                line_has_layer_marker = true;
                 saw_layer_change_marker = true;
                 pending_layer_change = true;
                 print_toolpath_started = true;
@@ -1388,23 +1394,23 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
         }
 
         if (command.empty() || is_preview_ignored_command(command)) {
-            continue;
+            return line_has_layer_marker;
         }
         if (command_matches(command, "G90")) {
             absolute_xyz = true;
-            continue;
+            return line_has_layer_marker;
         }
         if (command_matches(command, "G91")) {
             absolute_xyz = false;
-            continue;
+            return line_has_layer_marker;
         }
         if (command_matches(command, "M82")) {
             absolute_e = true;
-            continue;
+            return line_has_layer_marker;
         }
         if (command_matches(command, "M83")) {
             absolute_e = false;
-            continue;
+            return line_has_layer_marker;
         }
 
         const bool is_arc_move = command_matches(command, "G2") || command_matches(command, "G3");
@@ -1416,11 +1422,11 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
                 if (move_words.has_z) z = move_words.z;
                 if (move_words.has_e) e = move_words.e;
             }
-            continue;
+            return line_has_layer_marker;
         }
 
         if (!parse_gcode_move_words(command, move_words)) {
-            continue;
+            return line_has_layer_marker;
         }
 
         const double px = x;
@@ -1444,7 +1450,7 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
             if (print_toolpath_started) {
                 preview_position_synced = true;
             }
-            continue;
+            return line_has_layer_marker;
         }
         if (!print_toolpath_started && role == libvgcode::EGCodeExtrusionRole::Custom) {
             print_toolpath_started = true;
@@ -1452,12 +1458,12 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
         }
         if (!print_toolpath_started || !role_is_previewable_toolpath(role)) {
             extrusion_path_open = false;
-            continue;
+            return line_has_layer_marker;
         }
         if (!preview_position_synced) {
             preview_position_synced = true;
             extrusion_path_open = false;
-            continue;
+            return line_has_layer_marker;
         }
         if (layer_markers_available) {
             if (pending_layer_change) {
@@ -1482,7 +1488,7 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
         if (!should_preview_extrusion_segment(role, distance, mm3_per_mm)) {
             extrusion_path_open = false;
             preview_position_synced = true;
-            continue;
+            return line_has_layer_marker;
         }
 
         const size_t segment_count = is_arc_move
@@ -1492,33 +1498,40 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
             counter.emit(role, libvgcode::EMoveType::Extrude, layer_id, !extrusion_path_open && segment == 1);
         }
         extrusion_path_open = true;
+        return line_has_layer_marker;
+    }
+};
+
+static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_stream(
+    std::istream& stream)
+{
+    PreviewLayerCountParser no_marker_parser(false);
+    PreviewLayerCountParser marker_parser(true);
+    bool saw_layer_marker = false;
+
+    std::string raw_line;
+    while (std::getline(stream, raw_line)) {
+        if (saw_layer_marker) {
+            marker_parser.process_line(raw_line);
+        } else {
+            const bool marker_seen_by_no_marker_parser = no_marker_parser.process_line(raw_line);
+            const bool marker_seen_by_marker_parser = marker_parser.process_line(raw_line);
+            saw_layer_marker = marker_seen_by_no_marker_parser || marker_seen_by_marker_parser;
+        }
     }
 
-    return counter.layer_vertices;
+    return saw_layer_marker ?
+        marker_parser.counter.layer_vertices :
+        no_marker_parser.counter.layer_vertices;
 }
 
 static std::vector<size_t> count_preview_vertices_by_layer_from_gcode_file(const std::filesystem::path& path)
 {
-    std::ifstream marker_scan(path);
-    if (!marker_scan) {
-        return {};
-    }
-    bool layer_markers_available = false;
-    std::string raw_line;
-    while (std::getline(marker_scan, raw_line)) {
-        if (raw_line.find("LAYER_CHANGE") != std::string::npos ||
-            raw_line.find("CHANGE_LAYER") != std::string::npos) {
-            layer_markers_available = true;
-            break;
-        }
-    }
-    marker_scan.close();
-
     std::ifstream stream(path);
     if (!stream) {
         return {};
     }
-    return count_preview_vertices_by_layer_from_gcode_stream(stream, layer_markers_available);
+    return count_preview_vertices_by_layer_from_gcode_stream(stream);
 }
 
 static std::string label_for_libvgcode_role(libvgcode::EGCodeExtrusionRole role)
