@@ -411,6 +411,14 @@ internal fun WorkspaceScreen(
                         "layerEnd=${metrics.layerEnd} " +
                         "vertexBudget=${metrics.vertexBudget} " +
                         "nativeLoadMs=${metrics.nativeLoadMs} " +
+                        "nativeSelectedParseMs=${metrics.nativeSelectedParseMs} " +
+                        "nativeLibvgcodeLoadMs=${metrics.nativeLibvgcodeLoadMs} " +
+                        "nativeTotalLoadMs=${metrics.nativeTotalLoadMs} " +
+                        "nativeLoadedVertices=${metrics.nativeLoadedVertices} " +
+                        "nativeCachedVertices=${metrics.nativeCachedVertices} " +
+                        "nativeCachedLayers=${metrics.nativeCachedLayers} " +
+                        "nativeCacheHit=${metrics.nativeCacheHit} " +
+                        "nativeCacheBuilt=${metrics.nativeCacheBuilt} " +
                         "firstFrameMs=${metrics.firstFrameMs} " +
                         "lastFrameMs=${metrics.lastFrameMs} " +
                         "slowFrames=${metrics.slowFrameCount} " +

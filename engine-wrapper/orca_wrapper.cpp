@@ -102,6 +102,7 @@ struct OrcaGcodeViewer {
     libvgcode::Viewer viewer;
     libvgcode::GCodeInputData input_data;
     std::string last_error;
+    std::string last_load_metrics;
     bool initialized{false};
 };
 
@@ -4617,6 +4618,9 @@ extern "C" int orca_gcode_viewer_load_gcode(OrcaGcodeViewer* viewer, const char*
         }
         log_native_info("gcode_viewer_load_text", "vertices=" + std::to_string(viewer->input_data.vertices.size()) +
             " fidelity=exact");
+        viewer->last_load_metrics =
+            "source=text|vertices=" + std::to_string(viewer->input_data.vertices.size()) +
+            "|selectedParseMs=0|libvgcodeLoadMs=0|totalMs=0|cache=none";
         viewer->viewer.load(std::move(viewer->input_data));
         viewer->viewer.set_view_type(preview_view_type_for_loaded_viewer(viewer->viewer));
         viewer->viewer.set_time_mode(libvgcode::ETimeMode::Normal);
@@ -4643,7 +4647,7 @@ extern "C" int orca_gcode_viewer_load_latest_slice(
         return ORCA_ERROR_INVALID_ARGUMENT;
     }
     std::lock_guard<std::recursive_mutex> engine_lock(engine->impl.mutex);
-    if (!ensure_gcode_loaded_unlocked(engine)) {
+    if (engine->impl.gcode.empty() && engine->impl.gcode_path.empty()) {
         return ORCA_ERROR_INVALID_ARGUMENT;
     }
     if (!viewer->initialized) {
@@ -4697,13 +4701,37 @@ extern "C" int orca_gcode_viewer_load_latest_slice(
             auto should_cancel = [engine, generation]() {
                 return !is_gcode_preview_generation_current(engine, generation);
             };
-            viewer->input_data = to_vgcode_input_data_from_gcode_text(
-                engine->impl.gcode,
+            const size_t expected_vertices = count_preview_vertices_in_layer_range(
+                engine->impl.cached_preview_layer_counts,
                 min_layer,
                 max_layer,
-                vertex_budget,
-                nullptr,
-                should_cancel);
+                vertex_budget);
+            const bool can_parse_generated_file =
+                !engine->impl.gcode_path.empty() &&
+                !engine->impl.cached_preview_layer_counts.empty();
+            if (can_parse_generated_file) {
+                viewer->input_data = to_vgcode_input_data_from_generated_gcode_file(
+                    engine->impl.gcode_path,
+                    min_layer,
+                    max_layer,
+                    vertex_budget,
+                    nullptr,
+                    should_cancel,
+                    expected_vertices);
+            } else {
+                if (!ensure_gcode_loaded_unlocked(engine)) {
+                    viewer->last_error = "no generated G-code is available for preview.";
+                    return ORCA_ERROR_SLICE;
+                }
+                viewer->input_data = to_vgcode_input_data_from_gcode_text(
+                    engine->impl.gcode,
+                    min_layer,
+                    max_layer,
+                    vertex_budget,
+                    nullptr,
+                    should_cancel,
+                    expected_vertices);
+            }
             if (should_cancel()) {
                 viewer->last_error.clear();
                 return ORCA_SUCCESS;
@@ -4756,6 +4784,18 @@ extern "C" int orca_gcode_viewer_load_latest_slice(
                 " totalMs=" + std::to_string(total_ms) +
                 " fidelity=exact");
         }
+        viewer->last_load_metrics =
+            "source=latestSlice" +
+            std::string("|vertices=") + std::to_string(preview_vertices) +
+            "|selectedParseMs=" + std::to_string(selected_parse_ms) +
+            "|libvgcodeLoadMs=" + std::to_string(libvgcode_load_ms) +
+            "|totalMs=" + std::to_string(total_ms) +
+            "|cache=" + std::string(cache_covers_selected_range ? (loaded_directly_from_cache ? "range" : "fallback") : "miss") +
+            "|cacheValid=" + std::string(cache_status.cache_valid ? "1" : "0") +
+            "|cacheComplete=" + std::string(cache_status.cache_complete ? "1" : "0") +
+            "|cacheBuilt=" + std::string(cache_status.cache_built ? "1" : "0") +
+            "|cachedVertices=" + std::to_string(cache_status.cached_vertices) +
+            "|cachedLayers=" + std::to_string(cache_status.cached_layers);
         viewer->viewer.set_view_type(preview_view_type_for_loaded_viewer(viewer->viewer));
         viewer->viewer.set_time_mode(libvgcode::ETimeMode::Normal);
         viewer->last_error.clear();
@@ -4967,6 +5007,14 @@ extern "C" const char* orca_gcode_viewer_get_last_error(OrcaGcodeViewer* viewer)
     }
     return viewer->last_error.c_str();
 }
+
+extern "C" const char* orca_gcode_viewer_get_last_load_metrics(OrcaGcodeViewer* viewer)
+{
+    if (viewer == nullptr || viewer->last_load_metrics.empty()) {
+        return nullptr;
+    }
+    return viewer->last_load_metrics.c_str();
+}
 #else
 extern "C" OrcaGcodeViewer* orca_gcode_viewer_create(void) { return nullptr; }
 extern "C" void orca_gcode_viewer_destroy(OrcaGcodeViewer*) {}
@@ -4982,4 +5030,5 @@ extern "C" int orca_gcode_viewer_set_extrusion_width_scale(OrcaGcodeViewer*, flo
 extern "C" int orca_gcode_viewer_set_path_visibility(OrcaGcodeViewer*, int, int, int) { return ORCA_ERROR_SLICE; }
 extern "C" int orca_gcode_viewer_set_view_type(OrcaGcodeViewer*, int) { return ORCA_ERROR_SLICE; }
 extern "C" const char* orca_gcode_viewer_get_last_error(OrcaGcodeViewer*) { return nullptr; }
+extern "C" const char* orca_gcode_viewer_get_last_load_metrics(OrcaGcodeViewer*) { return nullptr; }
 #endif

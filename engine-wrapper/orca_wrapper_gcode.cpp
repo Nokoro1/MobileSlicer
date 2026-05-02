@@ -50,9 +50,11 @@ static void log_native_info(const char*, const std::string&)
 #define enrich_gcode_summary_from_processor internal_enrich_gcode_summary_from_processor
 #define to_vgcode_input_data_from_processor_result internal_to_vgcode_input_data_from_processor_result
 #define to_vgcode_input_data_from_gcode_text internal_to_vgcode_input_data_from_gcode_text
+#define to_vgcode_input_data_from_generated_gcode_file internal_to_vgcode_input_data_from_generated_gcode_file
 #define gcode_input_layer_count internal_gcode_input_layer_count
 #define count_preview_vertices_by_layer_from_processor_result internal_count_preview_vertices_by_layer_from_processor_result
 #define count_preview_vertices_by_layer_from_input_data internal_count_preview_vertices_by_layer_from_input_data
+#define count_preview_vertices_in_layer_range internal_count_preview_vertices_in_layer_range
 #define count_preview_vertices_by_layer_from_gcode_text internal_count_preview_vertices_by_layer_from_gcode_text
 #define count_preview_vertices_by_layer_from_gcode_file internal_count_preview_vertices_by_layer_from_gcode_file
 #define pack_preview_layer_ranges_from_counts internal_pack_preview_layer_ranges_from_counts
@@ -73,9 +75,11 @@ static void log_native_info(const char*, const std::string&)
 #undef enrich_gcode_summary_from_processor
 #undef to_vgcode_input_data_from_processor_result
 #undef to_vgcode_input_data_from_gcode_text
+#undef to_vgcode_input_data_from_generated_gcode_file
 #undef gcode_input_layer_count
 #undef count_preview_vertices_by_layer_from_processor_result
 #undef count_preview_vertices_by_layer_from_input_data
+#undef count_preview_vertices_in_layer_range
 #undef count_preview_vertices_by_layer_from_gcode_text
 #undef count_preview_vertices_by_layer_from_gcode_file
 #undef pack_preview_layer_ranges_from_counts
@@ -136,7 +140,8 @@ libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     long max_layer,
     size_t max_vertices,
     bool* vertex_limit_reached,
-    const std::function<bool()>& should_cancel)
+    const std::function<bool()>& should_cancel,
+    size_t expected_vertices)
 {
     return internal_to_vgcode_input_data_from_gcode_text(
         gcode,
@@ -144,7 +149,27 @@ libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
         max_layer,
         max_vertices,
         vertex_limit_reached,
-        should_cancel);
+        should_cancel,
+        expected_vertices);
+}
+
+libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
+    const std::filesystem::path& path,
+    long min_layer,
+    long max_layer,
+    size_t max_vertices,
+    bool* vertex_limit_reached,
+    const std::function<bool()>& should_cancel,
+    size_t expected_vertices)
+{
+    return internal_to_vgcode_input_data_from_generated_gcode_file(
+        path,
+        min_layer,
+        max_layer,
+        max_vertices,
+        vertex_limit_reached,
+        should_cancel,
+        expected_vertices);
 }
 
 uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data)
@@ -155,6 +180,15 @@ uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data)
 std::vector<size_t> count_preview_vertices_by_layer_from_input_data(const libvgcode::GCodeInputData& data)
 {
     return internal_count_preview_vertices_by_layer_from_input_data(data);
+}
+
+size_t count_preview_vertices_in_layer_range(
+    const std::vector<size_t>& layer_vertices,
+    long min_layer,
+    long max_layer,
+    size_t max_vertices)
+{
+    return internal_count_preview_vertices_in_layer_range(layer_vertices, min_layer, max_layer, max_vertices);
 }
 
 std::vector<size_t> count_preview_vertices_by_layer_from_processor_result(const Slic3r::GCodeProcessorResult& result)

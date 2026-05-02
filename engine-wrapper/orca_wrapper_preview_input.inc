@@ -733,18 +733,26 @@ static void normalize_top_surface_layers(libvgcode::GCodeInputData& data)
     }
 }
 
-static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
-    const std::string& gcode,
+static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_stream(
+    std::istream& stream,
+    bool layer_markers_available,
     long min_layer,
     long max_layer,
     size_t max_vertices = kMaxPreviewVertices,
     bool* vertex_limit_reached = nullptr,
-    const std::function<bool()>& should_cancel = {})
+    const std::function<bool()>& should_cancel = {},
+    size_t expected_vertices = 0)
 {
     if (vertex_limit_reached != nullptr) {
         *vertex_limit_reached = false;
     }
     libvgcode::GCodeInputData data;
+    if (expected_vertices > 0) {
+        const size_t reserve_vertices = max_vertices > 0 ?
+            std::min(expected_vertices, max_vertices) :
+            expected_vertices;
+        data.vertices.reserve(reserve_vertices);
+    }
     const std::initializer_list<libvgcode::Color> default_tool_colors = {
         { 255, 125, 56 },
         { 92, 157, 246 },
@@ -757,10 +765,6 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     };
     data.tools_colors.insert(data.tools_colors.end(), default_tool_colors.begin(), default_tool_colors.end());
     data.color_print_colors.insert(data.color_print_colors.end(), default_tool_colors.begin(), default_tool_colors.end());
-    const bool layer_markers_available =
-        gcode.find("LAYER_CHANGE") != std::string::npos ||
-        gcode.find("CHANGE_LAYER") != std::string::npos;
-
     double x = 0.0;
     double y = 0.0;
     double z = 0.0;
@@ -789,7 +793,6 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     GcodeMoveWords move_words;
     bool parse_cancelled = false;
 
-    std::istringstream stream(gcode);
     std::string raw_line;
     while (std::getline(stream, raw_line)) {
         ++line_id;
@@ -1052,6 +1055,57 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     return data;
 }
 
+static libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
+    const std::string& gcode,
+    long min_layer,
+    long max_layer,
+    size_t max_vertices = kMaxPreviewVertices,
+    bool* vertex_limit_reached = nullptr,
+    const std::function<bool()>& should_cancel = {},
+    size_t expected_vertices = 0)
+{
+    const bool layer_markers_available =
+        gcode.find("LAYER_CHANGE") != std::string::npos ||
+        gcode.find("CHANGE_LAYER") != std::string::npos;
+    std::istringstream stream(gcode);
+    return to_vgcode_input_data_from_gcode_stream(
+        stream,
+        layer_markers_available,
+        min_layer,
+        max_layer,
+        max_vertices,
+        vertex_limit_reached,
+        should_cancel,
+        expected_vertices);
+}
+
+static libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
+    const std::filesystem::path& path,
+    long min_layer,
+    long max_layer,
+    size_t max_vertices = kMaxPreviewVertices,
+    bool* vertex_limit_reached = nullptr,
+    const std::function<bool()>& should_cancel = {},
+    size_t expected_vertices = 0)
+{
+    std::ifstream stream(path);
+    if (!stream) {
+        if (vertex_limit_reached != nullptr) {
+            *vertex_limit_reached = false;
+        }
+        return {};
+    }
+    return to_vgcode_input_data_from_gcode_stream(
+        stream,
+        true,
+        min_layer,
+        max_layer,
+        max_vertices,
+        vertex_limit_reached,
+        should_cancel,
+        expected_vertices);
+}
+
 static uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data)
 {
     uint32_t layer_count = 0;
@@ -1080,6 +1134,33 @@ static std::vector<size_t> count_preview_vertices_by_layer_from_input_data(const
         ++layer_vertices[static_cast<size_t>(vertex.layer_id)];
     }
     return layer_vertices;
+}
+
+static size_t count_preview_vertices_in_layer_range(
+    const std::vector<size_t>& layer_vertices,
+    long min_layer,
+    long max_layer,
+    size_t max_vertices)
+{
+    if (layer_vertices.empty()) {
+        return 0;
+    }
+    const size_t first_layer = static_cast<size_t>(std::max<long>(0L, min_layer));
+    const size_t last_layer = static_cast<size_t>(
+        std::min<long>(
+            static_cast<long>(layer_vertices.size()) - 1L,
+            std::max<long>(min_layer, max_layer)));
+    if (first_layer >= layer_vertices.size() || last_layer < first_layer) {
+        return 0;
+    }
+    size_t total = 0;
+    for (size_t layer = first_layer; layer <= last_layer; ++layer) {
+        total += layer_vertices[layer];
+        if (max_vertices > 0 && total >= max_vertices) {
+            return max_vertices;
+        }
+    }
+    return total;
 }
 
 static std::string pack_preview_layer_ranges_from_counts(

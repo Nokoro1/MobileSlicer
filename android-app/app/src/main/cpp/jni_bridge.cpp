@@ -723,3 +723,12 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeGetGcodeViewerLastEr
     }
     return new_nonempty_string(env, orca_gcode_viewer_get_last_error(viewer_from_handle(viewer_handle)));
 }
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeGetGcodeViewerLastLoadMetrics(JNIEnv* env, jclass, jlong viewer_handle)
+{
+    if (viewer_handle == 0) {
+        return nullptr;
+    }
+    return new_nonempty_string(env, orca_gcode_viewer_get_last_load_metrics(viewer_from_handle(viewer_handle)));
+}

@@ -44,6 +44,7 @@ int orca_gcode_viewer_set_extrusion_width_scale(OrcaGcodeViewer* viewer, float s
 int orca_gcode_viewer_set_path_visibility(OrcaGcodeViewer* viewer, int kind, int id, int visible);
 int orca_gcode_viewer_set_view_type(OrcaGcodeViewer* viewer, int view_type);
 const char* orca_gcode_viewer_get_last_error(OrcaGcodeViewer* viewer);
+const char* orca_gcode_viewer_get_last_load_metrics(OrcaGcodeViewer* viewer);
 
 #ifdef __cplusplus
 }

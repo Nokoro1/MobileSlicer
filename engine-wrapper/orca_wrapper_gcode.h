@@ -44,11 +44,26 @@ libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     long max_layer = -1,
     size_t max_vertices = 1000000,
     bool* vertex_limit_reached = nullptr,
-    const std::function<bool()>& should_cancel = {});
+    const std::function<bool()>& should_cancel = {},
+    size_t expected_vertices = 0);
+
+libvgcode::GCodeInputData to_vgcode_input_data_from_generated_gcode_file(
+    const std::filesystem::path& path,
+    long min_layer = -1,
+    long max_layer = -1,
+    size_t max_vertices = 1000000,
+    bool* vertex_limit_reached = nullptr,
+    const std::function<bool()>& should_cancel = {},
+    size_t expected_vertices = 0);
 
 uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data);
 std::vector<size_t> count_preview_vertices_by_layer_from_processor_result(const Slic3r::GCodeProcessorResult& result);
 std::vector<size_t> count_preview_vertices_by_layer_from_input_data(const libvgcode::GCodeInputData& data);
+size_t count_preview_vertices_in_layer_range(
+    const std::vector<size_t>& layer_vertices,
+    long min_layer,
+    long max_layer,
+    size_t max_vertices);
 std::vector<size_t> count_preview_vertices_by_layer_from_gcode_text(const std::string& gcode);
 std::vector<size_t> count_preview_vertices_by_layer_from_gcode_file(const std::filesystem::path& path);
 

@@ -40,5 +40,6 @@ class NativeEngineBridge private constructor() {
         @JvmStatic external fun nativeSetGcodeViewerPathVisibility(viewerHandle: Long, kind: Int, id: Int, visible: Boolean): Boolean
         @JvmStatic external fun nativeSetGcodeViewerViewType(viewerHandle: Long, viewType: Int): Boolean
         @JvmStatic external fun nativeGetGcodeViewerLastError(viewerHandle: Long): String?
+        @JvmStatic external fun nativeGetGcodeViewerLastLoadMetrics(viewerHandle: Long): String?
     }
 }

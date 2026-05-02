@@ -89,6 +89,9 @@ internal object NativeGcodeViewerCalls {
     fun getLastErrorMessage(handle: NativeGcodeViewerHandle): String =
         NativeEngineBridge.nativeGetGcodeViewerLastError(handle.raw)?.trim().orEmpty()
 
+    fun getLastLoadMetrics(handle: NativeGcodeViewerHandle): String =
+        NativeEngineBridge.nativeGetGcodeViewerLastLoadMetrics(handle.raw)?.trim().orEmpty()
+
     private fun booleanCall(
         handle: NativeGcodeViewerHandle,
         operation: String,

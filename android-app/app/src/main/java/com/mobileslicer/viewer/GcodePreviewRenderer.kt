@@ -16,13 +16,28 @@ internal data class GcodePreviewLoadState(
     val localLayerMax: Long
 )
 
+internal data class GcodePreviewNativeLoadMetrics(
+    val selectedParseMs: Long = 0L,
+    val libvgcodeLoadMs: Long = 0L,
+    val totalMs: Long = 0L,
+    val vertices: Long = 0L,
+    val cachedVertices: Long = 0L,
+    val cachedLayers: Long = 0L,
+    val cacheHit: Long = 0L,
+    val cacheBuilt: Long = 0L
+)
+
 internal class GcodePreviewRenderer {
     private var viewerHandle: NativeGcodeViewerHandle? = null
     private var loadedLayerStart: Long = 0L
     private var loadedLayerEnd: Long = Long.MAX_VALUE
+    private var latestNativeLoadMetrics = GcodePreviewNativeLoadMetrics()
 
     val isActive: Boolean
         get() = viewerHandle != null
+
+    val lastNativeLoadMetrics: GcodePreviewNativeLoadMetrics
+        get() = latestNativeLoadMetrics
 
     fun loadLatestSlice(
         engineRawHandle: Long,
@@ -54,7 +69,11 @@ internal class GcodePreviewRenderer {
         if (loadResult is NativeEngineCallResult.Success) {
             loadedLayerStart = requestedLayerMin
             loadedLayerEnd = requestedLayerMax
+            latestNativeLoadMetrics = parseNativeLoadMetrics(
+                NativeGcodeViewerCalls.getLastLoadMetrics(createdHandle)
+            )
         } else {
+            latestNativeLoadMetrics = GcodePreviewNativeLoadMetrics()
             release()
         }
         return loadResult
@@ -101,6 +120,7 @@ internal class GcodePreviewRenderer {
         viewerHandle = null
         loadedLayerStart = 0L
         loadedLayerEnd = Long.MAX_VALUE
+        latestNativeLoadMetrics = GcodePreviewNativeLoadMetrics()
     }
 
     private fun failure(operation: String, message: String): NativeEngineCallResult.Failure =
@@ -111,6 +131,32 @@ internal class GcodePreviewRenderer {
                 message = message
             )
         )
+}
+
+private fun parseNativeLoadMetrics(raw: String): GcodePreviewNativeLoadMetrics {
+    if (raw.isBlank()) return GcodePreviewNativeLoadMetrics()
+    val fields = raw.split('|')
+        .mapNotNull { field ->
+            val separator = field.indexOf('=')
+            if (separator <= 0) {
+                null
+            } else {
+                field.substring(0, separator) to field.substring(separator + 1)
+            }
+        }
+        .toMap()
+    fun longField(name: String): Long = fields[name]?.toLongOrNull() ?: 0L
+    val cache = fields["cache"].orEmpty()
+    return GcodePreviewNativeLoadMetrics(
+        selectedParseMs = longField("selectedParseMs"),
+        libvgcodeLoadMs = longField("libvgcodeLoadMs"),
+        totalMs = longField("totalMs"),
+        vertices = longField("vertices"),
+        cachedVertices = longField("cachedVertices"),
+        cachedLayers = longField("cachedLayers"),
+        cacheHit = if (cache == "range") 1L else 0L,
+        cacheBuilt = longField("cacheBuilt")
+    )
 }
 
 internal fun parsePreviewRangePlan(plan: String?): List<PreviewRangeSuggestion> {

@@ -122,6 +122,14 @@ internal class WorkspaceRenderThread(
     private var modelUniformScale = 1f
     private var viewerColors = buildViewerColors(activeAppearance)
     private var activePreviewNativeLoadMs = 0L
+    private var activePreviewNativeSelectedParseMs = 0L
+    private var activePreviewNativeLibvgcodeLoadMs = 0L
+    private var activePreviewNativeTotalLoadMs = 0L
+    private var activePreviewNativeLoadedVertices = 0L
+    private var activePreviewNativeCachedVertices = 0L
+    private var activePreviewNativeCachedLayers = 0L
+    private var activePreviewNativeCacheHit = 0L
+    private var activePreviewNativeCacheBuilt = 0L
     private var activePreviewFirstFrameMs = -1L
     private var activePreviewRenderedFrames = 0L
     private var activePreviewSlowFrames = 0L
@@ -616,6 +624,15 @@ internal class WorkspaceRenderThread(
                     targetGcodePreviewVersion
                 )
                 activePreviewNativeLoadMs = SystemClock.elapsedRealtime() - loadStartedAtMs
+                val nativeLoadMetrics = gcodePreviewRenderer.lastNativeLoadMetrics
+                activePreviewNativeSelectedParseMs = nativeLoadMetrics.selectedParseMs
+                activePreviewNativeLibvgcodeLoadMs = nativeLoadMetrics.libvgcodeLoadMs
+                activePreviewNativeTotalLoadMs = nativeLoadMetrics.totalMs
+                activePreviewNativeLoadedVertices = nativeLoadMetrics.vertices
+                activePreviewNativeCachedVertices = nativeLoadMetrics.cachedVertices
+                activePreviewNativeCachedLayers = nativeLoadMetrics.cachedLayers
+                activePreviewNativeCacheHit = nativeLoadMetrics.cacheHit
+                activePreviewNativeCacheBuilt = nativeLoadMetrics.cacheBuilt
                 activePreviewFirstFrameMs = -1L
                 activePreviewRenderedFrames = 0L
                 activePreviewSlowFrames = 0L
@@ -849,6 +866,14 @@ internal class WorkspaceRenderThread(
                         layerEnd = activeGcodeLayerMax,
                         vertexBudget = activeGcodePreviewVertexBudget,
                         nativeLoadMs = activePreviewNativeLoadMs,
+                        nativeSelectedParseMs = activePreviewNativeSelectedParseMs,
+                        nativeLibvgcodeLoadMs = activePreviewNativeLibvgcodeLoadMs,
+                        nativeTotalLoadMs = activePreviewNativeTotalLoadMs,
+                        nativeLoadedVertices = activePreviewNativeLoadedVertices,
+                        nativeCachedVertices = activePreviewNativeCachedVertices,
+                        nativeCachedLayers = activePreviewNativeCachedLayers,
+                        nativeCacheHit = activePreviewNativeCacheHit,
+                        nativeCacheBuilt = activePreviewNativeCacheBuilt,
                         firstFrameMs = activePreviewFirstFrameMs,
                         lastFrameMs = frameMs,
                         slowFrameCount = activePreviewSlowFrames,
@@ -1071,6 +1096,14 @@ internal class WorkspaceRenderThread(
     private fun releaseGcodeViewer() {
         gcodePreviewRenderer.release()
         activePreviewNativeLoadMs = 0L
+        activePreviewNativeSelectedParseMs = 0L
+        activePreviewNativeLibvgcodeLoadMs = 0L
+        activePreviewNativeTotalLoadMs = 0L
+        activePreviewNativeLoadedVertices = 0L
+        activePreviewNativeCachedVertices = 0L
+        activePreviewNativeCachedLayers = 0L
+        activePreviewNativeCacheHit = 0L
+        activePreviewNativeCacheBuilt = 0L
         activePreviewFirstFrameMs = -1L
         activePreviewRenderedFrames = 0L
         activePreviewSlowFrames = 0L

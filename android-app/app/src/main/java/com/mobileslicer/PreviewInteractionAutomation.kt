@@ -159,6 +159,14 @@ private suspend fun MainActivity.runPreviewInteractionAutomation(
                 "layerEnd=${metric.layerEnd} " +
                 "vertexBudget=${metric.vertexBudget} " +
                 "nativeLoadMs=${metric.nativeLoadMs} " +
+                "nativeSelectedParseMs=${metric.nativeSelectedParseMs} " +
+                "nativeLibvgcodeLoadMs=${metric.nativeLibvgcodeLoadMs} " +
+                "nativeTotalLoadMs=${metric.nativeTotalLoadMs} " +
+                "nativeLoadedVertices=${metric.nativeLoadedVertices} " +
+                "nativeCachedVertices=${metric.nativeCachedVertices} " +
+                "nativeCachedLayers=${metric.nativeCachedLayers} " +
+                "nativeCacheHit=${metric.nativeCacheHit} " +
+                "nativeCacheBuilt=${metric.nativeCacheBuilt} " +
                 "firstFrameMs=${metric.firstFrameMs} " +
                 "lastFrameMs=${metric.lastFrameMs} " +
                 "slowFrames=${metric.slowFrameCount} " +

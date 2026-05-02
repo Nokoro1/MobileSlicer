@@ -81,6 +81,14 @@ def analyze(status: dict[str, Any], events: list[dict[str, int]], profile: str) 
     max_native_load_ms = first_present_int(status, events, "maxNativeLoadMs", "nativeLoadMs")
     max_first_frame_ms = first_present_int(status, events, "maxFirstFrameMs", "firstFrameMs")
     max_frame_ms = first_present_int(status, events, "maxFrameMs", "lastFrameMs")
+    max_native_selected_parse_ms = max_metric(events, "nativeSelectedParseMs")
+    max_native_libvgcode_load_ms = max_metric(events, "nativeLibvgcodeLoadMs")
+    max_native_total_load_ms = max_metric(events, "nativeTotalLoadMs")
+    max_native_loaded_vertices = max_metric(events, "nativeLoadedVertices")
+    max_native_cached_vertices = max_metric(events, "nativeCachedVertices")
+    max_native_cached_layers = max_metric(events, "nativeCachedLayers")
+    max_native_cache_hit = max_metric(events, "nativeCacheHit")
+    max_native_cache_built = max_metric(events, "nativeCacheBuilt")
     slow_frames = first_present_int(status, events, "slowFrames", "slowFrames")
     rendered_frames = maybe_int(status.get("renderedFrames")) or last_metric(events, "frames")
     metric_count = maybe_int(status.get("metrics")) or len(events)
@@ -100,6 +108,14 @@ def analyze(status: dict[str, Any], events: list[dict[str, int]], profile: str) 
         "churn_requests": churn_requests,
         "churn_ready": maybe_int(status.get("churnReady")),
         "max_native_load_ms": max_native_load_ms,
+        "max_native_selected_parse_ms": max_native_selected_parse_ms,
+        "max_native_libvgcode_load_ms": max_native_libvgcode_load_ms,
+        "max_native_total_load_ms": max_native_total_load_ms,
+        "max_native_loaded_vertices": max_native_loaded_vertices,
+        "max_native_cached_vertices": max_native_cached_vertices,
+        "max_native_cached_layers": max_native_cached_layers,
+        "max_native_cache_hit": max_native_cache_hit,
+        "max_native_cache_built": max_native_cache_built,
         "max_first_frame_ms": max_first_frame_ms,
         "max_frame_ms": max_frame_ms,
         "slow_frames": slow_frames,
@@ -166,6 +182,13 @@ def build_markdown(summary: dict[str, Any]) -> str:
         "## Timings",
         "",
         f"- Native preview load max: `{summary.get('max_native_load_ms')}` ms",
+        f"- Native selected parse max: `{summary.get('max_native_selected_parse_ms')}` ms",
+        f"- Native libvgcode load max: `{summary.get('max_native_libvgcode_load_ms')}` ms",
+        f"- Native loaded vertices max: `{summary.get('max_native_loaded_vertices')}`",
+        f"- Native cached vertices max: `{summary.get('max_native_cached_vertices')}`",
+        f"- Native cached layers max: `{summary.get('max_native_cached_layers')}`",
+        f"- Native cache hit observed: `{summary.get('max_native_cache_hit')}`",
+        f"- Native cache build observed: `{summary.get('max_native_cache_built')}`",
         f"- First frame max: `{summary.get('max_first_frame_ms')}` ms",
         f"- Frame max: `{summary.get('max_frame_ms')}` ms",
         f"- Slow frames: `{summary.get('slow_frames')}`",
