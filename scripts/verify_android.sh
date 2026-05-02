@@ -1501,7 +1501,38 @@ run_performance_gate() {
     startup_private_other_kb="$(meminfo_app_summary_kb "$startup_meminfo" "Private Other")"
     startup_system_kb="$(meminfo_app_summary_kb "$startup_meminfo" "System")"
     printf '%s\n' "$startup_meminfo" > "$PERF_CURRENT_MEMINFO_DIR/cold-start-final-meminfo.txt"
-    append_perf_record "$records_path" "cold-start" "startup" "$startup_ms" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "${startup_pss_kb:-0}" "${startup_java_heap_kb:-0}" "${startup_native_heap_kb:-0}" "${startup_graphics_kb:-0}" "${startup_private_other_kb:-0}" "${startup_system_kb:-0}" "" "" ""
+    append_perf_record \
+      "$records_path" \
+      "cold-start" \
+      "startup" \
+      "$startup_ms" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "" \
+      "${startup_pss_kb:-0}" \
+      "${startup_java_heap_kb:-0}" \
+      "${startup_native_heap_kb:-0}" \
+      "${startup_graphics_kb:-0}" \
+      "${startup_private_other_kb:-0}" \
+      "${startup_system_kb:-0}" \
+      "" \
+      "" \
+      ""
     assert_no_crash_after_launch "$serial"
   fi
 

@@ -4747,25 +4747,36 @@ extern "C" const char* orca_gcode_preview_suggest_layer_ranges(OrcaEngine* engin
         const bool cached_counts_available =
             !engine->impl.cached_preview_layer_counts.empty() &&
             engine->impl.cached_preview_layer_counts_source_size == source_size;
-        std::vector<size_t> streamed_layer_counts;
-        bool streamed_from_file = false;
+        std::vector<size_t> counted_layer_counts;
+        bool counted_from_file = false;
+        bool counted_from_text = false;
         if (!cached_counts_available) {
             if (!engine->impl.gcode_path.empty()) {
-                streamed_layer_counts = count_preview_vertices_by_layer_from_gcode_file(engine->impl.gcode_path);
-                streamed_from_file = !streamed_layer_counts.empty();
+                counted_layer_counts = count_preview_vertices_by_layer_from_gcode_file(engine->impl.gcode_path);
+                counted_from_file = !counted_layer_counts.empty();
             }
-            if (!streamed_from_file && !ensure_gcode_loaded_unlocked(engine)) {
+            if (!counted_from_file && !ensure_gcode_loaded_unlocked(engine)) {
                 set_last_error(engine, "no generated G-code is available for preview range planning");
                 return nullptr;
             }
+            if (!counted_from_file) {
+                if (source_size == 0) {
+                    source_size = engine->impl.gcode.size();
+                }
+                counted_layer_counts = count_preview_vertices_by_layer_from_gcode_text(engine->impl.gcode);
+                counted_from_text = !counted_layer_counts.empty();
+            }
+            if (!counted_layer_counts.empty() && source_size > 0) {
+                engine->impl.cached_preview_layer_counts = counted_layer_counts;
+                engine->impl.cached_preview_layer_counts_source_size = source_size;
+            }
         }
-        const std::vector<size_t> text_layer_counts =
-            (!cached_counts_available && !streamed_from_file) ?
-                count_preview_vertices_by_layer_from_gcode_text(engine->impl.gcode) :
-                std::vector<size_t>();
-        const std::vector<size_t>& layer_counts = cached_counts_available ?
+        const bool cached_counts_after_compute =
+            !engine->impl.cached_preview_layer_counts.empty() &&
+            engine->impl.cached_preview_layer_counts_source_size == source_size;
+        const std::vector<size_t>& layer_counts = cached_counts_after_compute ?
             engine->impl.cached_preview_layer_counts :
-            (streamed_from_file ? streamed_layer_counts : text_layer_counts);
+            counted_layer_counts;
         engine->impl.preview_range_plan = pack_preview_layer_ranges_from_counts(
             layer_counts,
             std::max<long>(0L, min_layer),
@@ -4782,7 +4793,9 @@ extern "C" const char* orca_gcode_preview_suggest_layer_ranges(OrcaEngine* engin
                 "ranges=" + engine->impl.preview_range_plan +
                     " layers=" + std::to_string(layer_counts.size()) +
                     " budget=" + std::to_string(budget) +
-                    " counts=" + std::string(cached_counts_available ? "cache" : (streamed_from_file ? "file" : "text")) +
+                    " counts=" + std::string(
+                        cached_counts_available ? "cache" : (
+                            counted_from_file ? "file-cache" : (counted_from_text ? "text-cache" : "none"))) +
                     " planMs=" + std::to_string(elapsed_ms_since(plan_start)));
         }
         thread_local std::string preview_range_plan_snapshot;
