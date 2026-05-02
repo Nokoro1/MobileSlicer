@@ -14,17 +14,7 @@ internal object GcodeSummaryParser {
         if (summaryText.isNullOrBlank()) {
             return null
         }
-        val fields = summaryText
-            .split('|')
-            .mapNotNull { part ->
-                val separator = part.indexOf('=')
-                if (separator <= 0) {
-                    null
-                } else {
-                    part.substring(0, separator) to part.substring(separator + 1)
-                }
-            }
-            .toMap()
+        val fields = parseNativeSummaryFields(summaryText)
         val byteCount = fields["bytes"]?.toIntOrNull() ?: return null
         val lineCount = fields["lines"]?.toIntOrNull() ?: return null
         val layerChangeCount = fields["layers"]?.toIntOrNull() ?: return null
@@ -32,8 +22,8 @@ internal object GcodeSummaryParser {
             byteCount = byteCount,
             lineCount = lineCount,
             layerChangeCount = layerChangeCount,
-            observedTypes = fields["types"].orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }.take(8),
-            wallShellTypes = fields["walls"].orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }.take(6),
+            observedTypes = parseCappedCsv(fields["types"].orEmpty(), limit = 8),
+            wallShellTypes = parseCappedCsv(fields["walls"].orEmpty(), limit = 6),
             estimatedPrintTimeText = fields["time"]?.let(::normalizeEstimatedPrintTimeText)?.takeIf { it.isNotBlank() },
             filamentUsedGrams = fields["grams"]?.toDoubleOrNull()?.takeIf { it >= 0.005 },
             previewInfo = parsePreviewInfo(fields)
@@ -313,6 +303,37 @@ internal object GcodeSummaryParser {
             filamentChanges = totals["filamentChanges"]?.toIntOrNull() ?: 0,
             extruderChanges = totals["extruderChanges"]?.toIntOrNull() ?: 0
         )
+    }
+
+    private fun parseNativeSummaryFields(summaryText: String): Map<String, String> {
+        val fields = HashMap<String, String>(16)
+        var fieldStart = 0
+        while (fieldStart <= summaryText.length) {
+            val fieldEnd = summaryText.indexOf('|', fieldStart).takeIf { it >= 0 } ?: summaryText.length
+            val separator = summaryText.indexOf('=', fieldStart)
+            if (separator > fieldStart && separator < fieldEnd) {
+                fields[summaryText.substring(fieldStart, separator)] = summaryText.substring(separator + 1, fieldEnd)
+            }
+            if (fieldEnd == summaryText.length) break
+            fieldStart = fieldEnd + 1
+        }
+        return fields
+    }
+
+    private fun parseCappedCsv(value: String, limit: Int): List<String> {
+        if (value.isBlank() || limit <= 0) return emptyList()
+        val items = ArrayList<String>(limit)
+        var itemStart = 0
+        while (itemStart <= value.length && items.size < limit) {
+            val itemEnd = value.indexOf(',', itemStart).takeIf { it >= 0 } ?: value.length
+            val item = value.substring(itemStart, itemEnd).trim()
+            if (item.isNotEmpty()) {
+                items += item
+            }
+            if (itemEnd == value.length) break
+            itemStart = itemEnd + 1
+        }
+        return items
     }
 
     private fun parsePreviewLineTypes(rawValue: String): List<PreviewLineTypeRow> =
