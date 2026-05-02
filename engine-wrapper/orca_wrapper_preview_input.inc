@@ -498,6 +498,47 @@ static libvgcode::GCodeInputData to_vgcode_input_data_from_processor_result(
     return data;
 }
 
+static std::vector<size_t> count_preview_vertices_by_layer_from_processor_result(
+    const Slic3r::GCodeProcessorResult& result)
+{
+    const auto& moves = result.moves;
+    if (moves.size() < 2) {
+        return {};
+    }
+    std::vector<size_t> layer_vertices;
+    auto add_vertex = [&layer_vertices](uint32_t layer_id) {
+        if (layer_vertices.size() <= layer_id) {
+            layer_vertices.resize(static_cast<size_t>(layer_id) + 1, 0);
+        }
+        ++layer_vertices[static_cast<size_t>(layer_id)];
+    };
+    for (size_t i = 1; i < moves.size(); ++i) {
+        const auto& current = moves[i];
+        const auto& previous = moves[i - 1];
+        const auto current_type = libvgcode_move_type_from_slic3r_move_type(current.type);
+        if (current_type == libvgcode::EMoveType::COUNT) {
+            continue;
+        }
+        const auto option_type = libvgcode::move_type_to_option(current_type);
+        if (
+            option_type == libvgcode::EOptionType::COUNT ||
+            option_type == libvgcode::EOptionType::Travels ||
+            option_type == libvgcode::EOptionType::Wipes
+        ) {
+            if (
+                layer_vertices.empty() ||
+                previous.type != current.type ||
+                previous.extrusion_role != current.extrusion_role ||
+                previous.mm3_per_mm != current.mm3_per_mm
+            ) {
+                add_vertex(static_cast<uint32_t>(current.layer_id));
+            }
+        }
+        add_vertex(static_cast<uint32_t>(current.layer_id));
+    }
+    return layer_vertices;
+}
+
 static bool starts_with_text(const std::string& value, const char* prefix)
 {
     return value.rfind(prefix, 0) == 0;

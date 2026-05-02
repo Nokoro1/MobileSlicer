@@ -49,6 +49,7 @@ static void log_native_info(const char*, const std::string&)
 #define to_vgcode_input_data_from_processor_result internal_to_vgcode_input_data_from_processor_result
 #define to_vgcode_input_data_from_gcode_text internal_to_vgcode_input_data_from_gcode_text
 #define gcode_input_layer_count internal_gcode_input_layer_count
+#define count_preview_vertices_by_layer_from_processor_result internal_count_preview_vertices_by_layer_from_processor_result
 #define count_preview_vertices_by_layer_from_input_data internal_count_preview_vertices_by_layer_from_input_data
 #define count_preview_vertices_by_layer_from_gcode_text internal_count_preview_vertices_by_layer_from_gcode_text
 #define pack_preview_layer_ranges_from_counts internal_pack_preview_layer_ranges_from_counts
@@ -70,6 +71,7 @@ static void log_native_info(const char*, const std::string&)
 #undef to_vgcode_input_data_from_processor_result
 #undef to_vgcode_input_data_from_gcode_text
 #undef gcode_input_layer_count
+#undef count_preview_vertices_by_layer_from_processor_result
 #undef count_preview_vertices_by_layer_from_input_data
 #undef count_preview_vertices_by_layer_from_gcode_text
 #undef pack_preview_layer_ranges_from_counts
@@ -142,6 +144,11 @@ uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data)
 std::vector<size_t> count_preview_vertices_by_layer_from_input_data(const libvgcode::GCodeInputData& data)
 {
     return internal_count_preview_vertices_by_layer_from_input_data(data);
+}
+
+std::vector<size_t> count_preview_vertices_by_layer_from_processor_result(const Slic3r::GCodeProcessorResult& result)
+{
+    return internal_count_preview_vertices_by_layer_from_processor_result(result);
 }
 
 std::vector<size_t> count_preview_vertices_by_layer_from_gcode_text(const std::string& gcode)

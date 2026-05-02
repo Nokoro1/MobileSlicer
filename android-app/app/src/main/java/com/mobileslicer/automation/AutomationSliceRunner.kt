@@ -10,7 +10,9 @@ import com.mobileslicer.nativebridge.isSuccess
 import com.mobileslicer.workspace.NativeModelTransform
 import com.mobileslicer.workspace.defaultNativeModelTransform
 import com.mobileslicer.workspace.GcodeSummaryParser
+import com.mobileslicer.viewer.DefaultPreviewVertexBudget
 import com.mobileslicer.viewer.PrinterBedSpec
+import com.mobileslicer.viewer.parsePreviewRangePlan
 import com.mobileslicer.viewer.StlMeshParser
 import org.json.JSONObject
 import java.io.File
@@ -94,6 +96,18 @@ internal data class AutomationSlicePreviewInfoMetrics(
     val layerCount: Int = 0
 )
 
+internal data class AutomationSlicePreviewLoadMetrics(
+    val rangePlanMs: Long = 0L,
+    val viewerLoadMs: Long = 0L,
+    val plannedRangeCount: Int = 0,
+    val loadedStartLayer: Int = 0,
+    val loadedEndLayer: Int = 0,
+    val loadedLayerCount: Int = 0,
+    val success: Boolean = false,
+    val unavailableWithoutGlContext: Boolean = false,
+    val failure: String = ""
+)
+
 internal fun automationSliceSuccessStatus(
     modelFile: File,
     stagedModel: File,
@@ -101,6 +115,7 @@ internal fun automationSliceSuccessStatus(
     timing: AutomationSliceTiming,
     nativeMetrics: AutomationSliceNativeMetrics = AutomationSliceNativeMetrics(),
     previewInfoMetrics: AutomationSlicePreviewInfoMetrics = AutomationSlicePreviewInfoMetrics(),
+    previewLoadMetrics: AutomationSlicePreviewLoadMetrics = AutomationSlicePreviewLoadMetrics(),
     configJson: String
 ): String =
     "success: model=${modelFile.absolutePath} " +
@@ -123,6 +138,15 @@ internal fun automationSliceSuccessStatus(
         "previewInfoLineTypes=${previewInfoMetrics.lineTypeCount} " +
         "previewInfoFilaments=${previewInfoMetrics.filamentCount} " +
         "previewInfoLayers=${previewInfoMetrics.layerCount} " +
+        "previewPlanMs=${previewLoadMetrics.rangePlanMs} " +
+        "previewLoadMs=${previewLoadMetrics.viewerLoadMs} " +
+        "previewRanges=${previewLoadMetrics.plannedRangeCount} " +
+        "previewLoadedStart=${previewLoadMetrics.loadedStartLayer} " +
+        "previewLoadedEnd=${previewLoadMetrics.loadedEndLayer} " +
+        "previewLoadedLayers=${previewLoadMetrics.loadedLayerCount} " +
+        "previewLoadSuccess=${if (previewLoadMetrics.success) 1 else 0} " +
+        "previewLoadGlUnavailable=${if (previewLoadMetrics.unavailableWithoutGlContext) 1 else 0} " +
+        previewLoadMetrics.failure.takeIf { it.isNotBlank() }?.let { "previewLoadFailure=${it.sanitizeStatusToken()} " }.orEmpty() +
         "elapsedMs=${timing.totalMs} " +
         "config=$configJson"
 
@@ -159,6 +183,43 @@ internal fun automationSlicePreviewInfoMetrics(summaryText: String?, enrichedSum
         layerCount = richestSummary?.layerChangeCount ?: 0
     )
 }
+
+internal fun automationSlicePreviewLoadMetrics(
+    engineHandle: NativeEngineHandle,
+    layerCount: Int,
+    vertexBudget: Long = DefaultPreviewVertexBudget
+): AutomationSlicePreviewLoadMetrics {
+    if (layerCount <= 0) {
+        return AutomationSlicePreviewLoadMetrics(failure = "missing-layers")
+    }
+    val planStartedAt = SystemClock.elapsedRealtime()
+    val rawPlan = NativeEngineCalls.planLatestSlicePreviewRanges(
+        handle = engineHandle,
+        minLayer = 0L,
+        maxLayer = (layerCount - 1).toLong(),
+        vertexBudget = vertexBudget
+    )
+    val planMs = SystemClock.elapsedRealtime() - planStartedAt
+    val ranges = parsePreviewRangePlan(rawPlan)
+    val firstRange = ranges.firstOrNull()
+        ?: return AutomationSlicePreviewLoadMetrics(
+            rangePlanMs = planMs,
+            failure = NativeEngineCalls.getLastErrorMessage(engineHandle).ifBlank { "no-preview-ranges" }
+        )
+    val loadedLayerCount = (firstRange.endLayer - firstRange.startLayer + 1).coerceAtLeast(0)
+    return AutomationSlicePreviewLoadMetrics(
+        rangePlanMs = planMs,
+        plannedRangeCount = ranges.size,
+        loadedStartLayer = firstRange.startLayer,
+        loadedEndLayer = firstRange.endLayer,
+        loadedLayerCount = loadedLayerCount,
+        unavailableWithoutGlContext = true,
+        failure = "non-ui-opengl-context-unavailable"
+    )
+}
+
+private fun String.sanitizeStatusToken(): String =
+    trim().replace(Regex("""\s+"""), "_").take(120)
 
 internal class AutomationSliceRunner(
     private val ensureEngine: () -> Long,
@@ -274,6 +335,10 @@ internal class AutomationSliceRunner(
             summaryText = NativeEngineCalls.getGcodeSummary(engineHandle),
             enrichedSummaryText = NativeEngineCalls.getEnrichedGcodeSummary(engineHandle)
         )
+        val previewLoadMetrics = automationSlicePreviewLoadMetrics(
+            engineHandle = engineHandle,
+            layerCount = previewInfoMetrics.layerCount
+        )
         writeStatus(
             automationSliceSuccessStatus(
                 modelFile = modelFile,
@@ -290,6 +355,7 @@ internal class AutomationSliceRunner(
                 ),
                 nativeMetrics = nativeMetrics,
                 previewInfoMetrics = previewInfoMetrics,
+                previewLoadMetrics = previewLoadMetrics,
                 configJson = configJson
             )
         )

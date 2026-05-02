@@ -45,6 +45,7 @@ libvgcode::GCodeInputData to_vgcode_input_data_from_gcode_text(
     bool* vertex_limit_reached = nullptr);
 
 uint32_t gcode_input_layer_count(const libvgcode::GCodeInputData& data);
+std::vector<size_t> count_preview_vertices_by_layer_from_processor_result(const Slic3r::GCodeProcessorResult& result);
 std::vector<size_t> count_preview_vertices_by_layer_from_input_data(const libvgcode::GCodeInputData& data);
 std::vector<size_t> count_preview_vertices_by_layer_from_gcode_text(const std::string& gcode);
 

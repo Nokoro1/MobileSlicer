@@ -2,6 +2,7 @@ package com.mobileslicer
 
 import com.mobileslicer.automation.AutomationSliceTiming
 import com.mobileslicer.automation.AutomationSliceNativeMetrics
+import com.mobileslicer.automation.AutomationSlicePreviewLoadMetrics
 import com.mobileslicer.automation.AutomationSlicePreviewInfoMetrics
 import com.mobileslicer.automation.automationSlicePreviewInfoMetrics
 import com.mobileslicer.automation.automationSliceSuccessStatus
@@ -44,6 +45,15 @@ class AutomationSliceRunnerTest {
                 filamentCount = 1,
                 layerCount = 42
             ),
+            previewLoadMetrics = AutomationSlicePreviewLoadMetrics(
+                rangePlanMs = 10,
+                viewerLoadMs = 11,
+                plannedRangeCount = 3,
+                loadedStartLayer = 1,
+                loadedEndLayer = 14,
+                loadedLayerCount = 14,
+                success = true
+            ),
             configJson = """{"layer_height":0.2}"""
         )
 
@@ -65,6 +75,14 @@ class AutomationSliceRunnerTest {
         assertTrue(status.contains("previewInfoLineTypes=2"))
         assertTrue(status.contains("previewInfoFilaments=1"))
         assertTrue(status.contains("previewInfoLayers=42"))
+        assertTrue(status.contains("previewPlanMs=10"))
+        assertTrue(status.contains("previewLoadMs=11"))
+        assertTrue(status.contains("previewRanges=3"))
+        assertTrue(status.contains("previewLoadedStart=1"))
+        assertTrue(status.contains("previewLoadedEnd=14"))
+        assertTrue(status.contains("previewLoadedLayers=14"))
+        assertTrue(status.contains("previewLoadSuccess=1"))
+        assertTrue(status.contains("previewLoadGlUnavailable=0"))
         assertTrue(status.contains("elapsedMs=21"))
         assertTrue(status.contains("""config={"layer_height":0.2}"""))
     }

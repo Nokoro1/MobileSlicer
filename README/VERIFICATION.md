@@ -45,7 +45,10 @@ signals changed.
 rejected load does not leave stale G-code output behind before a replacement model
 slices successfully. The valid slices also assert that native summary/enriched-summary
 data includes preview info line types, filament rows, and layer counts used by the
-preview info sheet.
+preview info sheet. It also asks native preview range planning for an exact-preview
+range and records plan timing plus the selected preview layer range. Non-UI
+automation records OpenGL context unavailability instead of constructing the native
+viewer, because the real viewer load runs on the app render thread with GL active.
 
 If device automation fails after a slice starts, the script captures context,
 logcat, crash logcat, status text, and G-code head/tail snippets under

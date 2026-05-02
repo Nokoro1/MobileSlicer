@@ -40,6 +40,14 @@ AUTOMATION_LAST_PREVIEW_INFO_ENRICHED_RICH=""
 AUTOMATION_LAST_PREVIEW_INFO_LINE_TYPES=""
 AUTOMATION_LAST_PREVIEW_INFO_FILAMENTS=""
 AUTOMATION_LAST_PREVIEW_INFO_LAYERS=""
+AUTOMATION_LAST_PREVIEW_PLAN_MS=""
+AUTOMATION_LAST_PREVIEW_LOAD_MS=""
+AUTOMATION_LAST_PREVIEW_RANGES=""
+AUTOMATION_LAST_PREVIEW_LOADED_START=""
+AUTOMATION_LAST_PREVIEW_LOADED_END=""
+AUTOMATION_LAST_PREVIEW_LOADED_LAYERS=""
+AUTOMATION_LAST_PREVIEW_LOAD_SUCCESS=""
+AUTOMATION_LAST_PREVIEW_LOAD_GL_UNAVAILABLE=""
 AUTOMATION_LAST_PEAK_PSS_KB=""
 AUTOMATION_LAST_PEAK_JAVA_HEAP_KB=""
 AUTOMATION_LAST_PEAK_NATIVE_HEAP_KB=""
@@ -740,6 +748,14 @@ run_automation_slice() {
   AUTOMATION_LAST_PREVIEW_INFO_LINE_TYPES="$(status_metric "$status" "previewInfoLineTypes")"
   AUTOMATION_LAST_PREVIEW_INFO_FILAMENTS="$(status_metric "$status" "previewInfoFilaments")"
   AUTOMATION_LAST_PREVIEW_INFO_LAYERS="$(status_metric "$status" "previewInfoLayers")"
+  AUTOMATION_LAST_PREVIEW_PLAN_MS="$(status_metric "$status" "previewPlanMs")"
+  AUTOMATION_LAST_PREVIEW_LOAD_MS="$(status_metric "$status" "previewLoadMs")"
+  AUTOMATION_LAST_PREVIEW_RANGES="$(status_metric "$status" "previewRanges")"
+  AUTOMATION_LAST_PREVIEW_LOADED_START="$(status_metric "$status" "previewLoadedStart")"
+  AUTOMATION_LAST_PREVIEW_LOADED_END="$(status_metric "$status" "previewLoadedEnd")"
+  AUTOMATION_LAST_PREVIEW_LOADED_LAYERS="$(status_metric "$status" "previewLoadedLayers")"
+  AUTOMATION_LAST_PREVIEW_LOAD_SUCCESS="$(status_metric "$status" "previewLoadSuccess")"
+  AUTOMATION_LAST_PREVIEW_LOAD_GL_UNAVAILABLE="$(status_metric "$status" "previewLoadGlUnavailable")"
   AUTOMATION_LAST_PEAK_PSS_KB="$PERF_LAST_PEAK_PSS_KB"
   AUTOMATION_LAST_PEAK_JAVA_HEAP_KB="$PERF_LAST_PEAK_JAVA_HEAP_KB"
   AUTOMATION_LAST_PEAK_NATIVE_HEAP_KB="$PERF_LAST_PEAK_NATIVE_HEAP_KB"
@@ -759,6 +775,20 @@ assert_automation_preview_info_ready() {
     fail "$label did not report preview info filaments."
   [[ "${AUTOMATION_LAST_PREVIEW_INFO_LAYERS:-0}" =~ ^[0-9]+$ && "$AUTOMATION_LAST_PREVIEW_INFO_LAYERS" -gt 0 ]] ||
     fail "$label did not report preview info layers."
+}
+
+assert_automation_preview_plan_ready() {
+  local label="$1"
+  [[ "${AUTOMATION_LAST_PREVIEW_RANGES:-0}" =~ ^[0-9]+$ && "$AUTOMATION_LAST_PREVIEW_RANGES" -gt 0 ]] ||
+    fail "$label did not report planned preview ranges."
+  [[ "${AUTOMATION_LAST_PREVIEW_LOADED_LAYERS:-0}" =~ ^[0-9]+$ && "$AUTOMATION_LAST_PREVIEW_LOADED_LAYERS" -gt 0 ]] ||
+    fail "$label did not report a selected preview range."
+  [[ "${AUTOMATION_LAST_PREVIEW_PLAN_MS:-0}" =~ ^[0-9]+$ ]] ||
+    fail "$label did not report preview range planning time."
+  [[ "${AUTOMATION_LAST_PREVIEW_LOAD_MS:-0}" =~ ^[0-9]+$ ]] ||
+    fail "$label did not report preview viewer load time."
+  [[ "$AUTOMATION_LAST_PREVIEW_LOAD_SUCCESS" == "1" || "$AUTOMATION_LAST_PREVIEW_LOAD_GL_UNAVAILABLE" == "1" ]] ||
+    fail "$label preview viewer load neither succeeded nor reported the expected non-UI OpenGL unavailability."
 }
 
 run_automation_slice_expect_failure() {
@@ -844,16 +874,22 @@ append_perf_record() {
   local preview_cache_complete="${14}"
   local preview_cached_vertices="${15}"
   local preview_cache_build_ms="${16}"
-  local peak_pss_kb="${17}"
-  local peak_java_heap_kb="${18}"
-  local peak_native_heap_kb="${19}"
-  local peak_graphics_kb="${20}"
-  local peak_private_other_kb="${21}"
-  local peak_system_kb="${22}"
-  local bytes="${23}"
-  local fixture_bytes="${24}"
-  local device_output_path="${25}"
-  python3 - "$records_path" "$name" "$type" "$startup_ms" "$staging_ms" "$native_load_ms" "$placement_ms" "$config_ms" "$native_slice_ms" "$write_gcode_ms" "$elapsed_ms" "$preview_moves" "$preview_cache_built" "$preview_cache_complete" "$preview_cached_vertices" "$preview_cache_build_ms" "$peak_pss_kb" "$peak_java_heap_kb" "$peak_native_heap_kb" "$peak_graphics_kb" "$peak_private_other_kb" "$peak_system_kb" "$bytes" "$fixture_bytes" "$device_output_path" <<'PY'
+  local preview_plan_ms="${17}"
+  local preview_load_ms="${18}"
+  local preview_ranges="${19}"
+  local preview_loaded_layers="${20}"
+  local preview_load_success="${21}"
+  local preview_load_gl_unavailable="${22}"
+  local peak_pss_kb="${23}"
+  local peak_java_heap_kb="${24}"
+  local peak_native_heap_kb="${25}"
+  local peak_graphics_kb="${26}"
+  local peak_private_other_kb="${27}"
+  local peak_system_kb="${28}"
+  local bytes="${29}"
+  local fixture_bytes="${30}"
+  local device_output_path="${31}"
+  python3 - "$records_path" "$name" "$type" "$startup_ms" "$staging_ms" "$native_load_ms" "$placement_ms" "$config_ms" "$native_slice_ms" "$write_gcode_ms" "$elapsed_ms" "$preview_moves" "$preview_cache_built" "$preview_cache_complete" "$preview_cached_vertices" "$preview_cache_build_ms" "$preview_plan_ms" "$preview_load_ms" "$preview_ranges" "$preview_loaded_layers" "$preview_load_success" "$preview_load_gl_unavailable" "$peak_pss_kb" "$peak_java_heap_kb" "$peak_native_heap_kb" "$peak_graphics_kb" "$peak_private_other_kb" "$peak_system_kb" "$bytes" "$fixture_bytes" "$device_output_path" <<'PY'
 import json
 import sys
 
@@ -874,6 +910,12 @@ import sys
     preview_cache_complete,
     preview_cached_vertices,
     preview_cache_build_ms,
+    preview_plan_ms,
+    preview_load_ms,
+    preview_ranges,
+    preview_loaded_layers,
+    preview_load_success,
+    preview_load_gl_unavailable,
     peak_pss_kb,
     peak_java_heap_kb,
     peak_native_heap_kb,
@@ -906,6 +948,12 @@ for key, value in [
     ("preview_cache_complete", preview_cache_complete),
     ("preview_cached_vertices", preview_cached_vertices),
     ("preview_cache_build_ms", preview_cache_build_ms),
+    ("preview_plan_ms", preview_plan_ms),
+    ("preview_load_ms", preview_load_ms),
+    ("preview_ranges", preview_ranges),
+    ("preview_loaded_layers", preview_loaded_layers),
+    ("preview_load_success", preview_load_success),
+    ("preview_load_gl_unavailable", preview_load_gl_unavailable),
     ("peak_pss_kb", peak_pss_kb),
     ("peak_java_heap_kb", peak_java_heap_kb),
     ("peak_native_heap_kb", peak_native_heap_kb),
@@ -934,6 +982,7 @@ run_perf_slice_case() {
   PERF_CURRENT_CASE="$name"
   run_automation_slice "$fixture" "$serial" "perf-$name" "0" "$config_json" "1"
   PERF_CURRENT_CASE=""
+  assert_automation_preview_plan_ready "$name"
   local fixture_bytes
   fixture_bytes="$(wc -c < "$fixture" | tr -d ' ')"
   append_perf_record \
@@ -953,6 +1002,12 @@ run_perf_slice_case() {
     "$AUTOMATION_LAST_PREVIEW_CACHE_COMPLETE" \
     "$AUTOMATION_LAST_PREVIEW_CACHED_VERTICES" \
     "$AUTOMATION_LAST_PREVIEW_CACHE_BUILD_MS" \
+    "$AUTOMATION_LAST_PREVIEW_PLAN_MS" \
+    "$AUTOMATION_LAST_PREVIEW_LOAD_MS" \
+    "$AUTOMATION_LAST_PREVIEW_RANGES" \
+    "$AUTOMATION_LAST_PREVIEW_LOADED_LAYERS" \
+    "$AUTOMATION_LAST_PREVIEW_LOAD_SUCCESS" \
+    "$AUTOMATION_LAST_PREVIEW_LOAD_GL_UNAVAILABLE" \
     "$AUTOMATION_LAST_PEAK_PSS_KB" \
     "$AUTOMATION_LAST_PEAK_JAVA_HEAP_KB" \
     "$AUTOMATION_LAST_PEAK_NATIVE_HEAP_KB" \
@@ -1019,7 +1074,7 @@ run_performance_gate() {
     startup_private_other_kb="$(meminfo_app_summary_kb "$startup_meminfo" "Private Other")"
     startup_system_kb="$(meminfo_app_summary_kb "$startup_meminfo" "System")"
     printf '%s\n' "$startup_meminfo" > "$PERF_CURRENT_MEMINFO_DIR/cold-start-final-meminfo.txt"
-    append_perf_record "$records_path" "cold-start" "startup" "$startup_ms" "" "" "" "" "" "" "" "" "" "" "" "" "${startup_pss_kb:-0}" "${startup_java_heap_kb:-0}" "${startup_native_heap_kb:-0}" "${startup_graphics_kb:-0}" "${startup_private_other_kb:-0}" "${startup_system_kb:-0}" "" "" ""
+    append_perf_record "$records_path" "cold-start" "startup" "$startup_ms" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "${startup_pss_kb:-0}" "${startup_java_heap_kb:-0}" "${startup_native_heap_kb:-0}" "${startup_graphics_kb:-0}" "${startup_private_other_kb:-0}" "${startup_system_kb:-0}" "" "" ""
     assert_no_crash_after_launch "$serial"
   fi
 
@@ -1254,12 +1309,14 @@ run_slice_lifecycle_regression() {
 
   run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "lifecycle-valid-a" "0" "$baseline_config"
   assert_automation_preview_info_ready "lifecycle-valid-a"
+  assert_automation_preview_plan_ready "lifecycle-valid-a"
   local first_bytes="$AUTOMATION_LAST_BYTES"
   run_automation_slice_expect_failure "$invalid_stl" "$serial" "lifecycle-rejected-empty" "0" "$baseline_config"
   [[ "$AUTOMATION_LAST_STATUS" == *"nativeLoadModel failed"* || "$AUTOMATION_LAST_STATUS" == *"load"* ]] ||
     fail "Rejected lifecycle load did not report a load failure: $AUTOMATION_LAST_STATUS"
   run_automation_slice "$SUPPORT_SLICE_SMOKE_STL" "$serial" "lifecycle-valid-b" "0" "$support_config"
   assert_automation_preview_info_ready "lifecycle-valid-b"
+  assert_automation_preview_plan_ready "lifecycle-valid-b"
   local second_bytes="$AUTOMATION_LAST_BYTES"
   [[ "$first_bytes" != "$second_bytes" ]] ||
     fail "Lifecycle reload emitted the same byte count after model replacement; expected a distinct support fixture output."

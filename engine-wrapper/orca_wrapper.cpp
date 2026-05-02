@@ -81,6 +81,8 @@ struct OrcaEngineImpl {
 #if defined(MOBILE_SLICER_ENABLE_VGCODE)
     libvgcode::GCodeInputData cached_preview_input;
     size_t cached_preview_source_size{0};
+    std::vector<size_t> cached_preview_layer_counts;
+    size_t cached_preview_layer_counts_source_size{0};
     bool cached_preview_valid{false};
     bool cached_preview_complete{false};
 #endif
@@ -2888,6 +2890,8 @@ static void clear_generated_gcode(OrcaEngine* engine)
 #if defined(MOBILE_SLICER_ENABLE_VGCODE)
     engine->impl.cached_preview_input = libvgcode::GCodeInputData{};
     engine->impl.cached_preview_source_size = 0;
+    engine->impl.cached_preview_layer_counts.clear();
+    engine->impl.cached_preview_layer_counts_source_size = 0;
     engine->impl.cached_preview_valid = false;
     engine->impl.cached_preview_complete = false;
 #endif
@@ -4027,6 +4031,8 @@ extern "C" int orca_slice(OrcaEngine* engine)
 #if defined(MOBILE_SLICER_ENABLE_VGCODE)
         engine->impl.cached_preview_input = libvgcode::GCodeInputData{};
         engine->impl.cached_preview_source_size = 0;
+        engine->impl.cached_preview_layer_counts = count_preview_vertices_by_layer_from_processor_result(gcode_result);
+        engine->impl.cached_preview_layer_counts_source_size = static_cast<size_t>(gcode_size);
         engine->impl.cached_preview_valid = false;
         engine->impl.cached_preview_complete = false;
         const size_t preview_moves = gcode_result.moves.size();
@@ -4344,6 +4350,10 @@ static bool ensure_gcode_preview_cache(OrcaEngine* engine, std::string& error, P
     engine->impl.cached_preview_source_size = source_size;
     engine->impl.cached_preview_valid = !engine->impl.cached_preview_input.vertices.empty();
     engine->impl.cached_preview_complete = engine->impl.cached_preview_valid && !vertex_limit_reached;
+    if (engine->impl.cached_preview_complete) {
+        engine->impl.cached_preview_layer_counts = count_preview_vertices_by_layer_from_input_data(engine->impl.cached_preview_input);
+        engine->impl.cached_preview_layer_counts_source_size = source_size;
+    }
 
     const auto parse_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - parse_start).count();
@@ -4589,21 +4599,28 @@ extern "C" const char* orca_gcode_preview_suggest_layer_ranges(OrcaEngine* engin
         return nullptr;
     }
     std::lock_guard<std::recursive_mutex> lock(engine->impl.mutex);
-    if (!ensure_gcode_loaded_unlocked(engine)) {
-        set_last_error(engine, "no generated G-code is available for preview range planning");
-        return nullptr;
-    }
     const size_t budget = static_cast<size_t>(
         std::max<long>(1L, std::min<long>(vertex_budget, static_cast<long>(kMaxPreviewVertices - 1))));
     try {
         std::string error;
         const auto plan_start = std::chrono::steady_clock::now();
+        size_t source_size = engine->impl.gcode.size();
+        if (source_size == 0 && !engine->impl.gcode_path.empty()) {
+            std::error_code ec;
+            const uintmax_t file_size = std::filesystem::file_size(engine->impl.gcode_path, ec);
+            if (!ec) {
+                source_size = static_cast<size_t>(file_size);
+            }
+        }
         const bool cached_counts_available =
-            engine->impl.cached_preview_valid &&
-            engine->impl.cached_preview_complete &&
-            engine->impl.cached_preview_source_size == engine->impl.gcode.size();
+            !engine->impl.cached_preview_layer_counts.empty() &&
+            engine->impl.cached_preview_layer_counts_source_size == source_size;
+        if (!cached_counts_available && !ensure_gcode_loaded_unlocked(engine)) {
+            set_last_error(engine, "no generated G-code is available for preview range planning");
+            return nullptr;
+        }
         const std::vector<size_t> layer_counts = cached_counts_available ?
-            count_preview_vertices_by_layer_from_input_data(engine->impl.cached_preview_input) :
+            engine->impl.cached_preview_layer_counts :
             count_preview_vertices_by_layer_from_gcode_text(engine->impl.gcode);
         engine->impl.preview_range_plan = pack_preview_layer_ranges_from_counts(
             layer_counts,
