@@ -31,7 +31,19 @@ AUTOMATION_LAST_CONFIG_MS=""
 AUTOMATION_LAST_NATIVE_SLICE_MS=""
 AUTOMATION_LAST_WRITE_GCODE_MS=""
 AUTOMATION_LAST_PEAK_PSS_KB=""
+AUTOMATION_LAST_PEAK_JAVA_HEAP_KB=""
+AUTOMATION_LAST_PEAK_NATIVE_HEAP_KB=""
+AUTOMATION_LAST_PEAK_GRAPHICS_KB=""
+AUTOMATION_LAST_PEAK_PRIVATE_OTHER_KB=""
+AUTOMATION_LAST_PEAK_SYSTEM_KB=""
 PERF_LAST_PEAK_PSS_KB=0
+PERF_LAST_PEAK_JAVA_HEAP_KB=0
+PERF_LAST_PEAK_NATIVE_HEAP_KB=0
+PERF_LAST_PEAK_GRAPHICS_KB=0
+PERF_LAST_PEAK_PRIVATE_OTHER_KB=0
+PERF_LAST_PEAK_SYSTEM_KB=0
+PERF_CURRENT_MEMINFO_DIR=""
+PERF_CURRENT_CASE=""
 
 usage() {
   cat <<'USAGE'
@@ -50,6 +62,7 @@ Usage:
   scripts/verify_android.sh slice-regression [serial]
   scripts/verify_android.sh profile-ui [serial]
   scripts/verify_android.sh perf [serial]
+  scripts/verify_android.sh perf-heavy [serial]
   scripts/verify_android.sh benchy <local-stl-path> [serial]
   scripts/verify_android.sh all [serial]
 
@@ -82,6 +95,9 @@ Modes:
           write reports under artifacts/performance, and fail on hard budgets
           or optional baseline regressions. Requires
           MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  perf-heavy
+          Run the same measurement stack on only the medium, complex, and stress
+          fixtures. Intended for memory-pressure optimization checks.
   benchy  Build, install, stage an STL app-private, and run automation slicing.
           Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   all     Run local checks and install the debug APK.
@@ -488,24 +504,102 @@ device_pss_kb() {
     awk '/^[[:space:]]*TOTAL[[:space:]]/ {print $2; exit}'
 }
 
+device_meminfo() {
+  local serial="$1"
+  adb_device "$serial" shell dumpsys meminfo "$PACKAGE_NAME" 2>/dev/null
+}
+
+meminfo_app_summary_kb() {
+  local meminfo="$1"
+  local label="$2"
+  MEMINFO_PAYLOAD="$meminfo" python3 - "$label" <<'PY'
+import os
+import re
+import sys
+
+label = re.escape(sys.argv[1])
+match = re.search(rf"^\s*{label}:\s+([0-9]+)\b", os.environ["MEMINFO_PAYLOAD"], re.MULTILINE)
+print(match.group(1) if match else "")
+PY
+}
+
+meminfo_total_pss_kb() {
+  local meminfo="$1"
+  MEMINFO_PAYLOAD="$meminfo" python3 - <<'PY'
+import os
+import re
+
+match = re.search(r"^\s*TOTAL PSS:\s+([0-9]+)\b", os.environ["MEMINFO_PAYLOAD"], re.MULTILINE)
+if not match:
+    match = re.search(r"^\s*TOTAL\s+([0-9]+)\b", os.environ["MEMINFO_PAYLOAD"], re.MULTILINE)
+print(match.group(1) if match else "")
+PY
+}
+
+write_peak_meminfo_snapshot() {
+  local meminfo="$1"
+  local pss_kb="$2"
+  if [[ -z "$PERF_CURRENT_MEMINFO_DIR" || -z "$PERF_CURRENT_CASE" ]]; then
+    return 0
+  fi
+  mkdir -p "$PERF_CURRENT_MEMINFO_DIR"
+  printf '%s\n' "$meminfo" > "$PERF_CURRENT_MEMINFO_DIR/$PERF_CURRENT_CASE-peak-meminfo.txt"
+  printf 'peakPssKb=%s\n' "$pss_kb" > "$PERF_CURRENT_MEMINFO_DIR/$PERF_CURRENT_CASE-peak-summary.txt"
+}
+
+update_peak_meminfo_metrics() {
+  local meminfo="$1"
+  local pss_kb java_heap_kb native_heap_kb graphics_kb private_other_kb system_kb
+  pss_kb="$(meminfo_total_pss_kb "$meminfo")"
+  java_heap_kb="$(meminfo_app_summary_kb "$meminfo" "Java Heap")"
+  native_heap_kb="$(meminfo_app_summary_kb "$meminfo" "Native Heap")"
+  graphics_kb="$(meminfo_app_summary_kb "$meminfo" "Graphics")"
+  private_other_kb="$(meminfo_app_summary_kb "$meminfo" "Private Other")"
+  system_kb="$(meminfo_app_summary_kb "$meminfo" "System")"
+
+  if [[ "$pss_kb" =~ ^[0-9]+$ && "$pss_kb" -gt "$PERF_LAST_PEAK_PSS_KB" ]]; then
+    PERF_LAST_PEAK_PSS_KB="$pss_kb"
+    write_peak_meminfo_snapshot "$meminfo" "$pss_kb"
+  fi
+  if [[ "$java_heap_kb" =~ ^[0-9]+$ && "$java_heap_kb" -gt "$PERF_LAST_PEAK_JAVA_HEAP_KB" ]]; then
+    PERF_LAST_PEAK_JAVA_HEAP_KB="$java_heap_kb"
+  fi
+  if [[ "$native_heap_kb" =~ ^[0-9]+$ && "$native_heap_kb" -gt "$PERF_LAST_PEAK_NATIVE_HEAP_KB" ]]; then
+    PERF_LAST_PEAK_NATIVE_HEAP_KB="$native_heap_kb"
+  fi
+  if [[ "$graphics_kb" =~ ^[0-9]+$ && "$graphics_kb" -gt "$PERF_LAST_PEAK_GRAPHICS_KB" ]]; then
+    PERF_LAST_PEAK_GRAPHICS_KB="$graphics_kb"
+  fi
+  if [[ "$private_other_kb" =~ ^[0-9]+$ && "$private_other_kb" -gt "$PERF_LAST_PEAK_PRIVATE_OTHER_KB" ]]; then
+    PERF_LAST_PEAK_PRIVATE_OTHER_KB="$private_other_kb"
+  fi
+  if [[ "$system_kb" =~ ^[0-9]+$ && "$system_kb" -gt "$PERF_LAST_PEAK_SYSTEM_KB" ]]; then
+    PERF_LAST_PEAK_SYSTEM_KB="$system_kb"
+  fi
+}
+
 wait_for_status_with_memory() {
   local serial="$1"
   local status_path="$2"
   local attempts="${3:-120}"
   local delay_seconds="${4:-1}"
   PERF_LAST_PEAK_PSS_KB=0
+  PERF_LAST_PEAK_JAVA_HEAP_KB=0
+  PERF_LAST_PEAK_NATIVE_HEAP_KB=0
+  PERF_LAST_PEAK_GRAPHICS_KB=0
+  PERF_LAST_PEAK_PRIVATE_OTHER_KB=0
+  PERF_LAST_PEAK_SYSTEM_KB=0
 
   for _ in $(seq 1 "$attempts"); do
-    local pss_kb
-    pss_kb="$(device_pss_kb "$serial" || true)"
-    if [[ "$pss_kb" =~ ^[0-9]+$ && "$pss_kb" -gt "$PERF_LAST_PEAK_PSS_KB" ]]; then
-      PERF_LAST_PEAK_PSS_KB="$pss_kb"
-    fi
+    local meminfo
+    meminfo="$(device_meminfo "$serial" || true)"
+    update_peak_meminfo_metrics "$meminfo"
     if adb_device "$serial" shell run-as "$PACKAGE_NAME" test -f "$status_path"; then
-      local final_pss_kb
-      final_pss_kb="$(device_pss_kb "$serial" || true)"
-      if [[ "$final_pss_kb" =~ ^[0-9]+$ && "$final_pss_kb" -gt "$PERF_LAST_PEAK_PSS_KB" ]]; then
-        PERF_LAST_PEAK_PSS_KB="$final_pss_kb"
+      local final_meminfo
+      final_meminfo="$(device_meminfo "$serial" || true)"
+      update_peak_meminfo_metrics "$final_meminfo"
+      if [[ -n "$PERF_CURRENT_MEMINFO_DIR" && -n "$PERF_CURRENT_CASE" ]]; then
+        printf '%s\n' "$final_meminfo" > "$PERF_CURRENT_MEMINFO_DIR/$PERF_CURRENT_CASE-final-meminfo.txt"
       fi
       adb_device "$serial" shell run-as "$PACKAGE_NAME" cat "$status_path"
       return 0
@@ -592,6 +686,11 @@ run_automation_slice() {
   AUTOMATION_LAST_NATIVE_SLICE_MS="$(status_metric "$status" "nativeSliceMs")"
   AUTOMATION_LAST_WRITE_GCODE_MS="$(status_metric "$status" "writeGcodeMs")"
   AUTOMATION_LAST_PEAK_PSS_KB="$PERF_LAST_PEAK_PSS_KB"
+  AUTOMATION_LAST_PEAK_JAVA_HEAP_KB="$PERF_LAST_PEAK_JAVA_HEAP_KB"
+  AUTOMATION_LAST_PEAK_NATIVE_HEAP_KB="$PERF_LAST_PEAK_NATIVE_HEAP_KB"
+  AUTOMATION_LAST_PEAK_GRAPHICS_KB="$PERF_LAST_PEAK_GRAPHICS_KB"
+  AUTOMATION_LAST_PEAK_PRIVATE_OTHER_KB="$PERF_LAST_PEAK_PRIVATE_OTHER_KB"
+  AUTOMATION_LAST_PEAK_SYSTEM_KB="$PERF_LAST_PEAK_SYSTEM_KB"
   clear_current_automation_context
 }
 
@@ -629,10 +728,15 @@ append_perf_record() {
   local write_gcode_ms="${10}"
   local elapsed_ms="${11}"
   local peak_pss_kb="${12}"
-  local bytes="${13}"
-  local fixture_bytes="${14}"
-  local device_output_path="${15}"
-  python3 - "$records_path" "$name" "$type" "$startup_ms" "$staging_ms" "$native_load_ms" "$placement_ms" "$config_ms" "$native_slice_ms" "$write_gcode_ms" "$elapsed_ms" "$peak_pss_kb" "$bytes" "$fixture_bytes" "$device_output_path" <<'PY'
+  local peak_java_heap_kb="${13}"
+  local peak_native_heap_kb="${14}"
+  local peak_graphics_kb="${15}"
+  local peak_private_other_kb="${16}"
+  local peak_system_kb="${17}"
+  local bytes="${18}"
+  local fixture_bytes="${19}"
+  local device_output_path="${20}"
+  python3 - "$records_path" "$name" "$type" "$startup_ms" "$staging_ms" "$native_load_ms" "$placement_ms" "$config_ms" "$native_slice_ms" "$write_gcode_ms" "$elapsed_ms" "$peak_pss_kb" "$peak_java_heap_kb" "$peak_native_heap_kb" "$peak_graphics_kb" "$peak_private_other_kb" "$peak_system_kb" "$bytes" "$fixture_bytes" "$device_output_path" <<'PY'
 import json
 import sys
 
@@ -649,6 +753,11 @@ import sys
     write_gcode_ms,
     elapsed_ms,
     peak_pss_kb,
+    peak_java_heap_kb,
+    peak_native_heap_kb,
+    peak_graphics_kb,
+    peak_private_other_kb,
+    peak_system_kb,
     bytes_value,
     fixture_bytes,
     device_output_path,
@@ -671,6 +780,11 @@ for key, value in [
     ("write_gcode_ms", write_gcode_ms),
     ("elapsed_ms", elapsed_ms),
     ("peak_pss_kb", peak_pss_kb),
+    ("peak_java_heap_kb", peak_java_heap_kb),
+    ("peak_native_heap_kb", peak_native_heap_kb),
+    ("peak_graphics_kb", peak_graphics_kb),
+    ("peak_private_other_kb", peak_private_other_kb),
+    ("peak_system_kb", peak_system_kb),
     ("bytes", bytes_value),
     ("fixture_bytes", fixture_bytes),
 ]:
@@ -690,7 +804,9 @@ run_perf_slice_case() {
   local name="$3"
   local fixture="$4"
   local config_json="$5"
+  PERF_CURRENT_CASE="$name"
   run_automation_slice "$fixture" "$serial" "perf-$name" "0" "$config_json" "1"
+  PERF_CURRENT_CASE=""
   local fixture_bytes
   fixture_bytes="$(wc -c < "$fixture" | tr -d ' ')"
   append_perf_record \
@@ -706,6 +822,11 @@ run_perf_slice_case() {
     "$AUTOMATION_LAST_WRITE_GCODE_MS" \
     "$AUTOMATION_LAST_ELAPSED_MS" \
     "$AUTOMATION_LAST_PEAK_PSS_KB" \
+    "$AUTOMATION_LAST_PEAK_JAVA_HEAP_KB" \
+    "$AUTOMATION_LAST_PEAK_NATIVE_HEAP_KB" \
+    "$AUTOMATION_LAST_PEAK_GRAPHICS_KB" \
+    "$AUTOMATION_LAST_PEAK_PRIVATE_OTHER_KB" \
+    "$AUTOMATION_LAST_PEAK_SYSTEM_KB" \
     "$AUTOMATION_LAST_BYTES" \
     "$fixture_bytes" \
     "$AUTOMATION_LAST_OUTPUT_PATH"
@@ -713,6 +834,7 @@ run_perf_slice_case() {
 
 run_performance_gate() {
   local serial="$1"
+  local heavy_only="${2:-0}"
   require_device_automation
   require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "small cube performance STL"
   require_automation_fixture "$SUPPORT_SLICE_SMOKE_STL" "bridge support performance STL"
@@ -730,16 +852,27 @@ run_performance_gate() {
   local records_path="$artifact_dir/records.jsonl"
   local report_json="$artifact_dir/report.json"
   local report_md="$artifact_dir/report.md"
+  PERF_CURRENT_MEMINFO_DIR="$artifact_dir/meminfo"
+  mkdir -p "$PERF_CURRENT_MEMINFO_DIR"
 
   log "Running non-UI performance gate on $serial"
-  local startup_output startup_ms startup_pss_kb
-  startup_output="$(launch_app_for_perf "$serial")"
-  printf '%s\n' "$startup_output"
-  startup_ms="$(printf '%s\n' "$startup_output" | tail -n 1)"
-  sleep 2
-  startup_pss_kb="$(device_pss_kb "$serial" || true)"
-  append_perf_record "$records_path" "cold-start" "startup" "$startup_ms" "" "" "" "" "" "" "" "${startup_pss_kb:-0}" "" "" ""
-  assert_no_crash_after_launch "$serial"
+  if [[ "$heavy_only" != "1" ]]; then
+    local startup_output startup_ms startup_meminfo startup_pss_kb startup_java_heap_kb startup_native_heap_kb startup_graphics_kb startup_private_other_kb startup_system_kb
+    startup_output="$(launch_app_for_perf "$serial")"
+    printf '%s\n' "$startup_output"
+    startup_ms="$(printf '%s\n' "$startup_output" | tail -n 1)"
+    sleep 2
+    startup_meminfo="$(device_meminfo "$serial" || true)"
+    startup_pss_kb="$(meminfo_total_pss_kb "$startup_meminfo")"
+    startup_java_heap_kb="$(meminfo_app_summary_kb "$startup_meminfo" "Java Heap")"
+    startup_native_heap_kb="$(meminfo_app_summary_kb "$startup_meminfo" "Native Heap")"
+    startup_graphics_kb="$(meminfo_app_summary_kb "$startup_meminfo" "Graphics")"
+    startup_private_other_kb="$(meminfo_app_summary_kb "$startup_meminfo" "Private Other")"
+    startup_system_kb="$(meminfo_app_summary_kb "$startup_meminfo" "System")"
+    printf '%s\n' "$startup_meminfo" > "$PERF_CURRENT_MEMINFO_DIR/cold-start-final-meminfo.txt"
+    append_perf_record "$records_path" "cold-start" "startup" "$startup_ms" "" "" "" "" "" "" "" "${startup_pss_kb:-0}" "${startup_java_heap_kb:-0}" "${startup_native_heap_kb:-0}" "${startup_graphics_kb:-0}" "${startup_private_other_kb:-0}" "${startup_system_kb:-0}" "" "" ""
+    assert_no_crash_after_launch "$serial"
+  fi
 
   local default_config support_config perimeter_config medium_config complex_config stress_config
   default_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
@@ -749,12 +882,14 @@ run_performance_gate() {
   complex_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
   stress_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=10 enable_support=false)"
 
-  run_perf_slice_case "$records_path" "$serial" "small-cube" "$DEFAULT_SLICE_SMOKE_STL" "$default_config"
-  run_perf_slice_case "$records_path" "$serial" "bridge-support" "$SUPPORT_SLICE_SMOKE_STL" "$support_config"
-  run_perf_slice_case "$records_path" "$serial" "perimeter-array" "$PERIMETER_ARRAY_SLICE_SMOKE_STL" "$perimeter_config"
+  if [[ "$heavy_only" != "1" ]]; then
+    run_perf_slice_case "$records_path" "$serial" "small-cube" "$DEFAULT_SLICE_SMOKE_STL" "$default_config"
+    run_perf_slice_case "$records_path" "$serial" "bridge-support" "$SUPPORT_SLICE_SMOKE_STL" "$support_config"
+    run_perf_slice_case "$records_path" "$serial" "perimeter-array" "$PERIMETER_ARRAY_SLICE_SMOKE_STL" "$perimeter_config"
+  fi
   run_perf_slice_case "$records_path" "$serial" "medium-speed-structure" "$MEDIUM_SLICE_PERF_STL" "$medium_config"
   run_perf_slice_case "$records_path" "$serial" "complex-vfa" "$COMPLEX_SLICE_PERF_STL" "$complex_config"
-  if [[ "${MOBILE_SLICER_PERF_INCLUDE_STRESS:-0}" =~ ^(1|true|TRUE|yes|YES)$ ]]; then
+  if [[ "$heavy_only" == "1" || "${MOBILE_SLICER_PERF_INCLUDE_STRESS:-0}" =~ ^(1|true|TRUE|yes|YES)$ ]]; then
     run_perf_slice_case "$records_path" "$serial" "stress-temperature-tower" "$STRESS_SLICE_PERF_STL" "$stress_config"
   else
     log "Skipping stress-temperature-tower; set MOBILE_SLICER_PERF_INCLUDE_STRESS=1 to include the 10MB stress fixture."
@@ -771,6 +906,7 @@ run_performance_gate() {
     "${baseline_args[@]}"
   ln -sfn "$artifact_dir" "$artifact_root/latest"
   log "Performance artifacts: $artifact_dir"
+  PERF_CURRENT_MEMINFO_DIR=""
   assert_no_crash_after_launch "$serial"
 }
 
@@ -982,6 +1118,9 @@ case "$mode" in
     ;;
   perf)
     run_performance_gate "$(device_serial "${2:-}")"
+    ;;
+  perf-heavy)
+    run_performance_gate "$(device_serial "${2:-}")" "1"
     ;;
   benchy)
     [[ $# -ge 2 ]] || {

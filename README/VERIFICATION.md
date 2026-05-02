@@ -30,6 +30,7 @@ scripts/verify_android.sh device RFCYA01ANVE
 MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh device-automation RFCYA01ANVE
 MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh slice-regression RFCYA01ANVE
 MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh perf RFCYA01ANVE
+MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh perf-heavy RFCYA01ANVE
 ```
 
 `device` builds and installs the debug APK only. `device-automation` builds, installs,
@@ -55,12 +56,17 @@ inside the app. It builds and installs the `perfDebug` APK, measures cold startu
 then runs app-private automation slices for the small cube, bridge/support, and
 small-perimeter-array fixtures plus medium and complex calibration STLs. Reports are written under
 `artifacts/performance/<timestamp>/` with `report.json`, `report.md`, and a
-`latest` symlink.
+`latest` symlink. Raw peak/final `dumpsys meminfo` snapshots are saved under the
+run's `meminfo/` directory.
 
 Default hard budgets are intentionally broad enough for normal phone variance:
 
 - cold startup: `MOBILE_SLICER_PERF_MAX_STARTUP_MS`, default `4000`
 - peak process PSS: `MOBILE_SLICER_PERF_MAX_PEAK_PSS_KB`, default `900000`
+- Java heap: `MOBILE_SLICER_PERF_MAX_JAVA_HEAP_KB`, default `350000`
+- native heap: `MOBILE_SLICER_PERF_MAX_NATIVE_HEAP_KB`, default `700000`
+- graphics memory: `MOBILE_SLICER_PERF_MAX_GRAPHICS_KB`, default `350000`
+- private-other memory: `MOBILE_SLICER_PERF_MAX_PRIVATE_OTHER_KB`, default `550000`
 - small cube slice: `MOBILE_SLICER_PERF_MAX_SMALL_CUBE_SLICE_MS`, default `120000`
 - bridge/support slice: `MOBILE_SLICER_PERF_MAX_BRIDGE_SUPPORT_SLICE_MS`, default `180000`
 - perimeter-array slice: `MOBILE_SLICER_PERF_MAX_PERIMETER_ARRAY_SLICE_MS`, default `180000`
@@ -80,7 +86,10 @@ scripts/verify_android.sh perf RFCYA01ANVE
 
 Slice records include phase timings from the automation path:
 `stagingMs`, `nativeLoadMs`, `placementMs`, `configMs`, `nativeSliceMs`,
-`writeGcodeMs`, and `elapsedMs`.
+`writeGcodeMs`, and `elapsedMs`. Memory attribution includes peak total PSS,
+Java heap, native heap, graphics, private-other, and system memory. Use
+`perf-heavy` while optimizing memory pressure; it runs only the medium, complex,
+and stress fixtures.
 
 To compare against a previous run, pass the prior `report.json`:
 

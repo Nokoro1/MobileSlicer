@@ -130,6 +130,27 @@ def build_markdown(records: list[dict[str, Any]], failures: list[str]) -> str:
                     elapsed=record.get("elapsed_ms", ""),
                 )
             )
+        lines.extend(
+            [
+                "",
+                "## Memory Attribution",
+                "",
+                "| Name | Peak PSS KB | Java heap KB | Native heap KB | Graphics KB | Private other KB | System KB |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for record in records:
+            lines.append(
+                "| {name} | {pss} | {java} | {native} | {graphics} | {private_other} | {system} |".format(
+                    name=record.get("name", ""),
+                    pss=record.get("peak_pss_kb", ""),
+                    java=record.get("peak_java_heap_kb", ""),
+                    native=record.get("peak_native_heap_kb", ""),
+                    graphics=record.get("peak_graphics_kb", ""),
+                    private_other=record.get("peak_private_other_kb", ""),
+                    system=record.get("peak_system_kb", ""),
+                )
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -137,6 +158,10 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
     failures: list[str] = []
     max_startup_ms = env_int("MOBILE_SLICER_PERF_MAX_STARTUP_MS", 4_000)
     max_peak_pss_kb = env_int("MOBILE_SLICER_PERF_MAX_PEAK_PSS_KB", 900_000)
+    max_java_heap_kb = env_int("MOBILE_SLICER_PERF_MAX_JAVA_HEAP_KB", 350_000)
+    max_native_heap_kb = env_int("MOBILE_SLICER_PERF_MAX_NATIVE_HEAP_KB", 700_000)
+    max_graphics_kb = env_int("MOBILE_SLICER_PERF_MAX_GRAPHICS_KB", 350_000)
+    max_private_other_kb = env_int("MOBILE_SLICER_PERF_MAX_PRIVATE_OTHER_KB", 550_000)
     startup_regression_percent = env_float("MOBILE_SLICER_PERF_STARTUP_REGRESSION_PERCENT", 25.0)
     slice_regression_percent = env_float("MOBILE_SLICER_PERF_SLICE_REGRESSION_PERCENT", 25.0)
     memory_regression_percent = env_float("MOBILE_SLICER_PERF_MEMORY_REGRESSION_PERCENT", 25.0)
@@ -148,6 +173,10 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
         startup_ms = record_metric(record, "startup_ms")
         elapsed_ms = record_metric(record, "elapsed_ms")
         peak_pss_kb = record_metric(record, "peak_pss_kb")
+        peak_java_heap_kb = record_metric(record, "peak_java_heap_kb")
+        peak_native_heap_kb = record_metric(record, "peak_native_heap_kb")
+        peak_graphics_kb = record_metric(record, "peak_graphics_kb")
+        peak_private_other_kb = record_metric(record, "peak_private_other_kb")
         output_bytes = record_metric(record, "bytes")
 
         if record_type == "startup":
@@ -170,6 +199,16 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
 
         if peak_pss_kb is not None and peak_pss_kb > max_peak_pss_kb:
             failures.append(f"{name}: peak PSS {peak_pss_kb:.0f}KB exceeds budget {max_peak_pss_kb}KB")
+        if peak_java_heap_kb is not None and peak_java_heap_kb > max_java_heap_kb:
+            failures.append(f"{name}: Java heap {peak_java_heap_kb:.0f}KB exceeds budget {max_java_heap_kb}KB")
+        if peak_native_heap_kb is not None and peak_native_heap_kb > max_native_heap_kb:
+            failures.append(f"{name}: native heap {peak_native_heap_kb:.0f}KB exceeds budget {max_native_heap_kb}KB")
+        if peak_graphics_kb is not None and peak_graphics_kb > max_graphics_kb:
+            failures.append(f"{name}: graphics memory {peak_graphics_kb:.0f}KB exceeds budget {max_graphics_kb}KB")
+        if peak_private_other_kb is not None and peak_private_other_kb > max_private_other_kb:
+            failures.append(
+                f"{name}: private other memory {peak_private_other_kb:.0f}KB exceeds budget {max_private_other_kb}KB"
+            )
 
         previous = baseline.get(name)
         if not previous:
@@ -181,6 +220,10 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
             ("native_slice_ms", slice_regression_percent),
             ("write_gcode_ms", slice_regression_percent),
             ("peak_pss_kb", memory_regression_percent),
+            ("peak_java_heap_kb", memory_regression_percent),
+            ("peak_native_heap_kb", memory_regression_percent),
+            ("peak_graphics_kb", memory_regression_percent),
+            ("peak_private_other_kb", memory_regression_percent),
             ("bytes", output_regression_percent),
         ]
         for metric, allowed_percent in comparisons:
@@ -223,14 +266,21 @@ def main() -> int:
 
     for record in records:
         if record.get("type") == "startup":
-            print(f"{record.get('name')}: startupMs={record.get('startup_ms')} peakPssKb={record.get('peak_pss_kb')}")
+            print(
+                f"{record.get('name')}: startupMs={record.get('startup_ms')} "
+                f"peakPssKb={record.get('peak_pss_kb')} javaHeapKb={record.get('peak_java_heap_kb')} "
+                f"nativeHeapKb={record.get('peak_native_heap_kb')} graphicsKb={record.get('peak_graphics_kb')} "
+                f"privateOtherKb={record.get('peak_private_other_kb')}"
+            )
         elif record.get("type") == "slice":
             print(
                 f"{record.get('name')}: elapsedMs={record.get('elapsed_ms')} "
                 f"stagingMs={record.get('staging_ms')} nativeLoadMs={record.get('native_load_ms')} "
                 f"placementMs={record.get('placement_ms')} configMs={record.get('config_ms')} "
                 f"nativeSliceMs={record.get('native_slice_ms')} writeGcodeMs={record.get('write_gcode_ms')} "
-                f"peakPssKb={record.get('peak_pss_kb')} "
+                f"peakPssKb={record.get('peak_pss_kb')} javaHeapKb={record.get('peak_java_heap_kb')} "
+                f"nativeHeapKb={record.get('peak_native_heap_kb')} graphicsKb={record.get('peak_graphics_kb')} "
+                f"privateOtherKb={record.get('peak_private_other_kb')} "
                 f"bytes={record.get('bytes')}"
             )
     if failures:
