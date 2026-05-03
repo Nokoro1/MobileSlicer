@@ -3,6 +3,9 @@
 Use `scripts/verify_android.sh` for repeatable local, APK, device, and Benchy checks.
 Use `scripts/release_gate_android.sh` when you want the full release confidence
 sequence in one command.
+Use `README/RELEASE_PERFORMANCE_HARDENING.md` for the optimization and
+release-hardening checklist that explains which gates to run, what the native
+memory checkpoints mean, and which preview-quality shortcuts are rejected.
 
 ## Quick Commands
 
@@ -171,6 +174,15 @@ Individual metrics can override that floor with
 `MOBILE_SLICER_PERF_<METRIC>_REGRESSION_MIN`; `peak_pss_kb` defaults to a
 higher `131072KB` floor because total PSS includes allocator and process memory
 sampling noise beyond the native heap attribution.
+
+Large-preview perf records also enforce native post-release RSS checkpoints:
+`native_after_release_rss_kb`, `native_after_stats_rss_kb`, and
+`native_before_return_rss_kb`. The analyzer fails if those checkpoints are
+missing, if processor preview storage is retained, or if native RSS grows more
+than `8192KB` after stats update or before slice return. Override only for
+proven device variance with
+`MOBILE_SLICER_PERF_MAX_NATIVE_AFTER_STATS_GROWTH_KB` or
+`MOBILE_SLICER_PERF_MAX_NATIVE_BEFORE_RETURN_GROWTH_KB`.
 
 Refresh `performance-baselines/perf-heavy-device-baseline.json` only after a
 clean `local`, `slice-regression`, and two-pass `perf-heavy` run. The baseline
