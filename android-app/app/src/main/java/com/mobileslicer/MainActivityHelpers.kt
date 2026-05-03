@@ -5,6 +5,9 @@ import java.util.Locale
 import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.workspace.SliceResultSummary
 
+internal const val DEFAULT_ORCA_TEMP_CACHE_MAX_BYTES: Long = 256L * 1024L * 1024L
+internal const val DEFAULT_ORCA_TEMP_CACHE_MAX_AGE_MS: Long = 24L * 60L * 60L * 1000L
+
 internal data class NativeSliceFailurePresentation(
     val userMessage: String,
     val automationStatus: String
@@ -145,3 +148,64 @@ internal fun cleanupStagedModelCache(cacheDir: File, retainedPaths: Set<String>)
 internal fun cleanupShareCache(cacheDir: File) {
     File(cacheDir, "shared").deleteRecursively()
 }
+
+internal fun cleanupOrcaTempCache(
+    cacheDir: File,
+    retainedPaths: Set<String>,
+    maxBytes: Long = DEFAULT_ORCA_TEMP_CACHE_MAX_BYTES,
+    maxAgeMs: Long = DEFAULT_ORCA_TEMP_CACHE_MAX_AGE_MS,
+    nowMs: Long = System.currentTimeMillis()
+) {
+    val tempDir = File(cacheDir, "orca-temp")
+    if (!tempDir.exists()) {
+        return
+    }
+
+    val retainedCanonicalPaths = retainedPaths.mapTo(LinkedHashSet()) { retainedPath ->
+        canonicalPathFor(File(retainedPath))
+    }
+    val byteLimit = maxBytes.coerceAtLeast(0L)
+    val ageLimit = maxAgeMs.coerceAtLeast(0L)
+
+    tempDir.walkBottomUp()
+        .filter { it.isFile }
+        .forEach { file ->
+            if (canonicalPathFor(file) !in retainedCanonicalPaths &&
+                nowMs - file.lastModified() > ageLimit
+            ) {
+                file.delete()
+            }
+        }
+
+    val files = tempDir.walkTopDown()
+        .filter { it.isFile }
+        .map { CacheFile(file = it, sizeBytes = it.length(), lastModifiedMs = it.lastModified()) }
+        .toList()
+        .sortedWith(compareBy<CacheFile> { it.lastModifiedMs }.thenBy { it.file.absolutePath })
+
+    var retainedBytes = files.sumOf { it.sizeBytes }
+    for (entry in files) {
+        if (retainedBytes <= byteLimit) {
+            break
+        }
+        if (canonicalPathFor(entry.file) in retainedCanonicalPaths) {
+            continue
+        }
+        if (entry.file.delete()) {
+            retainedBytes -= entry.sizeBytes
+        }
+    }
+
+    tempDir.walkBottomUp()
+        .filter { it.isDirectory && it != tempDir && (it.list()?.isEmpty() == true) }
+        .forEach { it.delete() }
+}
+
+private data class CacheFile(
+    val file: File,
+    val sizeBytes: Long,
+    val lastModifiedMs: Long
+)
+
+private fun canonicalPathFor(file: File): String =
+    runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)

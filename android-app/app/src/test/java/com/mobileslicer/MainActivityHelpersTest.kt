@@ -4,7 +4,11 @@ import com.mobileslicer.workspace.SliceResultSummary
 import com.mobileslicer.workspace.ImportedModelFormat
 import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.viewer.ViewerModelTransform
+import java.io.File
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MainActivityHelpersTest {
@@ -75,6 +79,93 @@ class MainActivityHelpersTest {
                 fallbackName = "custom_shared_name.gcode"
             )
         )
+    }
+
+    @Test
+    fun cleanupOrcaTempCacheDeletesExpiredFiles() {
+        val cacheDir = Files.createTempDirectory("mobileslicer-cache-").toFile()
+        try {
+            val tempDir = File(cacheDir, "orca-temp").apply { mkdirs() }
+            val expired = File(tempDir, "old.tmp").apply {
+                writeBytes(ByteArray(8))
+                setLastModified(1_000L)
+            }
+            val fresh = File(tempDir, "fresh.tmp").apply {
+                writeBytes(ByteArray(8))
+                setLastModified(10_000L)
+            }
+
+            cleanupOrcaTempCache(
+                cacheDir = cacheDir,
+                retainedPaths = emptySet(),
+                maxBytes = 1024L,
+                maxAgeMs = 5_000L,
+                nowMs = 10_000L
+            )
+
+            assertFalse(expired.exists())
+            assertTrue(fresh.exists())
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun cleanupOrcaTempCacheTrimsOldestFilesToByteBudget() {
+        val cacheDir = Files.createTempDirectory("mobileslicer-cache-").toFile()
+        try {
+            val tempDir = File(cacheDir, "orca-temp").apply { mkdirs() }
+            val oldest = File(tempDir, "oldest.tmp").apply {
+                writeBytes(ByteArray(100))
+                setLastModified(1_000L)
+            }
+            val newest = File(tempDir, "newest.tmp").apply {
+                writeBytes(ByteArray(100))
+                setLastModified(2_000L)
+            }
+
+            cleanupOrcaTempCache(
+                cacheDir = cacheDir,
+                retainedPaths = emptySet(),
+                maxBytes = 100L,
+                maxAgeMs = Long.MAX_VALUE,
+                nowMs = 3_000L
+            )
+
+            assertFalse(oldest.exists())
+            assertTrue(newest.exists())
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun cleanupOrcaTempCacheRetainsCurrentFilesWhenTrimming() {
+        val cacheDir = Files.createTempDirectory("mobileslicer-cache-").toFile()
+        try {
+            val tempDir = File(cacheDir, "orca-temp").apply { mkdirs() }
+            val retained = File(tempDir, "retained.tmp").apply {
+                writeBytes(ByteArray(100))
+                setLastModified(1_000L)
+            }
+            val removable = File(tempDir, "removable.tmp").apply {
+                writeBytes(ByteArray(100))
+                setLastModified(2_000L)
+            }
+
+            cleanupOrcaTempCache(
+                cacheDir = cacheDir,
+                retainedPaths = setOf(retained.absolutePath),
+                maxBytes = 50L,
+                maxAgeMs = 1L,
+                nowMs = 3_000L
+            )
+
+            assertTrue(retained.exists())
+            assertFalse(removable.exists())
+        } finally {
+            cacheDir.deleteRecursively()
+        }
     }
 
     private fun testSummary(time: String): SliceResultSummary = SliceResultSummary(

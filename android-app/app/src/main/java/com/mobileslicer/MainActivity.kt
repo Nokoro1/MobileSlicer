@@ -319,13 +319,22 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (!isChangingConfigurations) {
+        val finishingActivity = !isChangingConfigurations
+        if (finishingActivity) {
             stagedModelFile?.delete()
             stagedModelFile = null
             preparedViewerMeshCache.clear()
         }
 
         destroyNativeEngine()
+        if (finishingActivity) {
+            cleanupOrcaTempCache(
+                cacheDir = cacheDir,
+                retainedPaths = emptySet(),
+                maxBytes = 0L,
+                maxAgeMs = 0L
+            )
+        }
         super.onDestroy()
     }
 

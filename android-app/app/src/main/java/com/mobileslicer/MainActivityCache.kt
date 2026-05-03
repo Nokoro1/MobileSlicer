@@ -172,6 +172,7 @@ internal fun MainActivity.cleanupCacheArtifacts(extraRetainedFiles: Collection<F
         cleanupGeneratedGcodeCache(cacheDir = cacheDir, retainedPaths = retainedPaths)
         cleanupStagedModelCache(cacheDir = cacheDir, retainedPaths = retainedPaths)
         cleanupShareCache(cacheDir)
+        cleanupOrcaTempCache(cacheDir = cacheDir, retainedPaths = retainedPaths)
     }
 
 internal fun MainActivity.cleanupGeneratedGcodeCache(
