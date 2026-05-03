@@ -144,6 +144,7 @@ class AnalyzeMobilePerformanceTest(unittest.TestCase):
         self.assertIn("processor move buffer retained 1024 bytes", joined)
         self.assertIn("processor line-end buffer retained 512 bytes", joined)
         self.assertIn("native RSS release drop 1000KB below budget 16384KB", joined)
+        self.assertIn("missing native post-release RSS checkpoints", joined)
 
     def test_large_preview_processor_storage_release_passes(self) -> None:
         current = {
@@ -156,6 +157,8 @@ class AnalyzeMobilePerformanceTest(unittest.TestCase):
             "processor_line_end_bytes_retained": 0,
             "native_after_finalize_rss_kb": 700_000,
             "native_after_release_rss_kb": 650_000,
+            "native_after_stats_rss_kb": 650_000,
+            "native_before_return_rss_kb": 645_000,
             "bytes": 2048,
         }
 
@@ -163,6 +166,29 @@ class AnalyzeMobilePerformanceTest(unittest.TestCase):
             failures = analyzer.analyze([current], {})
 
         self.assertEqual([], failures)
+
+    def test_large_preview_fails_when_post_release_rss_regrows(self) -> None:
+        current = {
+            "name": "medium-speed-structure",
+            "type": "slice",
+            "elapsed_ms": 10_000,
+            "preview_moves": 600_000,
+            "processor_moves_released_during_export": 1,
+            "processor_move_bytes_retained": 0,
+            "processor_line_end_bytes_retained": 0,
+            "native_after_finalize_rss_kb": 700_000,
+            "native_after_release_rss_kb": 650_000,
+            "native_after_stats_rss_kb": 660_000,
+            "native_before_return_rss_kb": 670_000,
+            "bytes": 2048,
+        }
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            failures = analyzer.analyze([current], {})
+
+        joined = "\n".join(failures)
+        self.assertIn("native RSS grew 10000KB after stats update", joined)
+        self.assertIn("native RSS grew 10000KB before slice return", joined)
 
 
 if __name__ == "__main__":

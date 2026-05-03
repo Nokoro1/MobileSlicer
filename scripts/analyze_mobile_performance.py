@@ -37,6 +37,9 @@ REGRESSION_METRIC_GROUPS = {
     "peak_native_heap_kb": "memory",
     "peak_graphics_kb": "memory",
     "peak_private_other_kb": "memory",
+    "native_after_release_rss_kb": "memory",
+    "native_after_stats_rss_kb": "memory",
+    "native_before_return_rss_kb": "memory",
     "bytes": "output",
 }
 
@@ -287,6 +290,8 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
     max_private_other_kb = env_int("MOBILE_SLICER_PERF_MAX_PRIVATE_OTHER_KB", 550_000)
     max_preview_plan_ms = env_int("MOBILE_SLICER_PERF_MAX_PREVIEW_PLAN_MS", 1_500)
     min_processor_release_drop_kb = env_int("MOBILE_SLICER_PERF_MIN_PROCESSOR_RELEASE_DROP_KB", 16_384)
+    max_native_after_stats_growth_kb = env_int("MOBILE_SLICER_PERF_MAX_NATIVE_AFTER_STATS_GROWTH_KB", 8_192)
+    max_native_before_return_growth_kb = env_int("MOBILE_SLICER_PERF_MAX_NATIVE_BEFORE_RETURN_GROWTH_KB", 8_192)
     regression_groups = regression_allowances()
     repeat_memory_growth_percent = env_float("MOBILE_SLICER_PERF_REPEAT_MEMORY_GROWTH_PERCENT", 20.0)
     repeat_memory_growth_min_kb = env_int("MOBILE_SLICER_PERF_REPEAT_MEMORY_GROWTH_MIN_KB", 98_304)
@@ -336,6 +341,8 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
                 processor_line_retained = record_metric(record, "processor_line_end_bytes_retained")
                 native_after_finalize = record_metric(record, "native_after_finalize_rss_kb")
                 native_after_release = record_metric(record, "native_after_release_rss_kb")
+                native_after_stats = record_metric(record, "native_after_stats_rss_kb")
+                native_before_return = record_metric(record, "native_before_return_rss_kb")
                 if processor_released != 1:
                     failures.append(f"{name}: processor preview storage was not released during export")
                 if processor_move_retained not in (None, 0):
@@ -350,6 +357,21 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
                         f"{native_after_finalize - native_after_release:.0f}KB below budget "
                         f"{min_processor_release_drop_kb}KB"
                     )
+                if native_after_release is None or native_after_stats is None or native_before_return is None:
+                    failures.append(f"{name}: missing native post-release RSS checkpoints")
+                else:
+                    stats_growth = native_after_stats - native_after_release
+                    if stats_growth > max_native_after_stats_growth_kb:
+                        failures.append(
+                            f"{name}: native RSS grew {stats_growth:.0f}KB after stats update "
+                            f"(allowed {max_native_after_stats_growth_kb}KB)"
+                        )
+                    return_growth = native_before_return - native_after_stats
+                    if return_growth > max_native_before_return_growth_kb:
+                        failures.append(
+                            f"{name}: native RSS grew {return_growth:.0f}KB before slice return "
+                            f"(allowed {max_native_before_return_growth_kb}KB)"
+                        )
 
         if peak_pss_kb is not None and peak_pss_kb > max_peak_pss_kb:
             failures.append(f"{name}: peak PSS {peak_pss_kb:.0f}KB exceeds budget {max_peak_pss_kb}KB")
