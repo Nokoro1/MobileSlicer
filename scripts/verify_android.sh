@@ -195,6 +195,30 @@ fail() {
   exit 1
 }
 
+env_int_or_default() {
+  local name="$1"
+  local default_value="$2"
+  local value="${!name:-}"
+  if [[ -z "$value" ]]; then
+    printf '%s\n' "$default_value"
+    return 0
+  fi
+  [[ "$value" =~ ^[0-9]+$ ]] || fail "$name must be an integer, got: $value"
+  printf '%s\n' "$value"
+}
+
+add_memory_budget_failure() {
+  local -n failures_ref="$1"
+  local label="$2"
+  local value="$3"
+  local budget="$4"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    failures_ref+=("$label missing")
+  elif [[ "$value" -gt "$budget" ]]; then
+    failures_ref+=("$label ${value}KB exceeds budget ${budget}KB")
+  fi
+}
+
 capture_device_artifacts() {
   local exit_code="$1"
   if [[ -z "$CURRENT_AUTOMATION_SERIAL" ]]; then
@@ -880,6 +904,27 @@ run_preview_interaction_profile() {
   local responsiveness_json="$artifact_dir/preview-responsiveness.json"
   local responsiveness_md="$artifact_dir/preview-responsiveness.md"
   local responsiveness_status=0
+  local peak_pss_budget_kb peak_native_budget_kb final_native_budget_kb final_graphics_budget_kb
+  local final_pss_kb="" final_native_heap_kb="" final_graphics_kb=""
+  local memory_failures=()
+  if [[ "$lifecycle_cycles" != "0" ]]; then
+    peak_pss_budget_kb="$(env_int_or_default MOBILE_SLICER_PREVIEW_LIFECYCLE_MAX_PEAK_PSS_KB 665600)"
+    peak_native_budget_kb="$(env_int_or_default MOBILE_SLICER_PREVIEW_LIFECYCLE_MAX_PEAK_NATIVE_HEAP_KB 286720)"
+    final_native_budget_kb="$(env_int_or_default MOBILE_SLICER_PREVIEW_LIFECYCLE_MAX_FINAL_NATIVE_HEAP_KB 49152)"
+    final_graphics_budget_kb="$(env_int_or_default MOBILE_SLICER_PREVIEW_LIFECYCLE_MAX_FINAL_GRAPHICS_KB 16384)"
+    local final_meminfo_path="$artifact_dir/preview-lifecycle-final-meminfo.txt"
+    if [[ -s "$final_meminfo_path" ]]; then
+      local final_meminfo
+      final_meminfo="$(cat "$final_meminfo_path")"
+      final_pss_kb="$(meminfo_total_pss_kb "$final_meminfo")"
+      final_native_heap_kb="$(meminfo_app_summary_kb "$final_meminfo" "Native Heap")"
+      final_graphics_kb="$(meminfo_app_summary_kb "$final_meminfo" "Graphics")"
+    fi
+    add_memory_budget_failure memory_failures "peak PSS" "$PERF_LAST_PEAK_PSS_KB" "$peak_pss_budget_kb"
+    add_memory_budget_failure memory_failures "peak native heap" "$PERF_LAST_PEAK_NATIVE_HEAP_KB" "$peak_native_budget_kb"
+    add_memory_budget_failure memory_failures "final native heap" "$final_native_heap_kb" "$final_native_budget_kb"
+    add_memory_budget_failure memory_failures "final graphics" "$final_graphics_kb" "$final_graphics_budget_kb"
+  fi
   python3 "$ROOT_DIR/scripts/analyze_preview_responsiveness.py" \
     --status "$artifact_dir/status.txt" \
     --timing-log "$artifact_dir/timing-logcat.txt" \
@@ -922,6 +967,20 @@ run_preview_interaction_profile() {
       printf -- '- peak_graphics_kb: %s\n' "$PERF_LAST_PEAK_GRAPHICS_KB"
       printf -- '- peak_private_other_kb: %s\n' "$PERF_LAST_PEAK_PRIVATE_OTHER_KB"
       printf -- '- peak_system_kb: %s\n\n' "$PERF_LAST_PEAK_SYSTEM_KB"
+      printf '## Final Memory\n\n'
+      printf -- '- final_pss_kb: %s\n' "${final_pss_kb:-unknown}"
+      printf -- '- final_native_heap_kb: %s\n' "${final_native_heap_kb:-unknown}"
+      printf -- '- final_graphics_kb: %s\n\n' "${final_graphics_kb:-unknown}"
+      printf '## Memory Budgets\n\n'
+      printf -- '- max_peak_pss_kb: %s\n' "$peak_pss_budget_kb"
+      printf -- '- max_peak_native_heap_kb: %s\n' "$peak_native_budget_kb"
+      printf -- '- max_final_native_heap_kb: %s\n' "$final_native_budget_kb"
+      printf -- '- max_final_graphics_kb: %s\n\n' "$final_graphics_budget_kb"
+      if [[ "${#memory_failures[@]}" -gt 0 ]]; then
+        printf '## Memory Gate Failures\n\n'
+        printf -- '- %s\n' "${memory_failures[@]}"
+        printf '\n'
+      fi
     fi
     printf '## Responsiveness Gate\n\n'
     if [[ -s "$responsiveness_md" ]]; then
@@ -942,6 +1001,10 @@ run_preview_interaction_profile() {
   log "$profile_name artifacts: $artifact_dir"
   [[ "$responsiveness_status" -eq 0 ]] ||
     fail "$profile_name responsiveness analyzer failed; see artifacts: $artifact_dir"
+  if [[ "${#memory_failures[@]}" -gt 0 ]]; then
+    printf '%s\n' "${memory_failures[@]}" >&2
+    fail "$profile_name memory gate failed; see artifacts: $artifact_dir"
+  fi
 }
 
 stage_app_private_file() {
