@@ -1,6 +1,6 @@
 # MobileSlicer
 
-[![Android Checks](https://github.com/Nokoro1/MobileSlicer/actions/workflows/android-checks.yml/badge.svg)](https://github.com/Nokoro1/MobileSlicer/actions/workflows/android-checks.yml)
+[![Android Checks](https://github.com/MobileSlicerApp/MobileSlicer/actions/workflows/android-checks.yml/badge.svg)](https://github.com/MobileSlicerApp/MobileSlicer/actions/workflows/android-checks.yml)
 
 MobileSlicer is a local, touch-first 3D slicer for Android.
 
@@ -90,4 +90,4 @@ MobileSlicer release source is distributed under the GNU Affero General Public
 License version 3. See [LICENSE](LICENSE), [SOURCE_NOTICE.md](SOURCE_NOTICE.md),
 and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Public source is hosted at <https://github.com/Nokoro1/MobileSlicer>.
+Public source is hosted at <https://github.com/MobileSlicerApp/MobileSlicer>.

@@ -24,6 +24,6 @@ needed for those components.
 
 The public source repository is:
 
-<https://github.com/Nokoro1/MobileSlicer>
+<https://github.com/MobileSlicerApp/MobileSlicer>
 
 For source-availability questions, contact <mobileslicerapp@gmail.com>.
