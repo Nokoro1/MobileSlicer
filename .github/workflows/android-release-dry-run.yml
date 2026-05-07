@@ -2,6 +2,15 @@ name: Android Release Dry Run
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "android-app/**"
+      - "engine-wrapper/**"
+      - "scripts/**"
+      - ".github/workflows/android-release-dry-run.yml"
   pull_request:
     paths:
       - "android-app/**"
@@ -58,4 +67,3 @@ jobs:
         run: |
           echo "Release signing secrets are not configured; compileReleaseKotlin and lintVitalRelease were run only."
           echo "Configure MOBILE_SLICER_RELEASE_KEYSTORE_BASE64 and matching password/alias secrets before RC."
-
