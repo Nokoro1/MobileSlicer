@@ -2,9 +2,16 @@ package com.mobileslicer
 
 import com.mobileslicer.profiles.FilamentProfile
 import com.mobileslicer.viewer.PrinterBedSpec
+import com.mobileslicer.workspace.PaintMode
 import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateFlushVolumes
 import com.mobileslicer.workspace.PlateObject
+import com.mobileslicer.workspace.PlateObjectPaint
+import com.mobileslicer.workspace.commitNativePaintPayloadToPlateObjects
+import com.mobileslicer.workspace.invalidatingColorForRemovedSlot
+import com.mobileslicer.workspace.nativePaintPayloadJson
+
+internal typealias ColorSlotPayloadRemapper = (payloadJson: String, oldSlotToNewSlot: IntArray) -> String?
 
 internal data class ModelLoaderPlateMutation(
     val slots: List<PlateFilamentSlot>,
@@ -20,20 +27,57 @@ internal data class ModelLoaderObjectDeleteResult(
     val changed: Boolean
 )
 
+internal data class ModelLoaderNativePaintCommitMutation(
+    val objects: List<PlateObject>,
+    val committedObject: PlateObject?,
+    val currentSavedProjectId: String?,
+    val changed: Boolean
+)
+
+internal fun applyNativePaintPayloadCommit(
+    objects: List<PlateObject>,
+    currentSavedProjectId: String?,
+    objectId: Long,
+    mode: PaintMode,
+    payloadJson: String
+): ModelLoaderNativePaintCommitMutation {
+    val result = commitNativePaintPayloadToPlateObjects(
+        objects = objects,
+        objectId = objectId,
+        mode = mode,
+        payloadJson = payloadJson
+    )
+    return ModelLoaderNativePaintCommitMutation(
+        objects = result.objects,
+        committedObject = result.committedObject,
+        currentSavedProjectId = currentSavedProjectId,
+        changed = result.changed
+    )
+}
+
 internal fun autoOrientPlateObjectsUnavailableStatus(): String = "Auto-orient unavailable\nNo objects on plate"
+
+internal fun nativeAutoOrientPlateObjectsFailureStatus(details: String?): String {
+    val reason = details?.trim().orEmpty()
+    return if (reason.isEmpty()) {
+        "Auto-orient failed\nMobileSlicer could not find a better orientation."
+    } else {
+        "Auto-orient failed\n$reason"
+    }
+}
 
 internal fun autoOrientPlateObjectsStatus(result: PlateAutoOrientResult): String =
     if (result.changedCount == 0) {
         if (result.selectedOnly) {
-            "Object already oriented\nSnapped to nearest 90 degrees"
+            "Object already oriented\n1 checked"
         } else {
             "Objects already oriented\n${result.targetCount} checked"
         }
     } else {
         if (result.selectedOnly) {
-            "Object auto-oriented\nSnapped to nearest 90 degrees"
+            "Object auto-oriented\n1 changed"
         } else {
-            "Objects auto-oriented\n${result.changedCount} snapped to nearest 90 degrees"
+            "Objects auto-oriented\n${result.changedCount} changed"
         }
     }
 
@@ -41,7 +85,16 @@ internal fun autoArrangePlateObjectsFailureStatus(
     objectCount: Int,
     bed: PrinterBedSpec
 ): String =
-    "Objects do not fit\n$objectCount on ${bed.widthMm.toInt()} x ${bed.depthMm.toInt()} mm plate"
+    "Objects don't fit on current plate\nDelete some or add objects to other plates"
+
+internal fun nativeAutoArrangePlateObjectsFailureStatus(details: String?): String {
+    val reason = details?.trim().orEmpty()
+    return if (reason.isEmpty()) {
+        "Auto-arrange failed\nMobileSlicer could not find a valid plate layout."
+    } else {
+        "Auto-arrange failed\n$reason"
+    }
+}
 
 internal fun autoArrangePlateObjectsStatus(
     objectCount: Int,
@@ -148,7 +201,8 @@ internal fun removePlateFilamentSlot(
     slots: List<PlateFilamentSlot>,
     objects: List<PlateObject>,
     flushVolumes: PlateFlushVolumes?,
-    slotIndex: Int
+    slotIndex: Int,
+    colorSlotPayloadRemapper: ColorSlotPayloadRemapper? = null
 ): ModelLoaderPlateMutation {
     if (slotIndex <= 1 || slots.size <= 1) {
         return ModelLoaderPlateMutation(slots = slots, objects = objects, flushVolumes = flushVolumes, changed = false)
@@ -160,12 +214,28 @@ internal fun removePlateFilamentSlot(
     val remap = remainingOldIndices
         .mapIndexed { index, oldIndex -> oldIndex to index + 1 }
         .toMap()
+    val oldSlotToNewSlot = slots
+        .map { it.index }
+        .maxOrNull()
+        ?.let { maxSlot ->
+            IntArray(maxSlot) { oldSlotZeroBased ->
+                remap[oldSlotZeroBased + 1] ?: 0
+            }
+        }
+        ?: IntArray(0)
     val nextSlots = slots
         .filterNot { it.index == slotIndex }
         .sortedBy { it.index }
         .mapIndexed { index, slot -> slot.copy(index = index + 1) }
     val nextObjects = objects.map { objectOnPlate ->
-        objectOnPlate.copy(filamentSlotIndex = remap[objectOnPlate.filamentSlotIndex] ?: 1)
+        objectOnPlate.copy(
+            filamentSlotIndex = remap[objectOnPlate.filamentSlotIndex] ?: 1,
+            paint = objectOnPlate.remappedPaintForRemovedFilamentSlot(
+                slotIndex = slotIndex,
+                oldSlotToNewSlot = oldSlotToNewSlot,
+                colorSlotPayloadRemapper = colorSlotPayloadRemapper
+            )
+        )
     }
     return ModelLoaderPlateMutation(
         slots = nextSlots,
@@ -176,6 +246,45 @@ internal fun removePlateFilamentSlot(
             regenerateFromColors = false
         ),
         changed = true
+    )
+}
+
+private fun PlateObject.remappedPaintForRemovedFilamentSlot(
+    slotIndex: Int,
+    oldSlotToNewSlot: IntArray,
+    colorSlotPayloadRemapper: ColorSlotPayloadRemapper?
+): PlateObjectPaint {
+    val color = paint.color ?: return paint
+    if (color.isEmpty || color.isStale) return paint
+    if (slotIndex in color.referencedSlotIndexes || color.referencedSlotIndexes.isEmpty()) {
+        return paint.invalidatingColorForRemovedSlot(slotIndex)
+    }
+    val referencesShift = color.referencedSlotIndexes.any { oldSlot ->
+        oldSlot > 0 && oldSlot <= oldSlotToNewSlot.size && oldSlotToNewSlot[oldSlot - 1] != oldSlot
+    }
+    if (!referencesShift) {
+        return paint
+    }
+    val remapper = colorSlotPayloadRemapper ?: return paint.invalidatingColorForRemovedSlot(slotIndex)
+    val payloadJson = nativePaintPayloadJson(listOf(this))
+    if (payloadJson.isBlank()) {
+        return paint.markColorStale("Color paint slot remap failed because no active replay payload was available.")
+    }
+    val remappedPayloadJson = remapper(payloadJson, oldSlotToNewSlot)
+        ?.takeIf { it.isNotBlank() }
+        ?: return paint.markColorStale("Color paint slot remap failed in native code.")
+    val remapped = commitNativePaintPayloadToPlateObjects(
+        objects = listOf(this),
+        objectId = id,
+        mode = PaintMode.Color,
+        payloadJson = remappedPayloadJson
+    ).committedObject?.paint?.color
+        ?: return paint.markColorStale("Color paint slot remap returned no color payload.")
+    return paint.copy(
+        color = remapped.copy(
+            objectSourceKey = color.objectSourceKey,
+            meshFingerprint = color.meshFingerprint
+        )
     )
 }
 

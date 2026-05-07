@@ -10,23 +10,23 @@ internal class FilamentProfileEditorOptions {
             )
         val nullableBoolOptions: List<AppSettingOption<Boolean?>> =
             listOf(
-                AppSettingOption<Boolean?>(null, "Inherit", "Leave unset so Orca inherits from the printer or process preset."),
+                AppSettingOption<Boolean?>(null, "Inherit", "Use the value from the selected printer or process preset."),
                 AppSettingOption<Boolean?>(true, "Enabled", ""),
                 AppSettingOption<Boolean?>(false, "Disabled", "")
             )
         val filamentZHopTypeOptions =
-            listOf(AppSettingOption<ZHopType?>(null, "Inherit", "Leave unset so Orca inherits from the printer preset.")) +
+            listOf(AppSettingOption<ZHopType?>(null, "Inherit", "Use the value from the selected printer preset.")) +
                 ZHopType.entries.map { option ->
-                    AppSettingOption<ZHopType?>(option, option.displayLabel, "Maps directly to Orca filament_z_hop_types = ${option.configValue}.")
+                    AppSettingOption<ZHopType?>(option, option.displayLabel, "")
                 }
         val filamentRetractLiftEnforceOptions =
-            listOf(AppSettingOption<RetractLiftEnforce?>(null, "Inherit", "Leave unset so Orca inherits from the printer preset.")) +
+            listOf(AppSettingOption<RetractLiftEnforce?>(null, "Inherit", "Use the value from the selected printer preset.")) +
                 RetractLiftEnforce.entries.map { option ->
-                    AppSettingOption<RetractLiftEnforce?>(option, option.displayLabel, "Maps directly to Orca filament_retract_lift_enforce = ${option.configValue}.")
+                    AppSettingOption<RetractLiftEnforce?>(option, option.displayLabel, "")
                 }
         val overhangFanThresholdOptions =
             listOf("0%", "10%", "25%", "50%", "75%", "95%").map { threshold ->
-                AppSettingOption(threshold, threshold, "Maps directly to Orca overhang_fan_threshold = $threshold.")
+                AppSettingOption(threshold, threshold, "")
             }
         val materialTypeOptions =
             listOf(
@@ -107,6 +107,6 @@ internal class FilamentProfileEditorOptions {
                 "TPI",
                 "TPU"
             ).map { type ->
-                AppSettingOption(type, type, "Maps directly to Orca filament_type = $type.")
+                AppSettingOption(type, type, "")
             }
 }

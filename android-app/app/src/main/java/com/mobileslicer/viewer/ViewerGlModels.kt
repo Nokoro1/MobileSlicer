@@ -55,3 +55,19 @@ internal data class ModelObjectUpload(
     val colorInt: Int?,
     val selected: Boolean
 )
+
+internal data class PaintOverlayUpload(
+    val id: String,
+    val upload: TriangleUpload,
+    val color: FloatArray,
+    val modelMatrix: FloatArray?,
+    val layerIds: Set<String>,
+    val sourceKeys: Set<String>
+)
+
+internal data class PendingPaintOverlayUpload(
+    val layer: ViewerPaintOverlayLayer,
+    var vertexOffset: Int = 0,
+    val live: Boolean = false,
+    val replacement: Boolean = false
+)

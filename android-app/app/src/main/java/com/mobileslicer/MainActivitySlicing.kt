@@ -108,6 +108,7 @@ import com.mobileslicer.nativebridge.NativeEngineCalls
 import com.mobileslicer.nativebridge.NativeEngineErrorCode
 import com.mobileslicer.nativebridge.NativeEngineHandle
 import com.mobileslicer.nativebridge.NativeEngineSession
+import com.mobileslicer.nativebridge.NativePaintCalls
 import com.mobileslicer.printerconnection.PrinterConnectionRepository
 import com.mobileslicer.printerconnection.PrinterConnectionChoicesResult
 import com.mobileslicer.printerconnection.PrinterConnectionResult
@@ -119,6 +120,7 @@ import com.mobileslicer.profiles.ProfileStore
 import com.mobileslicer.profiles.ProfileStoreRepository
 import com.mobileslicer.profiles.PrintHostType
 import com.mobileslicer.profiles.PrinterProfile
+import com.mobileslicer.profiles.NativeConfigKeys
 import com.mobileslicer.storage.AppPreferenceStore
 import com.mobileslicer.storage.GCODE_MIME_TYPE
 import com.mobileslicer.storage.PreparedViewerMeshCache
@@ -155,6 +157,8 @@ import com.mobileslicer.workspace.WorkspaceScreen
 import com.mobileslicer.workspace.WorkspaceSessionViewModel
 import com.mobileslicer.workspace.defaultNativeModelTransform
 import com.mobileslicer.workspace.modelLoadStatusMessage
+import com.mobileslicer.workspace.nativePaintPayloadJson
+import com.mobileslicer.workspace.paintHash
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -165,11 +169,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import com.mobileslicer.viewer.MeshBounds
+import com.mobileslicer.workspace.nativePlateTransformInputStride
+import com.mobileslicer.workspace.writeTo
 
 private data class NativePlateLoadRequest(
     val paths: Array<String>,
     val transforms: DoubleArray,
     val extruderIds: IntArray,
+    val mobileObjectIds: LongArray,
+    val paintPayloadJson: String,
     val signature: String
 )
 
@@ -187,25 +195,16 @@ private fun nativePlateLoadRequest(
     if (sliceObjects.size != plateObjects.size) return null
 
     val paths = Array(sliceObjects.size) { index -> sliceObjects[index].filePath }
-    val transforms = DoubleArray(sliceObjects.size * 7)
+    val transformStride = nativePlateTransformInputStride(sliceObjects.map { it.transform })
+    val transforms = DoubleArray(sliceObjects.size * transformStride)
     val extruderIds = IntArray(sliceObjects.size)
-    val compactSlotIndexes = sliceObjects
-        .map { it.filamentSlotIndex.coerceAtLeast(1) }
-        .distinct()
-        .sorted()
-        .mapIndexed { index, slotIndex -> slotIndex to index + 1 }
-        .toMap()
+    val mobileObjectIds = LongArray(sliceObjects.size) { index -> sliceObjects[index].id }
+    val paintPayloadJson = nativePaintPayloadJson(sliceObjects)
+    val compactSlotIndexes = compactNativeFilamentSlotIndexes(sliceObjects)
     sliceObjects.forEachIndexed { index, objectOnPlate ->
         val objectBounds = objectOnPlate.mesh?.bounds ?: objectOnPlate.bounds ?: return null
         val transform = defaultNativeModelTransform(objectBounds, printerBed, objectOnPlate.transform)
-        val offset = index * 7
-        transforms[offset + 0] = transform.xMm
-        transforms[offset + 1] = transform.yMm
-        transforms[offset + 2] = transform.zMm
-        transforms[offset + 3] = transform.rotationXRadians
-        transforms[offset + 4] = transform.rotationYRadians
-        transforms[offset + 5] = transform.rotationZRadians
-        transforms[offset + 6] = transform.uniformScale
+        transform.writeTo(transforms, offset = index * transformStride, stride = transformStride)
         extruderIds[index] = compactSlotIndexes[objectOnPlate.filamentSlotIndex.coerceAtLeast(1)] ?: 1
     }
     val bedSignature = listOf(
@@ -215,11 +214,55 @@ private fun nativePlateLoadRequest(
         printerBed.depthMm,
         printerBed.maxHeightMm
     ).joinToString(",") { "%.3f".format(Locale.US, it) }
-    val signature = "plate:bed=$bedSignature:" + sliceObjects.mapIndexed { index, objectOnPlate ->
+    val signature = "plate:bed=$bedSignature:stride=$transformStride:" + sliceObjects.mapIndexed { index, objectOnPlate ->
         val originalSlot = objectOnPlate.filamentSlotIndex.coerceAtLeast(1)
-        "$index:${objectOnPlate.nativeSourceKey}:slot=$originalSlot:${compactSlotIndexes[originalSlot] ?: 1}:${objectOnPlate.transform}"
+        val paintHash = objectOnPlate.paint.paintHash().takeIf { it.isNotBlank() } ?: "none"
+        "$index:id=${objectOnPlate.id}:${objectOnPlate.nativeSourceKey}:slot=$originalSlot:${compactSlotIndexes[originalSlot] ?: 1}:paint=$paintHash:${objectOnPlate.transform}"
     }.joinToString("|")
-    return NativePlateLoadRequest(paths, transforms, extruderIds, signature)
+    return NativePlateLoadRequest(paths, transforms, extruderIds, mobileObjectIds, paintPayloadJson, signature)
+}
+
+private fun compactNativeFilamentSlotIndexes(sliceObjects: List<PlateObject>): Map<Int, Int> {
+    val objectSlots = sliceObjects.map { it.filamentSlotIndex.coerceAtLeast(1) }
+    val paintedColorSlots = sliceObjects
+        .flatMap { objectOnPlate ->
+            objectOnPlate.paint.color
+                ?.takeIf { layer -> !layer.isEmpty && !layer.isStale }
+                ?.referencedSlotIndexes
+                .orEmpty()
+        }
+        .filter { it > 0 }
+    val requiredSlots = (objectSlots + paintedColorSlots).ifEmpty { listOf(1) }
+    if (paintedColorSlots.isNotEmpty()) {
+        val maxSlot = requiredSlots.maxOrNull()?.coerceAtLeast(1) ?: 1
+        return (1..maxSlot).associateWith { it }
+    }
+    return requiredSlots
+        .distinct()
+        .sorted()
+        .mapIndexed { index, slotIndex -> slotIndex to index + 1 }
+        .toMap()
+}
+
+private fun nativePlateLoadRequestFailureReason(plateObjects: List<PlateObject>): String {
+    if (plateObjects.isEmpty()) return "Plate contains no objects"
+    val invalidObject = plateObjects.firstOrNull { objectOnPlate ->
+        objectOnPlate.format != ImportedModelFormat.Stl ||
+            objectOnPlate.filePath.isBlank() ||
+            (objectOnPlate.mesh == null && objectOnPlate.bounds == null) ||
+            !File(objectOnPlate.filePath).exists()
+    } ?: return "Native plate request could not be built"
+    return when {
+        invalidObject.format != ImportedModelFormat.Stl ->
+            "${invalidObject.label} is ${invalidObject.format.name}; native planning currently requires STL plate objects"
+        invalidObject.filePath.isBlank() ->
+            "${invalidObject.label} has no source file path"
+        invalidObject.mesh == null && invalidObject.bounds == null ->
+            "${invalidObject.label} has no prepared mesh bounds"
+        !File(invalidObject.filePath).exists() ->
+            "${invalidObject.label} source file is missing"
+        else -> "${invalidObject.label} cannot be planned natively"
+    }
 }
 
 internal fun MainActivity.loadModelFileIntoNativeCache(modelFilePath: String): Boolean {
@@ -253,18 +296,22 @@ internal fun MainActivity.loadPlateObjectsIntoNativeCache(
         nativeLoadedModelPath = null
         return false
     }
-    if (plateObjects.size == 1) {
-        return loadModelFileIntoNativeCache(plateObjects.first().filePath)
-    }
     val request = nativePlateLoadRequest(plateObjects, printerBed) ?: run {
         NativeEngineCalls.clearGeneratedGcode(handle)
         nativeLoadedModelPath = null
         return false
     }
-    if (nativeLoadedModelPath == request.signature) {
+    if (nativeLoadedModelPath == request.signature && nativePaintBindingsCover(handle, request.mobileObjectIds)) {
         return true
     }
-    val loadResult = NativeEngineCalls.loadPlateModels(handle, request.paths, request.transforms, request.extruderIds)
+    val loadResult = NativeEngineCalls.loadPlateModelsV2(
+        handle = handle,
+        paths = request.paths,
+        transforms = request.transforms,
+        extruderIds = request.extruderIds,
+        mobileObjectIds = request.mobileObjectIds,
+        paintPayloadJson = request.paintPayloadJson
+    )
     return if (loadResult is NativeEngineCallResult.Success) {
         nativeLoadedModelPath = request.signature
         true
@@ -272,6 +319,200 @@ internal fun MainActivity.loadPlateObjectsIntoNativeCache(
         NativeEngineCalls.clearGeneratedGcode(handle)
         nativeLoadedModelPath = null
         false
+    }
+}
+
+internal fun MainActivity.markPlateObjectsAsNativeCacheCurrent(
+    plateObjects: List<PlateObject>,
+    printerBed: PrinterBedSpec
+) {
+    val handle = NativeEngineHandle.fromRaw(ensureEngine()) ?: run {
+        nativeLoadedModelPath = null
+        return
+    }
+    val request = nativePlateLoadRequest(plateObjects, printerBed) ?: run {
+        nativeLoadedModelPath = null
+        return
+    }
+    nativeLoadedModelPath = if (nativePaintBindingsCover(handle, request.mobileObjectIds)) {
+        request.signature
+    } else {
+        null
+    }
+}
+
+internal fun MainActivity.loadSavedProjectIntoNativeCache(
+    nativeProjectFilePath: String?,
+    plateObjects: List<PlateObject>,
+    printerBed: PrinterBedSpec
+): Boolean {
+    val projectFile = nativeProjectFilePath
+        ?.let(::File)
+        ?.takeIf { it.exists() && it.extension.equals("3mf", ignoreCase = true) }
+        ?: return loadPlateObjectsIntoNativeCache(plateObjects, printerBed)
+    val handle = NativeEngineHandle.fromRaw(ensureEngine()) ?: run {
+        nativeLoadedModelPath = null
+        return false
+    }
+    val request = nativePlateLoadRequest(plateObjects, printerBed) ?: run {
+        NativeEngineCalls.clearGeneratedGcode(handle)
+        nativeLoadedModelPath = null
+        return false
+    }
+    if (nativeLoadedModelPath == request.signature && nativePaintBindingsCover(handle, request.mobileObjectIds)) {
+        return true
+    }
+    val loadResult = NativeEngineCalls.loadProject3mf(
+        handle = handle,
+        path = projectFile.absolutePath,
+        mobileObjectIds = request.mobileObjectIds
+    )
+    return if (loadResult is NativeEngineCallResult.Success) {
+        nativeLoadedModelPath = request.signature
+        true
+    } else {
+        loadPlateObjectsIntoNativeCache(plateObjects, printerBed)
+    }
+}
+
+private fun nativePaintBindingsCover(handle: NativeEngineHandle, objectIds: LongArray): Boolean {
+    return objectIds.all { objectId ->
+        NativePaintCalls.objectBoundsJson(handle, objectId) != null
+    }
+}
+
+internal suspend fun MainActivity.planNativePlateArrangement(
+    configJson: String,
+    plateObjects: List<PlateObject>,
+    printerBed: PrinterBedSpec,
+    allowRotation: Boolean
+): PlatePlanningOutcome<PlateAutoArrangeResult> =
+    withContext(Dispatchers.Default) {
+        val handle = NativeEngineHandle.fromRaw(ensureEngine()) ?: return@withContext PlatePlanningOutcome.Failure(
+            nativeAutoArrangePlateObjectsFailureStatus("The slicer is not ready. Restart the app and try again.")
+        )
+        val request = nativePlateLoadRequest(plateObjects, printerBed) ?: return@withContext PlatePlanningOutcome.Failure(
+            nativeAutoArrangePlateObjectsFailureStatus(nativePlateLoadRequestFailureReason(plateObjects))
+        )
+        val plannedTransforms = NativeEngineCalls.planPlateArrangement(
+            handle = handle,
+            paths = request.paths,
+            transforms = request.transforms,
+            extruderIds = request.extruderIds,
+            configJson = configJson,
+            allowRotation = allowRotation
+        )
+        if (plannedTransforms == null) {
+            val nativeError = NativeEngineCalls.getLastErrorMessage(handle)
+            Log.w(
+                MainActivity.TAG,
+                "planNativePlateArrangement failed: $nativeError"
+            )
+            return@withContext PlatePlanningOutcome.Failure(
+                nativeAutoArrangePlateObjectsFailureStatus(nativeError)
+            )
+        }
+        val plannedObjects = applyNativePlatePlan(
+            plateObjects = plateObjects,
+            bed = printerBed,
+            nativeTransforms = plannedTransforms,
+            requireAllOnBed = true,
+            requireNoOverlap = false
+        ) ?: run {
+            Log.w(MainActivity.TAG, "planNativePlateArrangement rejected invalid native transform output")
+            return@withContext PlatePlanningOutcome.Failure(
+                nativeAutoArrangePlateObjectsFailureStatus("The arranged objects did not fit the plate.")
+            )
+        }
+        PlatePlanningOutcome.Success(
+            PlateAutoArrangeResult(
+                objects = plannedObjects,
+                changedCount = nativePlanChangedCount(plateObjects, plannedObjects),
+                reservedPrimeTowerSpace = primeTowerEnabledForPlanning(configJson),
+                centersSummary = plannedObjects.joinToString(";") { objectOnPlate ->
+                    String.format(
+                        Locale.US,
+                        "%s=(%.2f,%.2f)",
+                        objectOnPlate.label,
+                        objectOnPlate.transform.centerXmm,
+                        objectOnPlate.transform.centerYmm
+                    )
+                }
+            )
+        )
+    }
+
+internal suspend fun MainActivity.planNativeAutoOrientation(
+    configJson: String,
+    plateObjects: List<PlateObject>,
+    selectedPlateObjectId: Long?,
+    printerBed: PrinterBedSpec
+): PlatePlanningOutcome<PlateAutoOrientResult> =
+    withContext(Dispatchers.Default) {
+        if (plateObjects.isEmpty()) {
+            return@withContext PlatePlanningOutcome.Failure(autoOrientPlateObjectsUnavailableStatus())
+        }
+        val selectedObject = selectedPlateObjectId?.let { selectedId ->
+            plateObjects.firstOrNull { it.id == selectedId }
+        }
+        val targetObjects = selectedObject?.let(::listOf) ?: plateObjects
+        val handle = NativeEngineHandle.fromRaw(ensureEngine()) ?: return@withContext PlatePlanningOutcome.Failure(
+            nativeAutoOrientPlateObjectsFailureStatus("The slicer is not ready. Restart the app and try again.")
+        )
+        val request = nativePlateLoadRequest(targetObjects, printerBed) ?: return@withContext PlatePlanningOutcome.Failure(
+            nativeAutoOrientPlateObjectsFailureStatus(nativePlateLoadRequestFailureReason(targetObjects))
+        )
+        val plannedTransforms = NativeEngineCalls.planAutoOrientation(
+            handle = handle,
+            paths = request.paths,
+            transforms = request.transforms,
+            extruderIds = request.extruderIds,
+            configJson = configJson
+        )
+        if (plannedTransforms == null) {
+            val nativeError = NativeEngineCalls.getLastErrorMessage(handle)
+            Log.w(
+                MainActivity.TAG,
+                "planNativeAutoOrientation failed: $nativeError"
+            )
+            return@withContext PlatePlanningOutcome.Failure(
+                nativeAutoOrientPlateObjectsFailureStatus(nativeError)
+            )
+        }
+        val plannedTargets = applyNativePlatePlan(
+            plateObjects = targetObjects,
+            bed = printerBed,
+            nativeTransforms = plannedTransforms,
+            requireAllOnBed = true
+        ) ?: run {
+            Log.w(MainActivity.TAG, "planNativeAutoOrientation rejected invalid native transform output")
+            return@withContext PlatePlanningOutcome.Failure(
+                nativeAutoOrientPlateObjectsFailureStatus("The oriented objects did not fit the plate.")
+            )
+        }
+        val plannedTargetsById = plannedTargets.associateBy { it.id }
+        val plannedObjects = plateObjects.map { objectOnPlate ->
+            plannedTargetsById[objectOnPlate.id] ?: objectOnPlate
+        }
+        PlatePlanningOutcome.Success(
+            PlateAutoOrientResult(
+                objects = plannedObjects,
+                targetCount = targetObjects.size,
+                changedCount = nativePlanChangedCount(targetObjects, plannedTargets),
+                selectedOnly = selectedObject != null
+            )
+        )
+    }
+
+private fun primeTowerEnabledForPlanning(configJson: String): Boolean =
+    runCatching {
+        val json = org.json.JSONObject(configJson)
+        json.optBoolean(NativeConfigKeys.PrimeTower.Enable, false)
+    }.getOrDefault(false)
+
+internal fun MainActivity.cancelNativePlatePlanning() {
+    NativeEngineHandle.fromRaw(ensureEngine())?.let { handle ->
+        NativeEngineCalls.cancelPlanning(handle)
     }
 }
 
@@ -289,26 +530,29 @@ internal fun MainActivity.sliceCurrentModel(
         val pipelineStartedAt = SystemClock.elapsedRealtime()
         val handle = NativeEngineHandle.fromRaw(ensureEngine())
         if (handle == null) {
-            return SliceResult("Slice failed\nNative engine is unavailable.", sliced = false)
+            return SliceResult("Slice failed\nThe slicer is not ready. Restart the app and try again.", sliced = false)
         }
         var modelReloadMs = 0L
-        val shouldUsePlateLoad = plateObjects.size > 1
-        if (shouldUsePlateLoad) {
+        if (plateObjects.isNotEmpty()) {
             val request = nativePlateLoadRequest(plateObjects, printerBed)
-            if (request == null && plateObjects.isEmpty()) {
-                return SliceResult("Slice failed\nNo plate objects are ready to slice.", sliced = false)
-            }
             if (request == null) {
                 return SliceResult("Slice failed\nOne or more plate objects are still preparing.", sliced = false)
             }
             if (nativeLoadedModelPath != request.signature) {
                 val modelReloadStartedAt = SystemClock.elapsedRealtime()
-                val loadPlateResult = NativeEngineCalls.loadPlateModels(handle, request.paths, request.transforms, request.extruderIds)
+                val loadPlateResult = NativeEngineCalls.loadPlateModelsV2(
+                    handle = handle,
+                    paths = request.paths,
+                    transforms = request.transforms,
+                    extruderIds = request.extruderIds,
+                    mobileObjectIds = request.mobileObjectIds,
+                    paintPayloadJson = request.paintPayloadJson
+                )
                 if (loadPlateResult !is NativeEngineCallResult.Success) {
                     NativeEngineCalls.clearGeneratedGcode(handle)
                     nativeLoadedModelPath = null
                     return SliceResult(
-                        "Slice failed\nUnable to load all plate objects into the native engine.\n${loadPlateResult.statusMessage}",
+                        "Slice failed\nMobileSlicer could not prepare every model on this plate.\n${loadPlateResult.statusMessage}",
                         sliced = false
                     )
                 }
@@ -320,7 +564,7 @@ internal fun MainActivity.sliceCurrentModel(
             val stagedModel = singlePlateObject?.filePath?.let(::File)?.takeIf { it.exists() }
                 ?: modelFilePath?.let(::File)?.takeIf { it.exists() }
                 ?: stagedModelFile?.takeIf { it.exists() }
-                ?: return SliceResult("Slice failed\nno model loaded", sliced = false)
+                ?: return SliceResult("Slice failed\nNo model loaded.", sliced = false)
             val bounds = singlePlateObject?.mesh?.bounds
                 ?: singlePlateObject?.bounds
                 ?: preparedMesh?.bounds
@@ -333,7 +577,7 @@ internal fun MainActivity.sliceCurrentModel(
                     NativeEngineCalls.clearGeneratedGcode(handle)
                     nativeLoadedModelPath = null
                     return SliceResult(
-                        "Slice failed\nUnable to load the staged model into the native engine.\n${loadResult.statusMessage}",
+                        "Slice failed\nMobileSlicer could not prepare this model for slicing.\n${loadResult.statusMessage}",
                         sliced = false
                     )
                 }
@@ -373,20 +617,7 @@ internal fun MainActivity.sliceCurrentModel(
         val configMs = SystemClock.elapsedRealtime() - configStartedAt
 
         val nativeSliceStartedAt = SystemClock.elapsedRealtime()
-        var nativeSliceResult = NativeEngineCalls.slice(handle)
-        val firstNativeSliceMs = SystemClock.elapsedRealtime() - nativeSliceStartedAt
-        if (
-            nativeSliceResult !is NativeEngineCallResult.Success &&
-            (nativeSliceResult as? NativeEngineCallResult.Failure)?.error?.message.orEmpty()
-                .equals("vector", ignoreCase = true)
-        ) {
-            Log.w(
-                MainActivity.TAG,
-                "sliceCurrentModel: native slice failed with vector after ${firstNativeSliceMs}ms; retrying full native slice once on same engine"
-            )
-            releaseSliceMemoryPressure()
-            nativeSliceResult = NativeEngineCalls.slice(handle)
-        }
+        val nativeSliceResult = NativeEngineCalls.slice(handle)
         val nativeSliceSucceeded = nativeSliceResult is NativeEngineCallResult.Success
         if (!nativeSliceSucceeded) {
             val nativeError = (nativeSliceResult as? NativeEngineCallResult.Failure)?.error?.message.orEmpty()
@@ -495,7 +726,7 @@ internal fun MainActivity.describeNativeSliceFailure(): NativeSliceFailurePresen
         val nativeError = handle?.let(NativeEngineCalls::getLastEngineError)
         if (nativeError?.code == NativeEngineErrorCode.PrintableVolumeExceeded) {
             return NativeSliceFailurePresentation(
-                userMessage = "Slice failed\nPrintable volume exceeded.\nCurrent Printer bed dimensions rejected emitted extrusion outside the configured printable area or height.",
+                userMessage = "Slice failed\nPrintable volume exceeded.\nGenerated extrusion would go outside the selected printer bed or height limit.",
                 automationStatus = nativeError.automationStatus
             )
         }

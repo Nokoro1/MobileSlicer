@@ -223,7 +223,7 @@ internal fun HomeTopBar(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "Android-first slicing workflow",
+                    text = "Local touch-first 3D slicer",
                     style = MaterialTheme.typography.bodySmall,
                     color = bodyColor
                 )
@@ -270,8 +270,8 @@ internal fun HeroImportCard(
 ) {
     LandingIsland(
         title = "Import an STL or 3MF",
-        body = "Bring the verified wrapper-backed load flow into the Mobile Slicer landing shell, then step into the dedicated workspace for model operations.",
-        footer = "Current import: $importedModel",
+        body = "Choose a model from your device, then prepare it on the bed before slicing.",
+        footer = "Current model: $importedModel",
         compact = true
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -290,7 +290,7 @@ internal fun HeroImportCard(
                 when {
                     importInProgress -> "Importing..."
                     importedModel != "No model imported" -> "Import another model"
-                    else -> "Open Model"
+                    else -> "Open model"
                 }
             )
         }
@@ -304,8 +304,8 @@ internal fun PrinterCalibrationsLandingSection(
 ) {
     LandingIsland(
         title = "Printer Calibrations",
-        body = "Run Orca-style calibration prints using the selected printer, filament, and process with temporary calibration overrides.",
-        footer = "Overrides apply only to the calibration job.",
+        body = "Create calibration prints for tuning flow, temperature, pressure advance, and other printer settings.",
+        footer = "Uses your selected printer, filament, and process.",
         compact = true
     ) {
         Button(
@@ -316,7 +316,7 @@ internal fun PrinterCalibrationsLandingSection(
                 .height(46.dp),
             shape = RoundedCornerShape(18.dp)
         ) {
-            Text("Open Printer Calibrations")
+            Text("Printer calibrations")
         }
     }
 }
@@ -324,12 +324,13 @@ internal fun PrinterCalibrationsLandingSection(
 @Composable
 internal fun CompactWorkspaceBadge(
     label: String,
+    modifier: Modifier = Modifier,
     emphasized: Boolean = false
 ) {
     val outlineColor = appOutlineColor()
     val textColor = if (emphasized) appTitleColor() else appBodyColor()
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(appCardColor().copy(alpha = if (emphasized) 0.48f else 0.28f))
             .border(1.dp, outlineColor, RoundedCornerShape(12.dp))
@@ -338,7 +339,9 @@ internal fun CompactWorkspaceBadge(
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = textColor
+            color = textColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -349,17 +352,20 @@ internal fun ProfileStore.profileRequirementMessage(): String? {
     val missingProcess = selectedProcessId.isBlank() ||
         processes.none { it.id == selectedProcessId && it.printerProfileId == selectedPrinterId }
     return when {
-        missingPrinter && missingFilament -> "No printer or filament selected, please go to profiles and select a printer and filament."
-        missingPrinter -> "No printer selected, please go to profiles and select a printer."
-        missingFilament -> "No filament selected, please go to profiles and select a filament."
-        missingProcess -> "No process selected, please go to profiles and select a process."
+        missingPrinter && missingFilament -> "Choose a printer and filament in Profiles before slicing."
+        missingPrinter -> "Choose a printer in Profiles before slicing."
+        missingFilament -> "Choose a filament in Profiles before slicing."
+        missingProcess -> "Choose a process in Profiles before slicing."
         else -> null
     }
 }
 
 @Composable
-internal fun SoftPill(label: String) {
-    CompactWorkspaceBadge(label = label)
+internal fun SoftPill(
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    CompactWorkspaceBadge(label = label, modifier = modifier)
 }
 
 @Composable

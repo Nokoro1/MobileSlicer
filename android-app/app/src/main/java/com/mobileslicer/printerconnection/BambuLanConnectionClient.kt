@@ -17,7 +17,7 @@ internal class BambuLanConnectionClient(
             return PrinterConnectionResult(false, "Connection failed", "Bambu LAN access codes are expected to be 8 characters.")
         }
         if (serial.isBlank()) {
-            return PrinterConnectionResult(false, "Connection failed", "Enter the Bambu device serial in Device serial. Orca uses this as the LAN device id.")
+            return PrinterConnectionResult(false, "Connection failed", "Enter the Bambu device serial in Device serial. This is used as the LAN device ID.")
         }
         val mqtt = canOpenTcp(host, 8883, 2_000)
         val transfer = canOpenTcp(host, 990, 2_000)

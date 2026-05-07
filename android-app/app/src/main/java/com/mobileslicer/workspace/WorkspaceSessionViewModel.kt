@@ -27,6 +27,14 @@ internal class WorkspaceSessionViewModel : ViewModel() {
     val currentGcodeFileName = mutableStateOf("mobile_slicer_output.gcode")
     val currentSlicePreviewKey = mutableLongStateOf(0L)
     val currentModelTransform = mutableStateOf<ViewerModelTransform?>(null)
+    val workspacePlates = mutableStateListOf(
+        WorkspacePlate(
+            id = 1L,
+            label = defaultWorkspacePlateLabel(1)
+        )
+    )
+    val activePlateId = mutableLongStateOf(1L)
+    val nextPlateId = mutableLongStateOf(2L)
     val plateObjects = mutableStateListOf<PlateObject>()
     val plateFilamentSlots = mutableStateListOf<PlateFilamentSlot>()
     val plateFlushVolumes = mutableStateOf<PlateFlushVolumes?>(null)
@@ -37,12 +45,14 @@ internal class WorkspaceSessionViewModel : ViewModel() {
     val currentScreen = mutableStateOf(AppScreen.Home)
     val profilesReturnScreenName = mutableStateOf(AppScreen.Home.name)
 
-    fun clearGeneratedPreviewState() {
+    fun clearGeneratedPreviewState(resetWorkspaceMode: Boolean = true) {
         currentGcodeFilePath.value = null
         currentSliceSummary.value = null
         currentSliceTiming.value = null
         currentGcodeFileName.value = "mobile_slicer_output.gcode"
         currentSlicePreviewKey.longValue = 0L
-        workspaceMode.value = WorkspaceMode.Prepare
+        if (resetWorkspaceMode) {
+            workspaceMode.value = WorkspaceMode.Prepare
+        }
     }
 }

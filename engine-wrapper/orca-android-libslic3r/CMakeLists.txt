@@ -89,6 +89,7 @@ target_include_directories(orca_android_libslic3r_port_config INTERFACE
     ${ORCA_VENDOR_ROOT}/src
     ${ORCA_LIBSLIC3R_ROOT}
     ${ORCA_DEPS_SRC_ROOT}
+    ${ORCA_DEPS_SRC_ROOT}/mcut/include
     ${ORCA_DEPS_SRC_ROOT}/libnest2d/include
     ${ORCA_DEPS_SRC_ROOT}/clipper2/Clipper2Lib/include
     ${ORCA_DEPS_SRC_ROOT}/libigl
@@ -96,6 +97,7 @@ target_include_directories(orca_android_libslic3r_port_config INTERFACE
     ${ORCA_DEPS_SRC_ROOT}/expat
     ${ORCA_DEPS_SRC_ROOT}/eigen
     ${ORCA_DEPS_SRC_ROOT}/qhull/src
+    ${ORCA_ANDROID_NLOPT_INCLUDE_DIR}
 )
 target_compile_definitions(orca_android_libslic3r_port_config INTERFACE
     SLIC3R_GUI=0
@@ -243,6 +245,26 @@ target_include_directories(orca_android_qhull SYSTEM BEFORE PUBLIC
     ${ORCA_DEPS_SRC_ROOT}/qhull/src
 )
 
+add_library(orca_android_glu_libtess STATIC
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/dict.c
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/geom.c
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/memalloc.c
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/mesh.c
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/normal.c
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/priorityq.c
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/render.c
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/sweep.c
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/tess.c
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/src/tessmono.c
+)
+target_link_libraries(orca_android_glu_libtess PRIVATE m)
+target_include_directories(orca_android_glu_libtess SYSTEM PUBLIC
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess/include
+)
+target_include_directories(orca_android_glu_libtess SYSTEM PRIVATE
+    ${ORCA_DEPS_SRC_ROOT}/glu-libtess
+)
+
 add_library(orca_android_libslic3r_dependency_subset STATIC
     orca_android_libslic3r_dependency_subset.cpp
 )
@@ -296,6 +318,7 @@ add_library(orca_android_libslic3r_config_impl_subset SHARED
     ${ORCA_LIBSLIC3R_ROOT}/MultiPoint.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Line.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Point.cpp
+    ${ORCA_LIBSLIC3R_ROOT}/MutablePolygon.cpp
     ${ORCA_LIBSLIC3R_ROOT}/BoundingBox.cpp
     ${ORCA_LIBSLIC3R_ROOT}/ClipperUtils.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Clipper2Utils.cpp
@@ -361,6 +384,7 @@ if (ORCA_ANDROID_LIBSLIC3R_BUILD_EXPERIMENTAL_TOOLS)
         ${ORCA_LIBSLIC3R_ROOT}/Arrange.cpp
         ${ORCA_LIBSLIC3R_ROOT}/TriangleMesh.cpp
         ${ORCA_LIBSLIC3R_ROOT}/TriangleMeshSlicer.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/TriangleSelector.cpp
         ${ORCA_LIBSLIC3R_ROOT}/Model.cpp
         ${ORCA_LIBSLIC3R_ROOT}/Format/STL.cpp
         ${ORCA_DEPS_SRC_ROOT}/semver/semver.c
@@ -385,6 +409,7 @@ if (ORCA_ANDROID_LIBSLIC3R_BUILD_EXPERIMENTAL_TOOLS)
         orca_android_libnoise_headers
         orca_android_tbb
         orca_android_tbbmalloc
+        orca_android_nlopt
         orca_android_cgal_headers
         orca_android_qhull
         orca_android_openssl_crypto
@@ -393,6 +418,130 @@ if (ORCA_ANDROID_LIBSLIC3R_BUILD_EXPERIMENTAL_TOOLS)
         $<$<COMPILE_LANGUAGE:CXX>:-w>
         $<$<COMPILE_LANGUAGE:CXX>:-include${CMAKE_CURRENT_SOURCE_DIR}/shims/orca_android_libslic3r_model_preinclude.hpp>
     )
+
+    add_executable(orca_android_libslic3r_triangle_selector_probe
+        orca_android_libslic3r_triangle_selector_probe.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../orca_native_paint.cpp
+        # Config core reused by Model.hpp / Model.cpp.
+        ${ORCA_LIBSLIC3R_ROOT}/Config.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/PrintConfig.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/libslic3r.cpp
+        ${ORCA_ANDROID_SHIMS_ROOT}/libslic3r/LocalesUtils.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/MaterialType.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/GCodeReader.cpp
+        # Geometry and model implementation used by TriangleSelector and FacetsAnnotation.
+        ${ORCA_LIBSLIC3R_ROOT}/Polygon.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Polyline.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/ExPolygon.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/MultiPoint.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Line.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Point.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/BoundingBox.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/ClipperUtils.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/clipper.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Geometry.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Circle.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/ArcFitter.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/ObjectID.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Geometry/ConvexHull.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/TriangleMesh.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/TriangleSelector.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Model.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Format/STL.cpp
+        ${ORCA_DEPS_SRC_ROOT}/semver/semver.c
+        ${ORCA_DEPS_SRC_ROOT}/admesh/connect.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/normals.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/shared.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/stl_io.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/stlinit.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/util.cpp
+        ${ORCA_ANDROID_BOOST_NOWIDE_CSTDLIB_SRC}
+        ${CMAKE_CURRENT_SOURCE_DIR}/android_libslic3r_stubs.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/android_libslic3r_model_stubs.cpp
+    )
+    target_link_libraries(orca_android_libslic3r_triangle_selector_probe PRIVATE
+        orca_android_libslic3r_port_config
+        orca_android_boost_headers
+        orca_android_boost_filesystem
+        orca_android_cereal_headers
+        orca_android_libnoise_headers
+        orca_android_tbb
+        orca_android_tbbmalloc
+        orca_android_cgal_headers
+        orca_android_qhull
+        orca_android_glu_libtess
+        orca_android_openssl_crypto
+    )
+    target_include_directories(orca_android_libslic3r_triangle_selector_probe PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+    )
+    target_compile_options(orca_android_libslic3r_triangle_selector_probe PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-w>
+        $<$<COMPILE_LANGUAGE:CXX>:-include${CMAKE_CURRENT_SOURCE_DIR}/shims/orca_android_libslic3r_model_preinclude.hpp>
+    )
+    target_link_options(orca_android_libslic3r_triangle_selector_probe PRIVATE -Wl,--gc-sections)
+
+    add_executable(orca_android_libslic3r_cut_probe
+        orca_android_libslic3r_cut_probe.cpp
+        # Config core reused by Model.hpp / Model.cpp.
+        ${ORCA_LIBSLIC3R_ROOT}/Config.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/PrintConfig.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/libslic3r.cpp
+        ${ORCA_ANDROID_SHIMS_ROOT}/libslic3r/LocalesUtils.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/MaterialType.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/GCodeReader.cpp
+        # Geometry and model implementation used by CutUtils.
+        ${ORCA_LIBSLIC3R_ROOT}/Polygon.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Polyline.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/ExPolygon.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/MultiPoint.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Line.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Point.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/BoundingBox.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/ClipperUtils.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/clipper.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Geometry.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Circle.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/ArcFitter.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/ObjectID.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Geometry/ConvexHull.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/TriangleMesh.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/TriangleMeshSlicer.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/TriangleSelector.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/CutUtils.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Triangulation.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Tesselate.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Model.cpp
+        ${ORCA_LIBSLIC3R_ROOT}/Format/STL.cpp
+        ${ORCA_DEPS_SRC_ROOT}/semver/semver.c
+        ${ORCA_DEPS_SRC_ROOT}/admesh/connect.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/normals.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/shared.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/stl_io.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/stlinit.cpp
+        ${ORCA_DEPS_SRC_ROOT}/admesh/util.cpp
+        ${ORCA_ANDROID_BOOST_NOWIDE_CSTDLIB_SRC}
+        ${CMAKE_CURRENT_SOURCE_DIR}/android_libslic3r_stubs.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/android_libslic3r_model_stubs.cpp
+    )
+    target_link_libraries(orca_android_libslic3r_cut_probe PRIVATE
+        orca_android_libslic3r_port_config
+        orca_android_boost_headers
+        orca_android_boost_filesystem
+        orca_android_cereal_headers
+        orca_android_libnoise_headers
+        orca_android_tbb
+        orca_android_tbbmalloc
+        orca_android_cgal_headers
+        orca_android_qhull
+        orca_android_glu_libtess
+        orca_android_openssl_crypto
+    )
+    target_compile_options(orca_android_libslic3r_cut_probe PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-w>
+        $<$<COMPILE_LANGUAGE:CXX>:-include${CMAKE_CURRENT_SOURCE_DIR}/shims/orca_android_libslic3r_model_preinclude.hpp>
+    )
+    target_link_options(orca_android_libslic3r_cut_probe PRIVATE -Wl,--gc-sections)
 
     add_executable(orca_android_libslic3r_config_json_probe
         orca_android_libslic3r_config_json_probe.cpp
@@ -448,6 +597,7 @@ set(ORCA_ANDROID_LIBSLIC3R_PRINT_GCODE_ENGINE_SOURCES
     ${ORCA_LIBSLIC3R_ROOT}/MultiPoint.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Line.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Point.cpp
+    ${ORCA_LIBSLIC3R_ROOT}/MutablePolygon.cpp
     ${ORCA_LIBSLIC3R_ROOT}/BoundingBox.cpp
     ${ORCA_LIBSLIC3R_ROOT}/ClipperUtils.cpp
     ${ORCA_LIBSLIC3R_ROOT}/clipper.cpp
@@ -461,7 +611,11 @@ set(ORCA_ANDROID_LIBSLIC3R_PRINT_GCODE_ENGINE_SOURCES
     ${ORCA_LIBSLIC3R_ROOT}/Orient.cpp
     ${ORCA_LIBSLIC3R_ROOT}/TriangleMesh.cpp
     ${ORCA_LIBSLIC3R_ROOT}/TriangleMeshSlicer.cpp
+    ${ORCA_LIBSLIC3R_ROOT}/TriangleSelector.cpp
+    ${ORCA_LIBSLIC3R_ROOT}/MeshBoolean.cpp
+    ${ORCA_LIBSLIC3R_ROOT}/CutUtils.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Triangulation.cpp
+    ${ORCA_LIBSLIC3R_ROOT}/Tesselate.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Model.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Format/STL.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Format/bbs_3mf.cpp
@@ -482,12 +636,21 @@ set(ORCA_ANDROID_LIBSLIC3R_PRINT_GCODE_ENGINE_SOURCES
     ${ORCA_DEPS_SRC_ROOT}/expat/xmlparse.c
     ${ORCA_DEPS_SRC_ROOT}/expat/xmlrole.c
     ${ORCA_DEPS_SRC_ROOT}/expat/xmltok.c
+    ${ORCA_DEPS_SRC_ROOT}/mcut/source/bvh.cpp
+    ${ORCA_DEPS_SRC_ROOT}/mcut/source/frontend.cpp
+    ${ORCA_DEPS_SRC_ROOT}/mcut/source/hmesh.cpp
+    ${ORCA_DEPS_SRC_ROOT}/mcut/source/kernel.cpp
+    ${ORCA_DEPS_SRC_ROOT}/mcut/source/math.cpp
+    ${ORCA_DEPS_SRC_ROOT}/mcut/source/mcut.cpp
+    ${ORCA_DEPS_SRC_ROOT}/mcut/source/preproc.cpp
+    ${ORCA_DEPS_SRC_ROOT}/mcut/source/shewchuk.c
     # First print/gcode root units under evaluation.
     ${ORCA_LIBSLIC3R_ROOT}/PrintBase.cpp
     ${ORCA_LIBSLIC3R_ROOT}/PrintApply.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Print.cpp
     ${ORCA_LIBSLIC3R_ROOT}/PrintObject.cpp
     ${ORCA_LIBSLIC3R_ROOT}/PrintObjectSlice.cpp
+    ${ORCA_LIBSLIC3R_ROOT}/MultiMaterialSegmentation.cpp
     ${ORCA_LIBSLIC3R_ROOT}/PrintRegion.cpp
     ${ORCA_LIBSLIC3R_ROOT}/PlaceholderParser.cpp
     ${ORCA_LIBSLIC3R_ROOT}/Layer.cpp
@@ -610,7 +773,9 @@ target_link_libraries(orca_android_libslic3r_print_gcode_lib PUBLIC
     orca_android_nlopt
     orca_android_cgal_headers
     orca_android_qhull
+    orca_android_glu_libtess
     orca_android_openssl_crypto
+    log
 )
 target_compile_options(orca_android_libslic3r_print_gcode_lib PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-w>
@@ -622,14 +787,12 @@ target_compile_definitions(orca_android_libslic3r_print_gcode_lib PRIVATE
     ORCA_ANDROID_REAL_GCODE_PROCESSOR
     ORCA_ANDROID_REAL_MEDIAL_AXIS
     ORCA_ANDROID_REAL_BBS_3MF
-    ORCA_ANDROID_BBS_EXPORT_ONLY
     XML_STATIC
 )
 
 if (ORCA_ANDROID_LIBSLIC3R_BUILD_EXPERIMENTAL_TOOLS)
     add_executable(orca_android_libslic3r_print_gcode_probe
         orca_android_libslic3r_print_gcode_probe.cpp
-        ${ORCA_ANDROID_LIBSLIC3R_PRINT_GCODE_ENGINE_SOURCES}
     )
     target_link_libraries(orca_android_libslic3r_print_gcode_probe PRIVATE
         orca_android_libslic3r_print_gcode_lib
@@ -642,6 +805,7 @@ if (ORCA_ANDROID_LIBSLIC3R_BUILD_EXPERIMENTAL_TOOLS)
         orca_android_cgal_headers
         orca_android_qhull
         orca_android_openssl_crypto
+        log
     )
     target_compile_options(orca_android_libslic3r_print_gcode_probe PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-w>

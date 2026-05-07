@@ -209,7 +209,7 @@ internal fun OrcaPrinterSelectionScreen(
         AlertDialog(
             onDismissRequest = { nozzleSelectionPreset = null },
             confirmButton = {},
-            title = { Text("Select Nozzle Size") },
+            title = { Text("Select nozzle size") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     preset.nozzleDiametersList().forEach { nozzle ->
@@ -229,7 +229,7 @@ internal fun OrcaPrinterSelectionScreen(
                                         onImport(profile, processes)
                                     }.onFailure { error ->
                                         importingProfilePath = null
-                                        importError = error.localizedMessage ?: "Unable to read Orca printer preset data."
+                                        importError = error.localizedMessage ?: "Unable to read printer preset data."
                                     }
                                 }
                             },
@@ -285,7 +285,7 @@ internal fun OrcaPrinterSelectionScreen(
                     }
                 }
                 Text(
-                    text = "Select Printer",
+                    text = "Select printer",
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleLarge,
                     color = titleColor,
@@ -299,8 +299,8 @@ internal fun OrcaPrinterSelectionScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
-                placeholder = { Text("Search Printers") },
-                label = { Text("Printer Name") },
+                placeholder = { Text("Search printers") },
+                label = { Text("Printer name") },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = appCardColor().copy(alpha = 0.72f),
                     unfocusedContainerColor = appCardColor().copy(alpha = 0.72f),
@@ -324,9 +324,9 @@ internal fun OrcaPrinterSelectionScreen(
                         ) {
                             Text(
                                 text = if (query.isNotBlank()) {
-                                    "No Orca printers match \"$query\"."
+                                    "No printer presets match \"$query\"."
                                 } else {
-                                    "No Orca printer profiles are available."
+                                    "No printer presets are available."
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = appBodyColor()
@@ -366,7 +366,7 @@ internal fun OrcaPrinterSelectionScreen(
                                                 onImport(profile, processes)
                                             }.onFailure { error ->
                                                 importingProfilePath = null
-                                                importError = error.localizedMessage ?: "Unable to read Orca printer preset data."
+                                                importError = error.localizedMessage ?: "Unable to read printer preset data."
                                             }
                                         }
                                     }

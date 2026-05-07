@@ -1,0 +1,791 @@
+#include "orca_wrapper.h"
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+struct EngineDeleter {
+    void operator()(OrcaEngine* engine) const
+    {
+        if (engine != nullptr)
+            orca_destroy(engine);
+    }
+};
+
+using EnginePtr = std::unique_ptr<OrcaEngine, EngineDeleter>;
+
+struct SliceResult {
+    std::string gcode;
+    std::uint64_t hash{0};
+    std::uint64_t semantic_hash{0};
+    std::uint64_t execution_hash{0};
+};
+
+struct GCodeMetrics {
+    int extrusion_moves{0};
+    int tool_changes{0};
+    int material_change_commands{0};
+    int support_markers{0};
+    std::vector<double> filament_used_mm;
+};
+
+struct CandidateRay {
+    std::array<float, 6> ray{};
+};
+
+int brush_shape_from_env(int mode);
+const char* brush_shape_name(int shape);
+
+std::string read_file_to_string(const char* path)
+{
+    std::ifstream input(path, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    return buffer.str();
+}
+
+void write_string_to_file(const char* path, const std::string& value)
+{
+    if (path == nullptr || path[0] == '\0')
+        return;
+    std::ofstream output(path, std::ios::binary);
+    output << value;
+}
+
+std::uint64_t fnv1a64(const std::string& value)
+{
+    std::uint64_t hash = 1469598103934665603ull;
+    for (const unsigned char ch : value) {
+        hash ^= ch;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+std::string hex64(std::uint64_t value)
+{
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string out(16, '0');
+    for (int idx = 15; idx >= 0; --idx) {
+        out[idx] = digits[value & 0xfu];
+        value >>= 4;
+    }
+    return out;
+}
+
+const char* mode_name(int mode)
+{
+    switch (mode) {
+    case 0:
+        return "Support";
+    case 1:
+        return "Seam";
+    case 2:
+        return "Color";
+    case 3:
+        return "FuzzySkin";
+    default:
+        return "Unknown";
+    }
+}
+
+bool payload_has_triangles(const std::string& payload)
+{
+    return payload.find("\"triangles\":[{") != std::string::npos;
+}
+
+bool starts_with(const std::string& value, const char* prefix)
+{
+    const std::string_view view(value);
+    const std::string_view expected(prefix);
+    return view.size() >= expected.size() && view.substr(0, expected.size()) == expected;
+}
+
+std::string lowercase_copy(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+GCodeMetrics measure_gcode(const std::string& gcode)
+{
+    GCodeMetrics metrics;
+    std::istringstream stream(gcode);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (starts_with(line, "G1 ") && line.find('E') != std::string::npos)
+            ++metrics.extrusion_moves;
+        if (line.size() >= 2 && line[0] == 'T' && std::isdigit(static_cast<unsigned char>(line[1])) != 0)
+            ++metrics.tool_changes;
+        if (starts_with(line, "M620") || starts_with(line, "M621") || starts_with(line, "M622"))
+            ++metrics.material_change_commands;
+        const std::string lower = lowercase_copy(line);
+        if (lower.find("support") != std::string::npos)
+            ++metrics.support_markers;
+        constexpr const char* filament_used_prefix = "; filament used [mm] =";
+        if (starts_with(line, filament_used_prefix)) {
+            metrics.filament_used_mm.clear();
+            std::string values = line.substr(std::strlen(filament_used_prefix));
+            std::stringstream values_stream(values);
+            std::string item;
+            while (std::getline(values_stream, item, ',')) {
+                char* end = nullptr;
+                const double parsed = std::strtod(item.c_str(), &end);
+                if (end != item.c_str())
+                    metrics.filament_used_mm.push_back(parsed);
+            }
+        }
+    }
+    return metrics;
+}
+
+std::string normalized_gcode_for_semantic_hash(const std::string& gcode)
+{
+    std::ostringstream normalized;
+    std::istringstream stream(gcode);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (starts_with(line, "; printing object ") || starts_with(line, "; stop printing object ")) {
+            const size_t id_pos = line.find(" id:");
+            const size_t copy_pos = line.find(" copy ", id_pos == std::string::npos ? 0 : id_pos);
+            if (id_pos != std::string::npos && copy_pos != std::string::npos)
+                line = line.substr(0, id_pos) + " id:<object>" + line.substr(copy_pos);
+        } else if (starts_with(line, "; generated by MobileSlicer ")) {
+            line = "; generated by MobileSlicer <timestamp>";
+        }
+        normalized << line << '\n';
+    }
+    return normalized.str();
+}
+
+std::string normalized_executable_gcode(const std::string& gcode)
+{
+    std::ostringstream normalized;
+    std::istringstream stream(gcode);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+        const size_t first_non_space = line.find_first_not_of(" \t");
+        if (first_non_space == std::string::npos)
+            continue;
+        if (line[first_non_space] == ';')
+            continue;
+
+        normalized << line.substr(first_non_space) << '\n';
+    }
+    return normalized.str();
+}
+
+std::string without_trailing_object_brace(std::string json)
+{
+    const size_t pos = json.find_last_of('}');
+    if (pos == std::string::npos)
+        return "{}";
+    json.erase(pos);
+    return json;
+}
+
+std::string config_for_mode(std::string config_json, int mode)
+{
+    if (mode == 2) {
+        // Build a clean color/MMU probe config instead of appending duplicate
+        // keys to the shared scalar fixture. The wrapper's lightweight JSON
+        // extractor intentionally keeps the first duplicate key, so appending
+        // vector filament/nozzle settings after scalar keys silently collapses
+        // the probe back to a single-filament print.
+        return R"json({
+            "layer_height":0.2,
+            "first_layer_height":0.2,
+            "bed_temperature":45,
+            "bed_width_mm":220,
+            "bed_depth_mm":220,
+            "max_height_mm":220,
+            "wall_loops":2,
+            "sparse_infill_density":10,
+            "top_shell_layers":3,
+            "bottom_shell_layers":3,
+            "skirt_loops":0,
+            "brim_width":0,
+            "enable_support":false,
+            "seam_position":"aligned",
+            "wall_generator":"classic",
+            "line_width":"0.42",
+            "inner_wall_line_width":"0.42",
+            "outer_wall_line_width":"0.42",
+            "sparse_infill_line_width":"0.42",
+            "internal_solid_infill_line_width":"0.42",
+            "top_surface_line_width":"0.42",
+            "support_line_width":"0.42",
+            "nozzle_diameter":[0.4,0.4,0.4],
+            "filament_diameter":[1.75,1.75,1.75],
+            "filament_colour":["#FF5038","#2A8CFF","#06D6A0"],
+            "filament_type":["PLA","PLA","PLA"],
+            "filament_start_gcode":["","",""],
+            "filament_end_gcode":["","",""],
+            "filament_map":[1,2,3],
+            "filament_map_mode":"Manual",
+            "physical_extruder_map":[0],
+            "printer_extruder_id":[1,1,1],
+            "print_extruder_id":[1,1,1],
+            "mobile_slicer_active_filament_slot_count":3,
+            "single_extruder_multi_material":true,
+            "enable_prime_tower":false,
+            "prime_tower_width":35,
+            "nozzle_temperature":[210,210,210],
+            "nozzle_temperature_initial_layer":[210,210,210],
+            "flush_volumes_matrix":[0,120,120,120,0,120,120,120,0],
+            "flush_multiplier":[1]
+        })json";
+    }
+
+    std::string out = without_trailing_object_brace(std::move(config_json));
+    if (out.empty() || out == "{") {
+        out = "{";
+    } else {
+        out += ",";
+    }
+    if (mode == 3) {
+        out += R"json(
+            "fuzzy_skin":"none",
+            "fuzzy_skin_thickness":0.2,
+            "fuzzy_skin_point_distance":0.3,
+            "fuzzy_skin_mode":"displacement"
+        )json";
+    } else {
+        out += R"json("mobile_slicer_probe_mode":"support_or_seam")json";
+    }
+    out += "}";
+    return out;
+}
+
+long long payload_mobile_object_id_or_default(const std::string& payload_json, long long default_id)
+{
+    const std::string key = "\"mobileObjectId\"";
+    const size_t key_pos = payload_json.find(key);
+    if (key_pos == std::string::npos)
+        return default_id;
+    const size_t colon_pos = payload_json.find(':', key_pos + key.size());
+    if (colon_pos == std::string::npos)
+        return default_id;
+    size_t value_pos = colon_pos + 1;
+    while (value_pos < payload_json.size() && std::isspace(static_cast<unsigned char>(payload_json[value_pos])))
+        ++value_pos;
+    size_t end_pos = value_pos;
+    if (end_pos < payload_json.size() && payload_json[end_pos] == '-')
+        ++end_pos;
+    while (end_pos < payload_json.size() && std::isdigit(static_cast<unsigned char>(payload_json[end_pos])))
+        ++end_pos;
+    if (end_pos == value_pos)
+        return default_id;
+    try {
+        return std::stoll(payload_json.substr(value_pos, end_pos - value_pos));
+    } catch (...) {
+        return default_id;
+    }
+}
+
+bool load_plate_v2(OrcaEngine* engine, const char* stl_path, const char* payload_json, long long object_id = 42)
+{
+    const char* paths[] = { stl_path };
+    const double transforms[] = {
+        0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0,
+        1.0
+    };
+    const int extruder_ids[] = { 1 };
+    const long long object_ids[] = { object_id };
+    return orca_load_plate_models_v2(
+        engine,
+        paths,
+        transforms,
+        7,
+        extruder_ids,
+        object_ids,
+        payload_json != nullptr ? payload_json : "",
+        1) == 0;
+}
+
+SliceResult slice_model(const char* stl_path, const std::string& config_json, const std::string& payload_json, const char* debug_output_path = nullptr)
+{
+    EnginePtr engine(orca_create());
+    if (!engine)
+        throw std::runtime_error("orca_create failed");
+    const long long object_id = payload_mobile_object_id_or_default(payload_json, 42);
+    if (!load_plate_v2(engine.get(), stl_path, payload_json.c_str(), object_id)) {
+        const char* error = orca_get_last_error(engine.get());
+        throw std::runtime_error(std::string("orca_load_plate_models_v2 failed: ") + (error != nullptr ? error : ""));
+    }
+    if (debug_output_path != nullptr && payload_json.find("\"mode\":\"Color\"") != std::string::npos) {
+        if (orca_paint_begin_session(engine.get(), object_id, 2) == 0) {
+            const char* roundtrip_payload = orca_paint_serialize(engine.get());
+            std::ofstream payload_out("/data/local/tmp/v2_replay_probe_color_roundtrip_payload.json", std::ios::binary);
+            payload_out << (roundtrip_payload != nullptr ? roundtrip_payload : "");
+            orca_paint_end_session(engine.get(), 0);
+        }
+    }
+    if (orca_set_config_json(engine.get(), config_json.c_str()) != 0) {
+        const char* error = orca_get_last_error(engine.get());
+        throw std::runtime_error(std::string("orca_set_config_json failed: ") + (error != nullptr ? error : ""));
+    }
+    if (orca_slice(engine.get()) != 0) {
+        const char* error = orca_get_last_error(engine.get());
+        throw std::runtime_error(std::string("orca_slice failed: ") + (error != nullptr ? error : ""));
+    }
+    const char* gcode = orca_get_gcode(engine.get());
+    if (gcode == nullptr || gcode[0] == '\0')
+        throw std::runtime_error("orca_get_gcode returned empty output");
+    SliceResult result;
+    result.gcode = gcode;
+    result.hash = fnv1a64(result.gcode);
+    result.semantic_hash = fnv1a64(normalized_gcode_for_semantic_hash(result.gcode));
+    result.execution_hash = fnv1a64(normalized_executable_gcode(result.gcode));
+    if (debug_output_path != nullptr && debug_output_path[0] != '\0') {
+        std::ofstream out(debug_output_path, std::ios::binary);
+        out << result.gcode;
+    }
+    return result;
+}
+
+std::vector<CandidateRay> candidate_rays()
+{
+    std::vector<CandidateRay> rays;
+    const std::array<float, 5> xs = { 2.f, 6.f, 10.f, 14.f, 18.f };
+    const std::array<float, 3> ys = { 0.8f, 2.f, 3.2f };
+    for (const float x : xs) {
+        for (const float y : ys) {
+            rays.push_back({ { x, y, 50.f, 0.f, 0.f, -1.f } });
+            rays.push_back({ { x, y, -20.f, 0.f, 0.f, 1.f } });
+            rays.push_back({ { x, -20.f, 6.f, 0.f, 1.f, 0.f } });
+            rays.push_back({ { x, 24.f, 6.f, 0.f, -1.f, 0.f } });
+        }
+    }
+    return rays;
+}
+
+std::string create_native_payload(const char* stl_path, int mode, const CandidateRay& candidate, std::string& error)
+{
+    EnginePtr engine(orca_create());
+    if (!engine) {
+        error = "orca_create failed";
+        return {};
+    }
+    if (!load_plate_v2(engine.get(), stl_path, "")) {
+        const char* last_error = orca_get_last_error(engine.get());
+        error = std::string("blank v2 load failed: ") + (last_error != nullptr ? last_error : "");
+        return {};
+    }
+    const char* binding_debug_json = orca_paint_binding_debug_json(engine.get());
+    if (binding_debug_json == nullptr ||
+        std::string(binding_debug_json).find("\"mobileObjectId\":42") == std::string::npos ||
+        std::string(binding_debug_json).find("\"hasModel\":true") == std::string::npos) {
+        error = "paint binding debug json did not expose loaded mobileObjectId=42";
+        return {};
+    }
+    if (orca_paint_begin_session(engine.get(), 999, mode) == 0) {
+        orca_paint_end_session(engine.get(), 0);
+        error = "paint begin session unexpectedly accepted an unbound object id";
+        return {};
+    } else {
+        const char* last_error = orca_get_last_error(engine.get());
+        const std::string error_message = last_error != nullptr ? last_error : "";
+        if (error_message.find("requestedMobileObjectId=999") == std::string::npos ||
+            error_message.find("\"mobileObjectId\":42") == std::string::npos ||
+            error_message.find("\"modelGeneration\"") == std::string::npos) {
+            error = "unbound paint session error did not include actionable binding diagnostics";
+            return {};
+        }
+    }
+    if (orca_paint_begin_session(engine.get(), 42, mode) != 0) {
+        const char* last_error = orca_get_last_error(engine.get());
+        error = std::string("paint begin session failed: ") + (last_error != nullptr ? last_error : "");
+        return {};
+    }
+    if (mode == 2 && orca_paint_set_tool(engine.get(), 0, 0, 12.0f, 0.0f, 2) != 0) {
+        const char* last_error = orca_get_last_error(engine.get());
+        orca_paint_end_session(engine.get(), 0);
+        error = std::string("paint set color tool failed: ") + (last_error != nullptr ? last_error : "");
+        return {};
+    }
+
+    const int brush_shape = brush_shape_from_env(mode);
+    if (orca_paint_set_tool_options(engine.get(), brush_shape == 3 ? 30.f : 180.f, 0.f, nullptr) != 0) {
+        const char* last_error = orca_get_last_error(engine.get());
+        orca_paint_end_session(engine.get(), 0);
+        error = std::string("paint set tool options failed: ") + (last_error != nullptr ? last_error : "");
+        return {};
+    }
+
+    auto paint_one_ray = [&](const CandidateRay& ray) -> bool {
+        float hit[9] = {};
+        if (orca_paint_hit_test_ray(engine.get(), ray.ray.data(), hit) != 0)
+            return false;
+        if (orca_paint_stroke_begin_ray(engine.get(), ray.ray.data(), brush_shape, 0, 12.0f) != 0)
+            return false;
+        return orca_paint_stroke_end(engine.get()) == 0;
+    };
+
+    int painted_strokes = 0;
+    if (paint_one_ray(candidate))
+        ++painted_strokes;
+    if (painted_strokes == 0) {
+        const char* last_error = orca_get_last_error(engine.get());
+        orca_paint_end_session(engine.get(), 0);
+        error = std::string("paint stroke failed: ") + (last_error != nullptr ? last_error : "all candidate rays missed");
+        return {};
+    }
+    const char* payload = orca_paint_serialize(engine.get());
+    const std::string payload_json = payload != nullptr ? payload : "";
+    orca_paint_end_session(engine.get(), 1);
+    if (!payload_has_triangles(payload_json)) {
+        error = "paint serialize produced no triangle payload";
+        return {};
+    }
+    return payload_json;
+}
+
+int mode_from_arg(const std::string& mode)
+{
+    if (mode == "support")
+        return 0;
+    if (mode == "seam")
+        return 1;
+    if (mode == "color")
+        return 2;
+    if (mode == "fuzzy")
+        return 3;
+    return -1;
+}
+
+int brush_shape_from_env(int mode)
+{
+    const char* raw_shape = std::getenv("MOBILESLICER_PAINT_BRUSH_SHAPE");
+    if (raw_shape == nullptr || raw_shape[0] == '\0')
+        return mode == 3 ? 2 : 0;
+    const std::string shape = lowercase_copy(raw_shape);
+    if (shape == "circle")
+        return 0;
+    if (shape == "sphere")
+        return 1;
+    if (shape == "fill" || shape == "bucket" || shape == "bucket_fill")
+        return 2;
+    if (shape == "smart" || shape == "smart_fill")
+        return 3;
+    return mode == 3 ? 2 : 0;
+}
+
+const char* brush_shape_name(int shape)
+{
+    switch (shape) {
+    case 0:
+        return "circle";
+    case 1:
+        return "sphere";
+    case 2:
+        return "bucket_fill";
+    case 3:
+        return "smart_fill";
+    default:
+        return "unknown";
+    }
+}
+
+bool semantic_change_for_mode(int mode, const SliceResult& baseline, const SliceResult& replay, std::string& reason)
+{
+    const GCodeMetrics base_metrics = measure_gcode(baseline.gcode);
+    const GCodeMetrics replay_metrics = measure_gcode(replay.gcode);
+    switch (mode) {
+    case 0:
+        if (base_metrics.extrusion_moves != replay_metrics.extrusion_moves ||
+            baseline.execution_hash != replay.execution_hash) {
+            reason = "support_replay_changed_support_or_toolpath_output";
+            return true;
+        }
+        break;
+    case 1:
+        if (baseline.execution_hash != replay.execution_hash) {
+            reason = "seam_replay_changed_order_or_path_output";
+            return true;
+        }
+        break;
+    case 2:
+        if (replay_metrics.tool_changes > base_metrics.tool_changes) {
+            reason = "color_replay_added_tool_changes";
+            return true;
+        }
+        if (replay_metrics.material_change_commands > base_metrics.material_change_commands) {
+            reason = "color_replay_added_material_change_commands";
+            return true;
+        }
+        if (base_metrics.filament_used_mm.size() >= 2 &&
+            replay_metrics.filament_used_mm.size() >= 2 &&
+            replay_metrics.filament_used_mm[1] > 0.01 &&
+            std::abs(base_metrics.filament_used_mm[1] - replay_metrics.filament_used_mm[1]) > 0.01) {
+            reason = "color_replay_changed_filament_slot_usage";
+            return true;
+        }
+        break;
+    case 3:
+        if (base_metrics.extrusion_moves != replay_metrics.extrusion_moves ||
+            baseline.execution_hash != replay.execution_hash) {
+            reason = "fuzzy_replay_changed_surface_toolpath_output";
+            return true;
+        }
+        break;
+    default:
+        break;
+    }
+    return false;
+}
+
+bool verify_color_remap_api(const std::string& payload, std::string& error)
+{
+    EnginePtr engine(orca_create());
+    if (!engine) {
+        error = "orca_create failed";
+        return false;
+    }
+
+    const int remap_slot_2_to_3[] = { 1, 3, 3 };
+    const char* remapped = orca_paint_remap_color_slots(
+        engine.get(),
+        payload.c_str(),
+        remap_slot_2_to_3,
+        3);
+    const std::string remapped_payload = remapped != nullptr ? remapped : "";
+    if (remapped_payload.empty()) {
+        const char* last_error = orca_get_last_error(engine.get());
+        error = std::string("safe color remap failed: ") + (last_error != nullptr ? last_error : "");
+        return false;
+    }
+    if (remapped_payload.find("\"mode\":\"Color\"") == std::string::npos ||
+        remapped_payload.find("\"colorSlots\":[3]") == std::string::npos ||
+        !payload_has_triangles(remapped_payload)) {
+        error = "safe color remap returned a payload without remapped color slot metadata or triangle state";
+        return false;
+    }
+
+    const int deleted_slot_2[] = { 1, 0, 3 };
+    const char* deleted_result = orca_paint_remap_color_slots(
+        engine.get(),
+        payload.c_str(),
+        deleted_slot_2,
+        3);
+    const std::string deleted_payload = deleted_result != nullptr ? deleted_result : "";
+    if (!deleted_payload.empty()) {
+        error = "deleted color slot remap unexpectedly returned a payload";
+        return false;
+    }
+    const char* last_error = orca_get_last_error(engine.get());
+    const std::string deleted_error = last_error != nullptr ? last_error : "";
+    if (deleted_error.find("deleted filament slot") == std::string::npos &&
+        deleted_error.find("unsafe") == std::string::npos &&
+        deleted_error.find("unsupported") == std::string::npos) {
+        error = "deleted color slot remap did not produce an explicit stale/unsupported error";
+        return false;
+    }
+
+    return true;
+}
+
+bool verify_tool_options_api(std::string& error)
+{
+    EnginePtr engine(orca_create());
+    if (!engine) {
+        error = "orca_create failed";
+        return false;
+    }
+
+    const float clipping_plane[] = { 0.f, 0.f, 1.f, 1000.f };
+    if (orca_paint_set_tool_options(engine.get(), 30.f, 45.f, clipping_plane) != 0) {
+        const char* last_error = orca_get_last_error(engine.get());
+        error = std::string("tool options valid call failed: ") + (last_error != nullptr ? last_error : "");
+        return false;
+    }
+    if (orca_paint_set_tool_options(engine.get(), 181.f, 45.f, clipping_plane) == 0) {
+        error = "tool options accepted invalid smart-fill angle";
+        return false;
+    }
+    if (orca_paint_set_tool_options(engine.get(), 30.f, 91.f, clipping_plane) == 0) {
+        error = "tool options accepted invalid overhang angle";
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    if (argc != 4 && argc != 5) {
+        std::cerr << "usage: orca_engine_v2_paint_replay_probe <input.stl> <config.json> <support|seam|color|fuzzy> [payload.json]\n";
+        return 2;
+    }
+
+    const int mode = mode_from_arg(argv[3]);
+    if (mode < 0) {
+        std::cerr << "error: unsupported mode: " << argv[3] << "\n";
+        return 2;
+    }
+
+    try {
+        std::string tool_options_error;
+        if (!verify_tool_options_api(tool_options_error)) {
+            std::cerr << "error: " << tool_options_error << "\n";
+            return 1;
+        }
+        std::cout << "tool_options_api=ok\n";
+
+        const char* cli_external_payload_path = argc == 5 ? argv[4] : nullptr;
+        const char* env_external_payload_path = std::getenv("MOBILESLICER_PAINT_REPLAY_PAYLOAD");
+        const char* external_payload_path = cli_external_payload_path != nullptr ?
+            cli_external_payload_path :
+            (env_external_payload_path != nullptr && env_external_payload_path[0] != '\0' ? env_external_payload_path : nullptr);
+        const std::string raw_config_json = read_file_to_string(argv[2]);
+        if (raw_config_json.empty()) {
+            std::cerr << "error: failed to read config JSON from " << argv[2] << "\n";
+            return 1;
+        }
+        const std::string config_json = config_for_mode(raw_config_json, mode);
+
+        const bool debug_dump_color = mode == 2;
+        const SliceResult baseline = slice_model(
+            argv[1],
+            config_json,
+            "",
+            debug_dump_color ? "/data/local/tmp/v2_replay_probe_color_baseline.gcode" : nullptr);
+        const GCodeMetrics baseline_metrics = measure_gcode(baseline.gcode);
+        std::cout << "baseline_gcode_bytes=" << baseline.gcode.size() << "\n";
+        std::cout << "baseline_gcode_hash=" << hex64(baseline.hash) << "\n";
+        std::cout << "baseline_semantic_hash=" << hex64(baseline.semantic_hash) << "\n";
+        std::cout << "baseline_execution_hash=" << hex64(baseline.execution_hash) << "\n";
+        std::cout << "baseline_extrusion_moves=" << baseline_metrics.extrusion_moves << "\n";
+        std::cout << "baseline_tool_changes=" << baseline_metrics.tool_changes << "\n";
+        std::cout << "baseline_material_change_commands=" << baseline_metrics.material_change_commands << "\n";
+        std::cout << "baseline_support_markers=" << baseline_metrics.support_markers << "\n";
+        if (!baseline_metrics.filament_used_mm.empty()) {
+            std::cout << "baseline_filament_used_mm=";
+            for (size_t i = 0; i < baseline_metrics.filament_used_mm.size(); ++i) {
+                if (i > 0)
+                    std::cout << ",";
+                std::cout << baseline_metrics.filament_used_mm[i];
+            }
+            std::cout << "\n";
+        }
+
+        auto evaluate_payload = [&](const std::string& payload, size_t candidate_index, const char* payload_source) -> bool {
+            if (!payload_has_triangles(payload))
+                return false;
+            if (mode == 2 && std::strcmp(payload_source, "native") == 0) {
+                std::string remap_error;
+                if (!verify_color_remap_api(payload, remap_error)) {
+                    std::cerr << "error: " << remap_error << "\n";
+                    return false;
+                }
+                std::cout << "color_remap_api=ok\n";
+            }
+
+            const SliceResult replay = slice_model(
+                argv[1],
+                config_json,
+                payload,
+                debug_dump_color ? "/data/local/tmp/v2_replay_probe_color_replay.gcode" : nullptr);
+            std::string semantic_reason;
+            if (!semantic_change_for_mode(mode, baseline, replay, semantic_reason))
+                return false;
+            const GCodeMetrics replay_metrics = measure_gcode(replay.gcode);
+
+            std::cout << "mode=" << mode_name(mode) << "\n";
+            std::cout << "payload_source=" << payload_source << "\n";
+            if (std::strcmp(payload_source, "native") == 0)
+                std::cout << "brush_shape=" << brush_shape_name(brush_shape_from_env(mode)) << "\n";
+            if (external_payload_path != nullptr)
+                std::cout << "payload_path=" << external_payload_path << "\n";
+            std::cout << "candidate_index=" << candidate_index << "\n";
+            std::cout << "payload_bytes=" << payload.size() << "\n";
+            std::cout << "replay_gcode_bytes=" << replay.gcode.size() << "\n";
+            std::cout << "replay_gcode_hash=" << hex64(replay.hash) << "\n";
+            std::cout << "replay_semantic_hash=" << hex64(replay.semantic_hash) << "\n";
+            std::cout << "replay_execution_hash=" << hex64(replay.execution_hash) << "\n";
+            std::cout << "replay_extrusion_moves=" << replay_metrics.extrusion_moves << "\n";
+            std::cout << "replay_tool_changes=" << replay_metrics.tool_changes << "\n";
+            std::cout << "replay_material_change_commands=" << replay_metrics.material_change_commands << "\n";
+            std::cout << "replay_support_markers=" << replay_metrics.support_markers << "\n";
+            if (!replay_metrics.filament_used_mm.empty()) {
+                std::cout << "replay_filament_used_mm=";
+                for (size_t i = 0; i < replay_metrics.filament_used_mm.size(); ++i) {
+                    if (i > 0)
+                        std::cout << ",";
+                    std::cout << replay_metrics.filament_used_mm[i];
+                }
+                std::cout << "\n";
+            }
+            std::cout << "semantic_check=" << semantic_reason << "\n";
+            std::cout << "result=v2_replay_changed_slice_output\n";
+            return true;
+        };
+
+        if (external_payload_path != nullptr) {
+            const std::string external_payload = read_file_to_string(external_payload_path);
+            if (external_payload.empty()) {
+                std::cerr << "error: failed to read external payload JSON from " << external_payload_path << "\n";
+                return 1;
+            }
+            if (!payload_has_triangles(external_payload)) {
+                std::cerr << "error: external payload JSON has no triangle annotation state\n";
+                return 1;
+            }
+            if (evaluate_payload(external_payload, 0, "external"))
+                return 0;
+            std::cerr << "error: external " << mode_name(mode)
+                      << " payload did not change v2 replay slice output\n";
+            return 1;
+        }
+
+        const std::vector<CandidateRay> rays = candidate_rays();
+        bool dumped_first_payload = false;
+        for (size_t index = 0; index < rays.size(); ++index) {
+            std::string paint_error;
+            const std::string payload = create_native_payload(argv[1], mode, rays[index], paint_error);
+            if (payload.empty())
+                continue;
+            const std::string mode_payload_path = std::string("/data/local/tmp/v2_replay_probe_") +
+                lowercase_copy(mode_name(mode)) + "_payload.json";
+            write_string_to_file(mode_payload_path.c_str(), payload);
+            if (mode == 2 && !dumped_first_payload) {
+                std::ofstream payload_out("/data/local/tmp/v2_replay_probe_color_payload.json", std::ios::binary);
+                payload_out << payload;
+                dumped_first_payload = true;
+            }
+
+            if (evaluate_payload(payload, index, "native"))
+                return 0;
+        }
+
+        std::cerr << "error: no " << mode_name(mode)
+                  << " native payload candidate changed v2 replay slice output\n";
+        return 1;
+    } catch (const std::exception& error) {
+        std::cerr << "error: " << error.what() << "\n";
+        return 1;
+    }
+}

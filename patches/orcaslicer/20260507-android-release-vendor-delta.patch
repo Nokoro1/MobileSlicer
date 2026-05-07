@@ -1,0 +1,488 @@
+diff --git a/vendor/orcaslicer/deps_src/libnest2d/include/libnest2d/placers/nfpplacer.hpp b/vendor/orcaslicer/deps_src/libnest2d/include/libnest2d/placers/nfpplacer.hpp
+index 65a3344b..145c9145 100644
+--- a/vendor/orcaslicer/deps_src/libnest2d/include/libnest2d/placers/nfpplacer.hpp
++++ b/vendor/orcaslicer/deps_src/libnest2d/include/libnest2d/placers/nfpplacer.hpp
+@@ -8,6 +8,7 @@
+ #include <iterator>
+ #include <future>
+ #include <atomic>
++#include <type_traits>
+ 
+ #ifndef NDEBUG
+ #include <iostream>
+@@ -575,6 +576,22 @@ private:
+ 
+     using Shapes = TMultiShape<RawShape>;
+ 
++    template<class Shape, class = void>
++    struct HasCommutativeOverlapTest: std::false_type {};
++
++    template<class Shape>
++    struct HasCommutativeOverlapTest<Shape, std::void_t<decltype(std::declval<const Shape&>().overlaps(std::declval<const Shape&>()))>>:
++        std::true_type {};
++
++    static bool shapesStrictlyOverlap(const RawShape& left, const RawShape& right)
++    {
++        if constexpr (HasCommutativeOverlapTest<RawShape>::value) {
++            return left.overlaps(right) || right.overlaps(left);
++        } else {
++            return sl::intersects(left, right) && !sl::touches(left, right);
++        }
++    }
++
+     Shapes calcnfp(const Item &trsh, const Box& bed ,Lvl<nfp::NfpLevel::CONVEX_ONLY>)
+     {
+         using namespace nfp;
+@@ -729,6 +746,17 @@ private:
+         }
+ 
+         bool first_object = std::all_of(items_.begin(), items_.end(), [&](const Item &rawShape) { return rawShape.is_virt_object && !rawShape.is_wipe_tower; });
++        auto overlapsPackedItems = [this](const Item& candidate) {
++            for (const Item& packed : items_) {
++                if (packed.is_virt_object && !packed.is_wipe_tower) {
++                    continue;
++                }
++                if (shapesStrictlyOverlap(candidate.transformedShape(), packed.transformedShape())) {
++                    return true;
++                }
++            }
++            return false;
++        };
+ 
+         // item won't overlap with virtual objects if it's inside or touches NFP
+         auto overlapWithVirtObject = [&]() -> double {
+@@ -795,11 +823,14 @@ private:
+                 }
+ 
+                 // Our object function for placement
+-                auto rawobjfunc = [_objfunc, iv, startpos]
++                auto rawobjfunc = [_objfunc, &overlapsPackedItems, iv, startpos]
+                         (Vertex v, Item& itm)
+                 {
+                     auto d = (v - iv) + startpos;
+                     itm.translation(d);
++                    if (overlapsPackedItems(itm)) {
++                        return LARGE_COST_TO_REJECT;
++                    }
+                     return _objfunc(itm);
+                 };
+ 
+@@ -812,11 +843,15 @@ private:
+                 auto alignment = config_.alignment;
+ 
+                 auto boundaryCheck = [alignment, &merged_pile, &getNfpPoint,
++                        &overlapsPackedItems,
+                         &item, &bin, &iv, &startpos] (const Optimum& o)
+                 {
+                     auto v = getNfpPoint(o);
+                     auto d = (v - iv) + startpos;
+                     item.translation(d);
++                    if (overlapsPackedItems(item)) {
++                        return LARGE_COST_TO_REJECT;
++                    }
+ 
+                     merged_pile.emplace_back(item.transformedShape());
+                     auto chull = sl::convexHull(merged_pile);
+@@ -948,12 +983,93 @@ private:
+                     }
+                 }
+ 
+-                if( best_score < global_score) {
+-                    auto d = (getNfpPoint(optimum) - iv) + startpos;
+-                    final_tr = d;
+-                    final_rot = initial_rot + rot;
++            if( best_score < global_score) {
++                auto d = (getNfpPoint(optimum) - iv) + startpos;
++                final_tr = d;
++                final_rot = initial_rot + rot;
++                can_pack = true;
++                global_score = best_score;
++            }
++            }
++
++            if (!can_pack && !items_.empty()) {
++                double recovered_score = std::numeric_limits<double>::max();
++                Vertex recovered_tr = final_tr;
++                Radians recovered_rot = final_rot;
++                const auto bed_center = binbb.center();
++                const auto bed_width = binbb.width();
++                const auto bed_height = binbb.height();
++                const auto min_step = static_cast<decltype(bed_width)>(CoordType<RawShape>::MM_IN_COORDS * 10);
++                const auto arrange_gap = static_cast<decltype(bed_width)>(CoordType<RawShape>::MM_IN_COORDS * 2);
++
++                auto try_position = [&](const Vertex& desired_center) {
++                    auto ibb = item.boundingBox();
++                    Vertex translation = item.translation() + desired_center - ibb.center();
++                    item.translation(translation);
++                    if (overfit(item.transformedShape(), bin_) > 0 || overlapsPackedItems(item)) {
++                        return;
++                    }
++                    double score = _objfunc(item);
++                    if (score >= 0 && score < LARGE_COST_TO_REJECT && score < recovered_score) {
++                        recovered_score = score;
++                        recovered_tr = item.translation();
++                        recovered_rot = item.rotation();
++                    }
++                };
++
++                for (auto rot : config_.rotations) {
++                    item.translation(initial_tr);
++                    item.rotation(initial_rot + rot);
++                    auto ibb = item.boundingBox();
++                    const auto item_width = std::max(ibb.width(), min_step);
++                    const auto item_height = std::max(ibb.height(), min_step);
++                    const auto step_x = std::max(item_width + arrange_gap, min_step);
++                    const auto step_y = std::max(item_height + arrange_gap, min_step);
++
++                    try_position(bed_center);
++
++                    for (const Item& packed : items_) {
++                        if (packed.is_virt_object && !packed.is_wipe_tower) {
++                            continue;
++                        }
++                        const auto pbb = packed.boundingBox();
++                        const auto pc = pbb.center();
++                        const auto candidate_half_w = item_width / 2 + arrange_gap;
++                        const auto candidate_half_h = item_height / 2 + arrange_gap;
++                        try_position({pbb.maxCorner().x() + candidate_half_w, pc.y()});
++                        try_position({pbb.minCorner().x() - candidate_half_w, pc.y()});
++                        try_position({pc.x(), pbb.maxCorner().y() + candidate_half_h});
++                        try_position({pc.x(), pbb.minCorner().y() - candidate_half_h});
++                        try_position({pbb.maxCorner().x() + candidate_half_w, pbb.maxCorner().y() + candidate_half_h});
++                        try_position({pbb.minCorner().x() - candidate_half_w, pbb.maxCorner().y() + candidate_half_h});
++                        try_position({pbb.maxCorner().x() + candidate_half_w, pbb.minCorner().y() - candidate_half_h});
++                        try_position({pbb.minCorner().x() - candidate_half_w, pbb.minCorner().y() - candidate_half_h});
++                    }
++
++                    if (recovered_score < std::numeric_limits<double>::max()) {
++                        continue;
++                    }
++
++                    const int max_ring_x = step_x > 0 ? int(std::abs(bed_width / step_x)) + 2 : 2;
++                    const int max_ring_y = step_y > 0 ? int(std::abs(bed_height / step_y)) + 2 : 2;
++                    const int max_ring = std::min(std::max(max_ring_x, max_ring_y), 8);
++                    for (int ring = 1; ring <= max_ring; ++ring) {
++                        for (int ix = -ring; ix <= ring; ++ix) {
++                            try_position({bed_center.x() + ix * step_x, bed_center.y() - ring * step_y});
++                            try_position({bed_center.x() + ix * step_x, bed_center.y() + ring * step_y});
++                        }
++                        for (int iy = -ring + 1; iy < ring; ++iy) {
++                            try_position({bed_center.x() - ring * step_x, bed_center.y() + iy * step_y});
++                            try_position({bed_center.x() + ring * step_x, bed_center.y() + iy * step_y});
++                        }
++                    }
++                }
++
++                if (recovered_score < global_score) {
++                    final_tr = recovered_tr;
++                    final_rot = recovered_rot;
+                     can_pack = true;
+-                    global_score = best_score;
++                    global_score = recovered_score;
+                 }
+             }
+ 
+diff --git a/vendor/orcaslicer/deps_src/libnest2d/include/libnest2d/selections/selection_boilerplate.hpp b/vendor/orcaslicer/deps_src/libnest2d/include/libnest2d/selections/selection_boilerplate.hpp
+index a9871dcb..f7095de5 100644
+--- a/vendor/orcaslicer/deps_src/libnest2d/include/libnest2d/selections/selection_boilerplate.hpp
++++ b/vendor/orcaslicer/deps_src/libnest2d/include/libnest2d/selections/selection_boilerplate.hpp
+@@ -35,18 +35,17 @@ protected:
+     {
+         // Safety test: try to pack each item into an empty bin. If it fails
+         // then it should be removed from the list
+-        Placer p{ bin };
+-        p.configure(pcfg);
+-        p.preload(pcfg.m_excluded_items);
+         auto it = c.begin();
+         while (it != c.end() && !stopcond_()) {
+ 
+-            // WARNING: The copy of itm needs to be created before Placer.
+-            // Placer is working with references and its destructor still
+-            // manipulates the item this is why the order of stack creation
+-            // matters here.
+             const Item& itm = *it;
+             Item cpy{itm};
++            // Placer stores references to accepted items and runs final
++            // alignment from its destructor, so it must be scoped inside the
++            // lifetime of the temporary copy being tested.
++            Placer p{ bin };
++            p.configure(pcfg);
++            p.preload(pcfg.m_excluded_items);
+ 
+             auto result = p.pack(cpy);
+             if (itm.area() <= 0 || !result) {
+diff --git a/vendor/orcaslicer/src/libslic3r/Format/bbs_3mf.cpp b/vendor/orcaslicer/src/libslic3r/Format/bbs_3mf.cpp
+index fabf4059..4ab16973 100644
+--- a/vendor/orcaslicer/src/libslic3r/Format/bbs_3mf.cpp
++++ b/vendor/orcaslicer/src/libslic3r/Format/bbs_3mf.cpp
+@@ -8277,7 +8277,7 @@ static void handle_legacy_project_loaded(unsigned int version_project_file, Dyna
+     }
+ }
+ 
+-#ifndef ORCA_ANDROID_BBS_EXPORT_ONLY
++#if !defined(ORCA_ANDROID_BBS_EXPORT_ONLY) && !defined(ORCA_ANDROID_HEADLESS)
+ // backup backgroud thread to dispatch tasks and coperate with ui thread
+ class _BBS_Backup_Manager
+ {
+@@ -8637,7 +8637,7 @@ private:
+     std::vector<std::pair<ModelObject*, size_t>> m_gaurd_objects;
+     boost::thread m_thread;
+ };
+-#endif // ORCA_ANDROID_BBS_EXPORT_ONLY
++#endif // !ORCA_ANDROID_BBS_EXPORT_ONLY && !ORCA_ANDROID_HEADLESS
+ 
+ 
+ //BBS: add plate data list related logic
+@@ -8742,7 +8742,7 @@ void release_PlateData_list(PlateDataPtrs& plate_data_list)
+ 
+ // backup interface
+ 
+-#ifndef ORCA_ANDROID_BBS_EXPORT_ONLY
++#if !defined(ORCA_ANDROID_BBS_EXPORT_ONLY) && !defined(ORCA_ANDROID_HEADLESS)
+ void save_object_mesh(ModelObject& object)
+ {
+     if (!object.get_model() || !object.get_model()->is_need_backup())
+diff --git a/vendor/orcaslicer/src/libslic3r/Print.cpp b/vendor/orcaslicer/src/libslic3r/Print.cpp
+index d6616b2c..d7e5db6d 100644
+--- a/vendor/orcaslicer/src/libslic3r/Print.cpp
++++ b/vendor/orcaslicer/src/libslic3r/Print.cpp
+@@ -2646,6 +2646,29 @@ void Print::_make_skirt()
+     if (config().draft_shield == dsDisabled)
+         append(points, m_first_layer_convex_hull.points);
+ 
++#ifdef __ANDROID__
++    {
++        static constexpr int64_t android_clipper_limit = int64_t(65536) * int64_t(16384);
++        const size_t before_filter_count = points.size();
++        points.erase(
++            std::remove_if(
++                points.begin(),
++                points.end(),
++                [](const Point& point) {
++                    return std::llabs(int64_t(point.x())) > android_clipper_limit ||
++                        std::llabs(int64_t(point.y())) > android_clipper_limit;
++                }),
++            points.end());
++        if (before_filter_count != points.size()) {
++            __android_log_print(
++                ANDROID_LOG_ERROR,
++                "MobileSlicerNative",
++                "orca_skirt_hull: removed %zu out-of-range source points before Clipper offset",
++                before_filter_count - points.size());
++        }
++    }
++#endif
++
+     if (points.size() < 3)
+         // At least three points required for a convex hull.
+         return;
+diff --git a/vendor/orcaslicer/src/libslic3r/TriangleSelector.cpp b/vendor/orcaslicer/src/libslic3r/TriangleSelector.cpp
+index a6d19f50..44baf2ea 100644
+--- a/vendor/orcaslicer/src/libslic3r/TriangleSelector.cpp
++++ b/vendor/orcaslicer/src/libslic3r/TriangleSelector.cpp
+@@ -921,6 +921,8 @@ bool TriangleSelector::select_triangle_recursive(int facet_idx, const Vec3i32 &n
+ 
+     if (num_of_inside_vertices == 3) {
+         // dump any subdivision and select whole triangle
++        if (tr->is_split() || tr->get_state() != type)
++            mark_dirty_source_triangle(tr->source_triangle);
+         undivide_triangle(facet_idx);
+         tr->set_state(type);
+     } else {
+@@ -933,10 +935,14 @@ bool TriangleSelector::select_triangle_recursive(int facet_idx, const Vec3i32 &n
+             return true;
+         }
+ 
+-        if (triangle_splitting)
++        if (triangle_splitting) {
++            if (!tr->is_split())
++                mark_dirty_source_triangle(tr->source_triangle);
+             split_triangle(facet_idx, neighbors);
+-        else if (!m_triangles[facet_idx].is_split())
++        } else if (!m_triangles[facet_idx].is_split() && m_triangles[facet_idx].get_state() != type) {
++            mark_dirty_source_triangle(tr->source_triangle);
+             m_triangles[facet_idx].set_state(type);
++        }
+         tr = &m_triangles[facet_idx]; // might have been invalidated by split_triangle().
+ 
+         int num_of_children = tr->number_of_split_sides() + 1;
+@@ -958,6 +964,7 @@ bool TriangleSelector::select_triangle_recursive(int facet_idx, const Vec3i32 &n
+ void TriangleSelector::set_facet(int facet_idx, EnforcerBlockerType state)
+ {
+     assert(facet_idx < m_orig_size_indices);
++    mark_dirty_source_triangle(facet_idx);
+     undivide_triangle(facet_idx);
+     assert(! m_triangles[facet_idx].is_split());
+     m_triangles[facet_idx].set_state(state);
+@@ -1284,6 +1291,8 @@ void TriangleSelector::reset()
+ {
+     m_vertices.clear();
+     m_triangles.clear();
++    m_dirty_source_triangles.clear();
++    m_dirty_source_triangle_flags.clear();
+     m_invalid_triangles = 0;
+     m_free_triangles_head = -1;
+     m_free_vertices_head = -1;
+@@ -1297,6 +1306,7 @@ void TriangleSelector::reset()
+     }
+     m_orig_size_vertices = int(m_vertices.size());
+     m_orig_size_indices  = int(m_triangles.size());
++    m_dirty_source_triangle_flags.assign(size_t(m_orig_size_indices), 0);
+ }
+ 
+ void TriangleSelector::set_edge_limit(float edge_limit)
+@@ -1304,6 +1314,18 @@ void TriangleSelector::set_edge_limit(float edge_limit)
+     m_edge_limit_sqr = std::pow(edge_limit, 2.f);
+ }
+ 
++void TriangleSelector::mark_dirty_source_triangle(int source_triangle)
++{
++    if (source_triangle < 0 || source_triangle >= m_orig_size_indices)
++        return;
++    if (m_dirty_source_triangle_flags.size() != size_t(m_orig_size_indices))
++        m_dirty_source_triangle_flags.assign(size_t(m_orig_size_indices), 0);
++    if (m_dirty_source_triangle_flags[size_t(source_triangle)] != 0)
++        return;
++    m_dirty_source_triangle_flags[size_t(source_triangle)] = 1;
++    m_dirty_source_triangles.emplace_back(source_triangle);
++}
++
+ int TriangleSelector::push_triangle(int a, int b, int c, int source_triangle, const EnforcerBlockerType state)
+ {
+     for (int i : {a, b, c}) {
+@@ -1443,6 +1465,50 @@ indexed_triangle_set TriangleSelector::get_facets(EnforcerBlockerType state) con
+     return out;
+ }
+ 
++indexed_triangle_set TriangleSelector::get_facets_for_sources(EnforcerBlockerType state, const std::vector<int>& source_triangles) const
++{
++    indexed_triangle_set out;
++    if (source_triangles.empty())
++        return out;
++
++    std::vector<int> vertex_map(m_vertices.size(), -1);
++    for (int source_triangle : source_triangles) {
++        if (source_triangle < 0 || source_triangle >= m_orig_size_indices)
++            continue;
++        get_facets_for_sources_recursive(m_triangles[source_triangle], state, vertex_map, out);
++    }
++    return out;
++}
++
++std::vector<int> TriangleSelector::consume_dirty_source_triangles()
++{
++    std::vector<int> dirty;
++    dirty.swap(m_dirty_source_triangles);
++    std::fill(m_dirty_source_triangle_flags.begin(), m_dirty_source_triangle_flags.end(), 0);
++    return dirty;
++}
++
++std::vector<int> TriangleSelector::consume_dirty_source_triangles(size_t max_count)
++{
++    if (max_count == 0 || m_dirty_source_triangles.empty())
++        return {};
++    if (m_dirty_source_triangles.size() <= max_count)
++        return consume_dirty_source_triangles();
++
++    std::vector<int> dirty;
++    dirty.reserve(max_count);
++    for (size_t i = 0; i < max_count; ++i) {
++        const int source_triangle = m_dirty_source_triangles[i];
++        dirty.push_back(source_triangle);
++        if (source_triangle >= 0 && source_triangle < int(m_dirty_source_triangle_flags.size()))
++            m_dirty_source_triangle_flags[source_triangle] = 0;
++    }
++    m_dirty_source_triangles.erase(
++        m_dirty_source_triangles.begin(),
++        m_dirty_source_triangles.begin() + ptrdiff_t(max_count));
++    return dirty;
++}
++
+ // BBS
+ void TriangleSelector::get_facets(std::vector<indexed_triangle_set>& facets_per_type) const
+ {
+@@ -1512,6 +1578,34 @@ void TriangleSelector::get_facets_strict_recursive(
+         this->get_facets_split_by_tjoints({tr.verts_idxs[0], tr.verts_idxs[1], tr.verts_idxs[2]}, neighbors, out_triangles);
+ }
+ 
++void TriangleSelector::get_facets_for_sources_recursive(
++    const Triangle      &tr,
++    EnforcerBlockerType  state,
++    std::vector<int>     &vertex_map,
++    indexed_triangle_set &out) const
++{
++    if (!tr.valid())
++        return;
++    if (tr.is_split()) {
++        for (int i = 0; i <= tr.number_of_split_sides(); ++i)
++            get_facets_for_sources_recursive(m_triangles[tr.children[i]], state, vertex_map, out);
++        return;
++    }
++    if (tr.get_state() != state)
++        return;
++
++    stl_triangle_vertex_indices indices;
++    for (int i = 0; i < 3; ++i) {
++        const int vertex_idx = tr.verts_idxs[i];
++        if (vertex_map[vertex_idx] == -1) {
++            vertex_map[vertex_idx] = int(out.vertices.size());
++            out.vertices.emplace_back(m_vertices[vertex_idx].v);
++        }
++        indices[i] = vertex_map[vertex_idx];
++    }
++    out.indices.emplace_back(indices);
++}
++
+ void TriangleSelector::get_facets_split_by_tjoints(const Vec3i32 &vertices, const Vec3i32 &neighbors, std::vector<stl_triangle_vertex_indices> &out_triangles) const
+ {
+ // Export this triangle, but first collect the T-joint vertices along its edges.
+@@ -1937,8 +2031,10 @@ void TriangleSelector::seed_fill_unselect_all_triangles()
+ void TriangleSelector::seed_fill_apply_on_triangles(EnforcerBlockerType new_state)
+ {
+     for (Triangle &triangle : m_triangles)
+-        if (!triangle.is_split() && triangle.is_selected_by_seed_fill())
++        if (!triangle.is_split() && triangle.is_selected_by_seed_fill()) {
++            mark_dirty_source_triangle(triangle.source_triangle);
+             triangle.set_state(new_state);
++        }
+ 
+     for (Triangle &triangle : m_triangles)
+         if (triangle.is_split() && triangle.valid()) {
+diff --git a/vendor/orcaslicer/src/libslic3r/TriangleSelector.hpp b/vendor/orcaslicer/src/libslic3r/TriangleSelector.hpp
+index 50bbdd4e..4d29385a 100644
+--- a/vendor/orcaslicer/src/libslic3r/TriangleSelector.hpp
++++ b/vendor/orcaslicer/src/libslic3r/TriangleSelector.hpp
+@@ -330,6 +330,12 @@ public:
+     int                  num_facets(EnforcerBlockerType state) const;
+     // Get facets at a given state. Don't triangulate T-joints.
+     indexed_triangle_set get_facets(EnforcerBlockerType state) const;
++    // Get facets at a given state, limited to source triangles changed since the
++    // last dirty-source consume. Used by interactive paint renderers to avoid
++    // rebuilding full paint overlays while dragging.
++    indexed_triangle_set get_facets_for_sources(EnforcerBlockerType state, const std::vector<int>& source_triangles) const;
++    std::vector<int> consume_dirty_source_triangles();
++    std::vector<int> consume_dirty_source_triangles(size_t max_count);
+     // Get facets at a given state. Triangulate T-joints.
+     indexed_triangle_set get_facets_strict(EnforcerBlockerType state) const;
+     // Get edges around the selected area by seed fill.
+@@ -515,12 +521,20 @@ private:
+         const Vec3i32                                 &neighbors,
+         EnforcerBlockerType                          state,
+         std::vector<stl_triangle_vertex_indices>    &out_triangles) const;
++    void get_facets_for_sources_recursive(
++        const Triangle                              &tr,
++        EnforcerBlockerType                          state,
++        std::vector<int>                             &vertex_map,
++        indexed_triangle_set                         &out) const;
+     void get_facets_split_by_tjoints(const Vec3i32 &vertices, const Vec3i32 &neighbors, std::vector<stl_triangle_vertex_indices> &out_triangles) const;
+ 
+     void get_seed_fill_contour_recursive(int facet_idx, const Vec3i32 &neighbors, const Vec3i32 &neighbors_propagated, std::vector<Vec2i32> &edges_out) const;
++    void mark_dirty_source_triangle(int source_triangle);
+ 
+     int m_free_triangles_head { -1 };
+     int m_free_vertices_head { -1 };
++    std::vector<int> m_dirty_source_triangles;
++    std::vector<unsigned char> m_dirty_source_triangle_flags;
+ };
+ 
+ 

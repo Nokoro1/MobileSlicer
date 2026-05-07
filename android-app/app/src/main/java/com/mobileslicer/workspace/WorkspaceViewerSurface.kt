@@ -30,7 +30,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -99,7 +98,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -126,7 +124,15 @@ import com.mobileslicer.viewer.PrinterBedSpec
 import com.mobileslicer.viewer.TouchModelViewerView
 import com.mobileslicer.viewer.ViewerCameraState
 import com.mobileslicer.viewer.ViewerModelTransform
+import com.mobileslicer.viewer.ViewerPaintSession
+import com.mobileslicer.viewer.ViewerPaintStrokePoint
 import com.mobileslicer.viewer.ViewerPlateObject
+import com.mobileslicer.viewer.ViewerCutPlaneAxis
+import com.mobileslicer.viewer.ViewerCutPlaneSession
+import com.mobileslicer.viewer.ViewerCutConnectorPoint
+import com.mobileslicer.viewer.ViewerCutConnectorKind
+import com.mobileslicer.viewer.ViewerCutConnectorShape
+import com.mobileslicer.viewer.ViewerCutConnectorStyle
 import com.mobileslicer.ui.theme.MobileSlicerTheme
 import com.mobileslicer.ui.theme.PanelAmber
 import com.mobileslicer.ui.theme.PanelBlue
@@ -167,10 +173,21 @@ internal fun WorkspaceViewerSurface(
     gcodeLayerMax: Long,
     gcodeLayerReloadToken: Long,
     gcodeDisplayMode: GcodePreviewDisplayMode?,
+    paintSession: ViewerPaintSession? = null,
+    activeStylusPaintOnly: Boolean = false,
     onRuntimeFailureChanged: (com.mobileslicer.viewer.ViewerFailure?) -> Unit,
     onViewerReadyChanged: (Boolean) -> Unit,
     onPreviewRuntimeMetrics: (com.mobileslicer.viewer.GcodePreviewRuntimeMetrics) -> Unit,
     onObjectSelected: (Long?) -> Unit,
+    onObjectHitSelected: (com.mobileslicer.viewer.ViewerPickHit?) -> Boolean = { false },
+    onObjectDrag: (Long, Float, Float, Boolean) -> Unit = { _, _, _, _ -> },
+    onPaintHitTest: (Float, Float) -> Boolean? = { _, _ -> null },
+    onPaintStrokeBegin: (ViewerPaintStrokePoint) -> Unit = {},
+    onPaintStrokeMove: (ViewerPaintStrokePoint) -> Unit = {},
+    onPaintStrokeEnd: (Boolean) -> Unit = {},
+    cutSession: WorkspaceCutSession? = null,
+    onCutOffsetChanged: (Float) -> Unit = {},
+    onCutConnectorPointAdded: (WorkspaceCutConnectorPoint) -> Unit = {},
     onViewerViewChanged: (TouchModelViewerView?) -> Unit
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -178,6 +195,10 @@ internal fun WorkspaceViewerSurface(
     val surfaceLayoutKey = "${configuration.screenWidthDp}x${configuration.screenHeightDp}"
     var viewerView by remember { mutableStateOf<TouchModelViewerView?>(null) }
     var savedCameraState by remember { mutableStateOf<ViewerCameraState?>(null) }
+    var paintCursor by remember { mutableStateOf<Offset?>(null) }
+    LaunchedEffect(paintSession?.selectedObjectId, paintSession?.mode) {
+        paintCursor = null
+    }
     Box(
         modifier = Modifier.fillMaxSize()
     ) {
@@ -195,8 +216,34 @@ internal fun WorkspaceViewerSurface(
                             setRenderReadyListener(onViewerReadyChanged)
                             setPreviewRuntimeMetricsListener(onPreviewRuntimeMetrics)
                             setObjectSelectionListener(onObjectSelected)
+                            setCutConnectorPointListener { point ->
+                                onCutConnectorPointAdded(point.toWorkspaceCutConnectorPoint())
+                            }
+                            setObjectHitSelectionListener(onObjectHitSelected)
+                            setObjectDragListener(
+                                movableIds = plateObjects.filter { it.movable }.mapTo(mutableSetOf()) { it.id },
+                                listener = onObjectDrag
+                            )
+                            setPaintSession(paintSession)
+                            setActiveStylusPaintOnly(activeStylusPaintOnly)
+                            setPaintHitTestListener(onPaintHitTest)
+                            setPaintStrokeListener(
+                                onBegin = { point ->
+                                    paintCursor = Offset(point.x, point.y)
+                                    onPaintStrokeBegin(point)
+                                },
+                                onMove = { point ->
+                                    paintCursor = Offset(point.x, point.y)
+                                    onPaintStrokeMove(point)
+                                },
+                                onEnd = { committed ->
+                                    paintCursor = null
+                                    onPaintStrokeEnd(committed)
+                                }
+                            )
                             setModelTransform(modelTransform)
                             setPlateObjects(plateObjects)
+                            setCutPlaneSession(cutSession?.toViewerCutPlaneSession())
                             setMesh(preparedMesh)
                             setGcodePreviewSourceAndLayerRange(
                                 previewEngineHandle,
@@ -219,8 +266,34 @@ internal fun WorkspaceViewerSurface(
                         view.setRenderReadyListener(onViewerReadyChanged)
                         view.setPreviewRuntimeMetricsListener(onPreviewRuntimeMetrics)
                         view.setObjectSelectionListener(onObjectSelected)
+                        view.setCutConnectorPointListener { point ->
+                            onCutConnectorPointAdded(point.toWorkspaceCutConnectorPoint())
+                        }
+                        view.setObjectHitSelectionListener(onObjectHitSelected)
+                        view.setObjectDragListener(
+                            movableIds = plateObjects.filter { it.movable }.mapTo(mutableSetOf()) { it.id },
+                            listener = onObjectDrag
+                        )
+                        view.setPaintSession(paintSession)
+                        view.setActiveStylusPaintOnly(activeStylusPaintOnly)
+                        view.setPaintHitTestListener(onPaintHitTest)
+                        view.setPaintStrokeListener(
+                            onBegin = { point ->
+                                paintCursor = Offset(point.x, point.y)
+                                onPaintStrokeBegin(point)
+                            },
+                            onMove = { point ->
+                                paintCursor = Offset(point.x, point.y)
+                                onPaintStrokeMove(point)
+                            },
+                            onEnd = { committed ->
+                                paintCursor = null
+                                onPaintStrokeEnd(committed)
+                            }
+                        )
                         view.setModelTransform(modelTransform)
                         view.setPlateObjects(plateObjects)
+                        view.setCutPlaneSession(cutSession?.toViewerCutPlaneSession())
                         view.setMesh(preparedMesh)
                         view.setGcodePreviewSourceAndLayerRange(
                             previewEngineHandle,
@@ -259,3 +332,69 @@ internal fun WorkspaceViewerSurface(
         }
     }
 }
+
+private fun WorkspaceCutSession.toViewerCutPlaneSession(): ViewerCutPlaneSession =
+    ViewerCutPlaneSession(
+        selectedObjectId = selectedObjectId,
+        axis = when (axis) {
+            WorkspaceCutAxis.X -> ViewerCutPlaneAxis.X
+            WorkspaceCutAxis.Y -> ViewerCutPlaneAxis.Y
+            WorkspaceCutAxis.Z -> ViewerCutPlaneAxis.Z
+            WorkspaceCutAxis.Custom -> ViewerCutPlaneAxis.Custom
+        },
+        offsetMm = offsetMm,
+        rotationXDegrees = rotationXDegrees,
+        rotationYDegrees = rotationYDegrees,
+        keepUpper = keepUpper,
+        keepLower = keepLower,
+        connectorKind = when (connectorKind) {
+            WorkspaceCutConnectorKind.None -> ViewerCutConnectorKind.None
+            WorkspaceCutConnectorKind.Plug -> ViewerCutConnectorKind.Plug
+            WorkspaceCutConnectorKind.Dowel -> ViewerCutConnectorKind.Dowel
+            WorkspaceCutConnectorKind.Snap -> ViewerCutConnectorKind.Snap
+        },
+        connectorStyle = when (connectorStyle) {
+            WorkspaceCutConnectorStyle.Prism -> ViewerCutConnectorStyle.Prism
+            WorkspaceCutConnectorStyle.Frustum -> ViewerCutConnectorStyle.Frustum
+        },
+        connectorShape = when (connectorShape) {
+            WorkspaceCutConnectorShape.Triangle -> ViewerCutConnectorShape.Triangle
+            WorkspaceCutConnectorShape.Square -> ViewerCutConnectorShape.Square
+            WorkspaceCutConnectorShape.Hexagon -> ViewerCutConnectorShape.Hexagon
+            WorkspaceCutConnectorShape.Circle -> ViewerCutConnectorShape.Circle
+        },
+        connectorDepthMm = connectorDepthMm,
+        connectorDepthToleranceMm = connectorDepthToleranceMm,
+        connectorSizeMm = connectorSizeMm,
+        connectorSizeToleranceMm = connectorSizeToleranceMm,
+        connectorRotationDegrees = connectorRotationDegrees,
+        connectorSnapBulgePercent = connectorSnapBulgePercent,
+        connectorSnapSpacePercent = connectorSnapSpacePercent,
+        connectorsEditing = connectorsEditing,
+        connectorPoints = connectorPositions.map {
+            ViewerCutConnectorPoint(it.xMm, it.yMm, it.zMm)
+        }
+    )
+
+private fun ViewerCutConnectorPoint.toWorkspaceCutConnectorPoint(): WorkspaceCutConnectorPoint =
+    WorkspaceCutConnectorPoint(xMm = xMm, yMm = yMm, zMm = zMm)
+
+private fun ViewerPaintSession.previewPaintColor(): Color =
+    when (mode) {
+        com.mobileslicer.viewer.ViewerPaintMode.Color ->
+            activeColorInt?.let(::Color) ?: Color(0xFFFF7043)
+        com.mobileslicer.viewer.ViewerPaintMode.Support ->
+            if (action == com.mobileslicer.viewer.ViewerPaintAction.Block) {
+                Color(0xFFFF7043)
+            } else {
+                Color(0xFF88A2FF)
+            }
+        com.mobileslicer.viewer.ViewerPaintMode.Seam ->
+            if (action == com.mobileslicer.viewer.ViewerPaintAction.Block) {
+                Color(0xFFFF7043)
+            } else {
+                Color(0xFFFFAA00)
+            }
+        com.mobileslicer.viewer.ViewerPaintMode.FuzzySkin ->
+            Color(0xFF9C6ADE)
+    }

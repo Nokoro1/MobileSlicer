@@ -168,45 +168,52 @@ import kotlinx.coroutines.withContext
 import com.mobileslicer.viewer.MeshBounds
 
 internal fun MainActivity.maybeRunAutomation(intent: Intent?): Boolean {
-        if (maybeRunPreviewInteractionAutomation(intent)) {
-            return true
-        }
-        if (intent?.action != AutomationSliceRequest.ACTION_AUTOMATE_SLICE) {
-            return false
-        }
-
-        val request = AutomationSliceRequest.fromIntent(intent)
-        if (request == null) {
-            Log.e(MainActivity.TAG, "automation:start missing modelPath or outputPath")
-            setResult(Activity.RESULT_CANCELED)
-            finish()
-            return true
-        }
-
-        val runner = AutomationSliceRunner(
-            ensureEngine = ::ensureEngine,
-            stageModelFile = ::stageAutomationModelFile,
-            resolveConfigJson = AutomationConfigResolver(loadProfileStore = {
-                loadProfileStore()
-            })::resolve,
-            onModelLoaded = { stagedModel ->
-                nativeLoadedModelPath = stagedModel.absolutePath
-                currentModelName = stagedModel.nameWithoutExtension.removePrefix("selected-model-")
-            },
-            onModelLoadRejected = {
-                nativeLoadedModelPath = null
-            },
-            nativeSliceFailureStatus = {
-                describeNativeSliceFailure().automationStatus
-            }
-        )
-
-        lifecycleScope.launch {
-            val success = withContext(Dispatchers.Default) {
-                runner.run(request)
-            }
-            setResult(if (success) Activity.RESULT_OK else Activity.RESULT_CANCELED)
-            finish()
-        }
+    if (!BuildConfig.AUTOMATION_ENABLED) {
+        return false
+    }
+    if (maybeRunPaintInteractionAutomation(intent)) {
         return true
     }
+    if (maybeRunPreviewInteractionAutomation(intent)) {
+        return true
+    }
+    if (intent?.action != AutomationSliceRequest.ACTION_AUTOMATE_SLICE) {
+        return false
+    }
+
+    val request = AutomationSliceRequest.fromIntent(intent)
+    if (request == null) {
+        Log.e(MainActivity.TAG, "automation:start missing modelPath or outputPath")
+        setResult(Activity.RESULT_CANCELED)
+        finish()
+        return true
+    }
+
+    val runner = AutomationSliceRunner(
+        ensureEngine = ::ensureEngine,
+        resetEngineForRecovery = ::resetNativeEngineForRecovery,
+        stageModelFile = ::stageAutomationModelFile,
+        resolveConfigJson = AutomationConfigResolver(loadProfileStore = {
+            loadProfileStore()
+        })::resolve,
+        onModelLoaded = { stagedModel ->
+            nativeLoadedModelPath = stagedModel.absolutePath
+            currentModelName = stagedModel.nameWithoutExtension.removePrefix("selected-model-")
+        },
+        onModelLoadRejected = {
+            nativeLoadedModelPath = null
+        },
+        nativeSliceFailureStatus = {
+            describeNativeSliceFailure().automationStatus
+        }
+    )
+
+    lifecycleScope.launch {
+        val success = withContext(Dispatchers.Default) {
+            runner.run(request)
+        }
+        setResult(if (success) Activity.RESULT_OK else Activity.RESULT_CANCELED)
+        finish()
+    }
+    return true
+}

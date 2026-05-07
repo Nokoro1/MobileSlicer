@@ -23,6 +23,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,12 +61,17 @@ internal fun previewLineVisibilityKey(row: PreviewLineTypeRow): String = "${row.
 internal fun PlateObjectListSheet(
     plateObjects: List<PlateObject>,
     filamentSlots: List<PlateFilamentSlot>,
+    workspacePlates: List<WorkspacePlate>,
+    activePlateId: Long,
     selectedPlateObjectId: Long?,
     onObjectSelected: (Long) -> Unit,
+    onMoveObjectToPlate: (Long, Long) -> Unit,
+    onMoveObjectToNewPlate: (Long) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val slotsByIndex = filamentSlots.associateBy { it.index }
+    val targetPlates = workspacePlates.filterNot { it.id == activePlateId }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
@@ -138,6 +144,34 @@ internal fun PlateObjectListSheet(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                Row(
+                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextButton(
+                                        onClick = { onMoveObjectToNewPlate(objectOnPlate.id) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text(
+                                            text = "Move to new plate",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    targetPlates.forEachIndexed { index, plate ->
+                                        TextButton(
+                                            onClick = { onMoveObjectToPlate(objectOnPlate.id, plate.id) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                        ) {
+                                            Text(
+                                                text = "Move to ${plate.shortPlateMoveLabel(index)}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
                             }
                             if (selected) {
                                 Text(
@@ -154,6 +188,262 @@ internal fun PlateObjectListSheet(
         }
     }
 }
+
+private fun WorkspacePlate.shortPlateMoveLabel(fallbackIndex: Int): String =
+    label.ifBlank { defaultWorkspacePlateLabel(fallbackIndex + 1) }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun WorkspacePlateSheet(
+    plateLabel: String,
+    plates: List<WorkspacePlate>,
+    activePlateId: Long,
+    objectCount: Int,
+    selectedObjectId: Long?,
+    selectedObjectLabel: String?,
+    onDismiss: () -> Unit,
+    onPlateSelected: (Long) -> Unit,
+    onAddPlate: () -> Unit,
+    onDuplicateActivePlate: () -> Unit,
+    onDeleteActivePlate: () -> Unit,
+    onRenameActivePlate: (String) -> Unit,
+    onMoveObjectToPlate: (Long, Long) -> Unit,
+    onMoveObjectToNewPlate: (Long) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val activePlate = plates.firstOrNull { it.id == activePlateId }
+    var draftName by remember(activePlateId, activePlate?.label) {
+        mutableStateOf(activePlate?.label ?: plateLabel)
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = plateLabel,
+                style = MaterialTheme.typography.titleMedium,
+                color = appTitleColor(),
+                fontWeight = FontWeight.SemiBold
+            )
+            OutlinedTextField(
+                value = draftName,
+                onValueChange = { value ->
+                    draftName = value
+                    onRenameActivePlate(value)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Plate name") }
+            )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = appCardColorMuted().copy(alpha = 0.72f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    appOutlineColor().copy(alpha = 0.46f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PlateMetadataRow(label = "Objects", value = objectCount.toObjectCountLabel())
+                    selectedObjectLabel?.takeIf { it.isNotBlank() }?.let { label ->
+                        PlateMetadataRow(label = "Selected", value = label)
+                    }
+                }
+            }
+            if (selectedObjectId != null && selectedObjectLabel?.isNotBlank() == true) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = appCardColorMuted().copy(alpha = 0.60f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        appOutlineColor().copy(alpha = 0.42f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Move Selected Object",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = appBodyColor(),
+                            maxLines = 1
+                        )
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = { onMoveObjectToNewPlate(selectedObjectId) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.size(width = 88.dp, height = 32.dp)
+                            ) {
+                                Text(
+                                    text = "New plate",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1
+                                )
+                            }
+                            plates.filterNot { it.id == activePlateId }.forEachIndexed { index, plate ->
+                                TextButton(
+                                    onClick = { onMoveObjectToPlate(selectedObjectId, plate.id) },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    modifier = Modifier.size(width = 88.dp, height = 32.dp)
+                                ) {
+                                    Text(
+                                        text = plate.shortPlateMoveLabel(index),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.36f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(plates, key = { it.id }) { plate ->
+                    val selected = plate.id == activePlateId
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !selected) { onPlateSelected(plate.id) },
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+                        } else {
+                            appCardColorMuted().copy(alpha = 0.72f)
+                        },
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (selected) MaterialTheme.colorScheme.primary else appOutlineColor().copy(alpha = 0.46f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = plate.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = appTitleColor(),
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (plate.objectCount == 0) "Empty" else plate.objectCount.toObjectCountLabel(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = appBodyColor(),
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onAddPlate,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Add")
+                }
+                Button(
+                    onClick = onDuplicateActivePlate,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Duplicate")
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onDeleteActivePlate,
+                    enabled = plates.size > 1,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                        disabledContainerColor = appCardColorMuted(),
+                        disabledContentColor = appBodyColor()
+                    )
+                ) {
+                    Text("Delete")
+                }
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text("Done")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlateMetadataRow(
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = appBodyColor(),
+            modifier = Modifier.weight(0.36f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = appTitleColor(),
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(0.64f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+private fun Int.toObjectCountLabel(): String = "$this ${if (this == 1) "object" else "objects"}"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

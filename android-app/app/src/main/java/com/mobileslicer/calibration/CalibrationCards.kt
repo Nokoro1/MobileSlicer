@@ -107,7 +107,7 @@ internal fun CalibrationCard(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp)
             ) {
-                Text("Open Calibration")
+                Text("Open calibration")
             }
         }
     }

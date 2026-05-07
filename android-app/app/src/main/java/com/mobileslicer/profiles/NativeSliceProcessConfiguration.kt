@@ -3,6 +3,9 @@ package com.mobileslicer.profiles
 import org.json.JSONArray
 import org.json.JSONObject
 
+private const val ORCA_MIN_IRONING_SPACING_MM = 0.1f
+private const val ORCA_DEFAULT_SUPPORT_IRONING_FLOW_PERCENT = 10f
+
 internal fun JSONObject.putNativeProcessConfiguration(process: ProcessProfile): JSONObject = apply {
     put("layer_height", process.layerHeightMm.toDouble())
             .put("initial_layer_print_height", process.firstLayerHeightMm.toDouble())
@@ -230,8 +233,8 @@ internal fun JSONObject.putNativeProcessConfiguration(process: ProcessProfile): 
             .put("max_bridge_length", process.supportMaxBridgeLengthMm.toDouble())
             .put("support_ironing", process.supportIroning)
             .put("support_ironing_pattern", process.supportIroningPattern.configValue)
-            .put("support_ironing_flow", process.supportIroningFlowPercent.toDouble())
-            .put("support_ironing_spacing", process.supportIroningSpacingMm.toDouble())
+            .put("support_ironing_flow", process.supportIroningFlowPercent.orcaSupportIroningFlowPercent().toDouble())
+            .put("support_ironing_spacing", process.supportIroningSpacingMm.orcaIroningSpacingMm().toDouble())
             .put("support_expansion", process.supportExpansionMm.toDouble())
             .put("support_object_xy_distance", process.supportObjectXyDistanceMm.toDouble())
             .put("independent_support_layer_height", process.independentSupportLayerHeight)
@@ -251,13 +254,15 @@ internal fun JSONObject.putNativeProcessConfiguration(process: ProcessProfile): 
             .put("ironing_type", process.ironingType.configValue)
             .put("ironing_pattern", process.ironingPattern.configValue)
             .put("ironing_flow", process.ironingFlowPercent.toDouble())
-            .put("ironing_spacing", process.ironingSpacingMm.toDouble())
+            .put("ironing_spacing", process.ironingSpacingMm.orcaIroningSpacingMm().toDouble())
             .put("ironing_inset", process.ironingInsetMm.toDouble())
             .put("ironing_angle", process.ironingAngleDegrees.toDouble())
             .put("ironing_angle_fixed", process.ironingAngleFixed)
             .put("ironing_speed", process.ironingSpeedMmPerSec.toDouble())
             .put(NativeConfigKeys.PrimeTower.Enable, process.enablePrimeTower)
             .put("prime_tower_width", process.primeTowerWidthMm.toDouble())
+            .put(NativeConfigKeys.Process.WipeTowerX, process.wipeTowerXmm.toDouble())
+            .put(NativeConfigKeys.Process.WipeTowerY, process.wipeTowerYmm.toDouble())
             .put("prime_tower_skip_points", process.primeTowerSkipPoints)
             .put("prime_volume", process.primeVolumeMm3.toDouble())
             .put("prime_tower_brim_width", process.primeTowerBrimWidthMm.toDouble())
@@ -336,6 +341,12 @@ private fun ProcessProfile.nativeBrimTypeConfigValue(): String =
         brimType == BrimType.Auto && brimWidthMm > 0f -> BrimType.OuterOnly.configValue
         else -> brimType.configValue
     }
+
+private fun Float.orcaIroningSpacingMm(): Float =
+    if (this < 0.05f) ORCA_MIN_IRONING_SPACING_MM else this
+
+private fun Float.orcaSupportIroningFlowPercent(): Float =
+    if (this <= 0f) ORCA_DEFAULT_SUPPORT_IRONING_FLOW_PERCENT else this
 
 internal fun String.asNativeConfigJsonObjectOrNull(): JSONObject? =
     takeIf { it.isNotBlank() }?.let { raw -> runCatching { JSONObject(raw) }.getOrNull() }

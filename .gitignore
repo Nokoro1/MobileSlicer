@@ -5,6 +5,10 @@
 .claude/
 .idea/
 
+# Keep local docs/site/operator files out of the public GitHub repo.
+/README/
+/Website/
+
 # Root build outputs
 /build/
 
@@ -21,11 +25,13 @@ __pycache__/
 # Generated native dependency build trees
 /engine-wrapper/orca-android-libslic3r/android-deps-build/
 /engine-wrapper/orca-android-libslic3r/android-deps-install/
+/engine-wrapper/orca-android-libslic3r/android-probe-build/
 
 # Local artifact holding areas
 /_quarantine/
 /artifacts/
 /Website/private/
+/Website/.wrangler/
 *.apk
 *.gcode
 

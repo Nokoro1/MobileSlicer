@@ -213,6 +213,8 @@ internal fun ProcessProfile.toJson(): JSONObject = JSONObject()
     .put("treeSupportWallCount", treeSupportWallCount)
     .put("enablePrimeTower", enablePrimeTower)
     .put("primeTowerWidthMm", primeTowerWidthMm.toDouble())
+    .put("wipeTowerXmm", wipeTowerXmm.toDouble())
+    .put("wipeTowerYmm", wipeTowerYmm.toDouble())
     .put("primeTowerSkipPoints", primeTowerSkipPoints)
     .put("primeVolumeMm3", primeVolumeMm3.toDouble())
     .put("primeTowerBrimWidthMm", primeTowerBrimWidthMm.toDouble())
@@ -417,6 +419,24 @@ internal fun JSONObject.toProcessProfile(): ProcessProfile {
         138 to optBoolean("supportBuildplateOnly", DEFAULT_SUPPORT_BUILDPLATE_ONLY),
         188 to optBoolean("enablePrimeTower", DEFAULT_ENABLE_PRIME_TOWER),
         189 to optDouble("primeTowerWidthMm", DEFAULT_PRIME_TOWER_WIDTH_MM.toDouble()).toFloat(),
+        207 to ProcessPrimeTowerDetails(
+            wipeTowerXmm = optDouble("wipeTowerXmm", 15.0).toFloat(),
+            wipeTowerYmm = optDouble("wipeTowerYmm", 220.0).toFloat(),
+            primeTowerSkipPoints = optBoolean("primeTowerSkipPoints", true),
+            primeVolumeMm3 = optDouble("primeVolumeMm3", 45.0).toFloat(),
+            primeTowerBrimWidthMm = optDouble("primeTowerBrimWidthMm", 3.0).toFloat(),
+            primeTowerInfillGapPercent = optInt("primeTowerInfillGapPercent", 150),
+            wipeTowerRotationAngleDegrees = optDouble("wipeTowerRotationAngleDegrees", 0.0).toFloat(),
+            wipeTowerBridgingMm = optDouble("wipeTowerBridgingMm", 10.0).toFloat(),
+            wipeTowerExtraSpacingPercent = optInt("wipeTowerExtraSpacingPercent", 100),
+            wipeTowerExtraFlowPercent = optInt("wipeTowerExtraFlowPercent", 100),
+            wipeTowerMaxPurgeSpeedMmPerSec = optDouble("wipeTowerMaxPurgeSpeedMmPerSec", 90.0).toFloat(),
+            wipeTowerWallType = WipeTowerWallType.fromConfigValue(optString("wipeTowerWallType", WipeTowerWallType.Rectangle.configValue)),
+            wipeTowerConeAngleDegrees = optDouble("wipeTowerConeAngleDegrees", 30.0).toFloat(),
+            wipeTowerExtraRibLengthMm = optDouble("wipeTowerExtraRibLengthMm", 0.0).toFloat(),
+            wipeTowerRibWidthMm = optDouble("wipeTowerRibWidthMm", 8.0).toFloat(),
+            wipeTowerFilletWall = optBoolean("wipeTowerFilletWall", true)
+        ),
         194 to optInt("standbyTemperatureDeltaC", DEFAULT_STANDBY_TEMPERATURE_DELTA_C),
         195 to optBoolean("wipeTowerNoSparseLayers", DEFAULT_WIPE_TOWER_NO_SPARSE_LAYERS),
         199 to optInt("skirts", 2),

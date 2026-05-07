@@ -2,29 +2,29 @@ solid stage2_bridge_speed_fixture
   facet normal 0 0 -1
     outer loop
       vertex 0 0 0
-      vertex 4 4 0
+      vertex 4 20 0
       vertex 4 0 0
     endloop
   endfacet
   facet normal 0 0 -1
     outer loop
       vertex 0 0 0
-      vertex 0 4 0
-      vertex 4 4 0
+      vertex 0 20 0
+      vertex 4 20 0
     endloop
   endfacet
   facet normal 0 0 1
     outer loop
       vertex 0 0 10
       vertex 4 0 10
-      vertex 4 4 10
+      vertex 4 20 10
     endloop
   endfacet
   facet normal 0 0 1
     outer loop
       vertex 0 0 10
-      vertex 4 4 10
-      vertex 0 4 10
+      vertex 4 20 10
+      vertex 0 20 10
     endloop
   endfacet
   facet normal 0 -1 0
@@ -43,73 +43,73 @@ solid stage2_bridge_speed_fixture
   endfacet
   facet normal 0 1 0
     outer loop
-      vertex 0 4 0
-      vertex 0 4 10
-      vertex 4 4 10
+      vertex 0 20 0
+      vertex 0 20 10
+      vertex 4 20 10
     endloop
   endfacet
   facet normal 0 1 0
     outer loop
-      vertex 0 4 0
-      vertex 4 4 10
-      vertex 4 4 0
+      vertex 0 20 0
+      vertex 4 20 10
+      vertex 4 20 0
     endloop
   endfacet
   facet normal -1 0 0
     outer loop
       vertex 0 0 0
       vertex 0 0 10
-      vertex 0 4 10
+      vertex 0 20 10
     endloop
   endfacet
   facet normal -1 0 0
     outer loop
       vertex 0 0 0
-      vertex 0 4 10
-      vertex 0 4 0
+      vertex 0 20 10
+      vertex 0 20 0
     endloop
   endfacet
   facet normal 1 0 0
     outer loop
       vertex 4 0 0
-      vertex 4 4 10
+      vertex 4 20 10
       vertex 4 0 10
     endloop
   endfacet
   facet normal 1 0 0
     outer loop
       vertex 4 0 0
-      vertex 4 4 0
-      vertex 4 4 10
+      vertex 4 20 0
+      vertex 4 20 10
     endloop
   endfacet
 
   facet normal 0 0 -1
     outer loop
       vertex 16 0 0
-      vertex 20 4 0
+      vertex 20 20 0
       vertex 20 0 0
     endloop
   endfacet
   facet normal 0 0 -1
     outer loop
       vertex 16 0 0
-      vertex 16 4 0
-      vertex 20 4 0
+      vertex 16 20 0
+      vertex 20 20 0
     endloop
   endfacet
   facet normal 0 0 1
     outer loop
       vertex 16 0 10
       vertex 20 0 10
-      vertex 20 4 10
+      vertex 20 20 10
     endloop
   endfacet
   facet normal 0 0 1
     outer loop
       vertex 16 0 10
-      vertex 20 4 10
-      vertex 16 4 10
+      vertex 20 20 10
+      vertex 16 20 10
     endloop
   endfacet
   facet normal 0 -1 0
@@ -128,73 +128,73 @@ solid stage2_bridge_speed_fixture
   endfacet
   facet normal 0 1 0
     outer loop
-      vertex 16 4 0
-      vertex 16 4 10
-      vertex 20 4 10
+      vertex 16 20 0
+      vertex 16 20 10
+      vertex 20 20 10
     endloop
   endfacet
   facet normal 0 1 0
     outer loop
-      vertex 16 4 0
-      vertex 20 4 10
-      vertex 20 4 0
+      vertex 16 20 0
+      vertex 20 20 10
+      vertex 20 20 0
     endloop
   endfacet
   facet normal -1 0 0
     outer loop
       vertex 16 0 0
       vertex 16 0 10
-      vertex 16 4 10
+      vertex 16 20 10
     endloop
   endfacet
   facet normal -1 0 0
     outer loop
       vertex 16 0 0
-      vertex 16 4 10
-      vertex 16 4 0
+      vertex 16 20 10
+      vertex 16 20 0
     endloop
   endfacet
   facet normal 1 0 0
     outer loop
       vertex 20 0 0
-      vertex 20 4 10
+      vertex 20 20 10
       vertex 20 0 10
     endloop
   endfacet
   facet normal 1 0 0
     outer loop
       vertex 20 0 0
-      vertex 20 4 0
-      vertex 20 4 10
+      vertex 20 20 0
+      vertex 20 20 10
     endloop
   endfacet
 
   facet normal 0 0 -1
     outer loop
       vertex 0 0 10
-      vertex 20 4 10
+      vertex 20 20 10
       vertex 20 0 10
     endloop
   endfacet
   facet normal 0 0 -1
     outer loop
       vertex 0 0 10
-      vertex 0 4 10
-      vertex 20 4 10
+      vertex 0 20 10
+      vertex 20 20 10
     endloop
   endfacet
   facet normal 0 0 1
     outer loop
       vertex 0 0 12
       vertex 20 0 12
-      vertex 20 4 12
+      vertex 20 20 12
     endloop
   endfacet
   facet normal 0 0 1
     outer loop
       vertex 0 0 12
-      vertex 20 4 12
-      vertex 0 4 12
+      vertex 20 20 12
+      vertex 0 20 12
     endloop
   endfacet
   facet normal 0 -1 0
@@ -213,44 +213,44 @@ solid stage2_bridge_speed_fixture
   endfacet
   facet normal 0 1 0
     outer loop
-      vertex 0 4 10
-      vertex 0 4 12
-      vertex 20 4 12
+      vertex 0 20 10
+      vertex 0 20 12
+      vertex 20 20 12
     endloop
   endfacet
   facet normal 0 1 0
     outer loop
-      vertex 0 4 10
-      vertex 20 4 12
-      vertex 20 4 10
+      vertex 0 20 10
+      vertex 20 20 12
+      vertex 20 20 10
     endloop
   endfacet
   facet normal -1 0 0
     outer loop
       vertex 0 0 10
       vertex 0 0 12
-      vertex 0 4 12
+      vertex 0 20 12
     endloop
   endfacet
   facet normal -1 0 0
     outer loop
       vertex 0 0 10
-      vertex 0 4 12
-      vertex 0 4 10
+      vertex 0 20 12
+      vertex 0 20 10
     endloop
   endfacet
   facet normal 1 0 0
     outer loop
       vertex 20 0 10
-      vertex 20 4 12
+      vertex 20 20 12
       vertex 20 0 12
     endloop
   endfacet
   facet normal 1 0 0
     outer loop
       vertex 20 0 10
-      vertex 20 4 10
-      vertex 20 4 12
+      vertex 20 20 10
+      vertex 20 20 12
     endloop
   endfacet
 endsolid stage2_bridge_speed_fixture

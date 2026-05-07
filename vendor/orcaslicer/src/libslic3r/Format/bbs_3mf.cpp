@@ -8277,7 +8277,7 @@ static void handle_legacy_project_loaded(unsigned int version_project_file, Dyna
     }
 }
 
-#ifndef ORCA_ANDROID_BBS_EXPORT_ONLY
+#if !defined(ORCA_ANDROID_BBS_EXPORT_ONLY) && !defined(ORCA_ANDROID_HEADLESS)
 // backup backgroud thread to dispatch tasks and coperate with ui thread
 class _BBS_Backup_Manager
 {
@@ -8637,7 +8637,7 @@ private:
     std::vector<std::pair<ModelObject*, size_t>> m_gaurd_objects;
     boost::thread m_thread;
 };
-#endif // ORCA_ANDROID_BBS_EXPORT_ONLY
+#endif // !ORCA_ANDROID_BBS_EXPORT_ONLY && !ORCA_ANDROID_HEADLESS
 
 
 //BBS: add plate data list related logic
@@ -8742,7 +8742,7 @@ void release_PlateData_list(PlateDataPtrs& plate_data_list)
 
 // backup interface
 
-#ifndef ORCA_ANDROID_BBS_EXPORT_ONLY
+#if !defined(ORCA_ANDROID_BBS_EXPORT_ONLY) && !defined(ORCA_ANDROID_HEADLESS)
 void save_object_mesh(ModelObject& object)
 {
     if (!object.get_model() || !object.get_model()->is_need_backup())

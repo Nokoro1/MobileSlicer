@@ -35,18 +35,17 @@ protected:
     {
         // Safety test: try to pack each item into an empty bin. If it fails
         // then it should be removed from the list
-        Placer p{ bin };
-        p.configure(pcfg);
-        p.preload(pcfg.m_excluded_items);
         auto it = c.begin();
         while (it != c.end() && !stopcond_()) {
 
-            // WARNING: The copy of itm needs to be created before Placer.
-            // Placer is working with references and its destructor still
-            // manipulates the item this is why the order of stack creation
-            // matters here.
             const Item& itm = *it;
             Item cpy{itm};
+            // Placer stores references to accepted items and runs final
+            // alignment from its destructor, so it must be scoped inside the
+            // lifetime of the temporary copy being tested.
+            Placer p{ bin };
+            p.configure(pcfg);
+            p.preload(pcfg.m_excluded_items);
 
             auto result = p.pack(cpy);
             if (itm.area() <= 0 || !result) {

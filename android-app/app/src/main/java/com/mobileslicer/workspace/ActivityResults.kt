@@ -9,7 +9,8 @@ internal data class ModelLoadResult(
     val stagedFilePath: String? = null,
     val format: ImportedModelFormat? = null,
     val loadTiming: ModelImportTiming? = null,
-    val bounds: MeshBounds? = null
+    val bounds: MeshBounds? = null,
+    val geometrySource: PlateObjectGeometrySource = PlateObjectGeometrySource.StagedFile
 )
 
 internal data class WorkspacePreparationResult(

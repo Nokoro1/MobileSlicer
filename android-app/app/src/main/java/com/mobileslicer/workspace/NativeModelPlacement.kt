@@ -14,11 +14,45 @@ internal data class NativeModelTransform(
     val rotationXRadians: Double,
     val rotationYRadians: Double,
     val rotationZRadians: Double,
-    val uniformScale: Double
+    val uniformScale: Double,
+    val orientationMatrix: List<Double>? = null
 )
 
-internal fun nativeModelTransformFromArray(values: DoubleArray, offset: Int = 0): NativeModelTransform {
-    require(offset >= 0 && offset + 6 < values.size) { "Native transform offset is outside the source array." }
+internal const val NativeModelTransformInputStride = 7
+internal const val NativeModelTransformOutputStride = 16
+internal const val NativeModelTransformPlateInputStride = NativeModelTransformOutputStride
+
+internal fun nativePlateTransformInputStride(transforms: Iterable<ViewerModelTransform?>): Int =
+    if (transforms.any { it.hasNativeOrientationMatrix() }) {
+        NativeModelTransformOutputStride
+    } else {
+        NativeModelTransformInputStride
+    }
+
+private fun ViewerModelTransform?.hasNativeOrientationMatrix(): Boolean {
+    val matrix = this?.orientationMatrix ?: return false
+    return matrix.size == 9 && matrix.all { value -> !value.isNaN() && !value.isInfinite() }
+}
+
+internal fun nativeModelTransformFromArray(
+    values: DoubleArray,
+    offset: Int = 0,
+    stride: Int = inferNativeModelTransformStride(values, offset)
+): NativeModelTransform {
+    require(offset >= 0 && offset + NativeModelTransformInputStride - 1 < values.size) { "Native transform offset is outside the source array." }
+    if (stride == NativeModelTransformOutputStride && offset + NativeModelTransformOutputStride - 1 < values.size) {
+        val matrix = List(9) { index -> values[offset + 3 + index] }
+        return NativeModelTransform(
+            xMm = values[offset + 0],
+            yMm = values[offset + 1],
+            zMm = values[offset + 2],
+            rotationXRadians = values[offset + 13],
+            rotationYRadians = values[offset + 14],
+            rotationZRadians = values[offset + 15],
+            uniformScale = values[offset + 12],
+            orientationMatrix = matrix.takeIf { it.all(Double::isFinite) }
+        )
+    }
     return NativeModelTransform(
         xMm = values[offset + 0],
         yMm = values[offset + 1],
@@ -30,16 +64,45 @@ internal fun nativeModelTransformFromArray(values: DoubleArray, offset: Int = 0)
     )
 }
 
-internal fun NativeModelTransform.writeTo(values: DoubleArray, offset: Int = 0) {
+internal fun NativeModelTransform.writeTo(
+    values: DoubleArray,
+    offset: Int = 0,
+    stride: Int = inferNativeModelTransformStride(values, offset)
+) {
     require(offset >= 0 && offset + 6 < values.size) { "Native transform offset is outside the target array." }
     values[offset + 0] = xMm
     values[offset + 1] = yMm
     values[offset + 2] = zMm
+    if (stride == NativeModelTransformOutputStride) {
+        require(offset + NativeModelTransformOutputStride - 1 < values.size) { "Native matrix transform offset is outside the target array." }
+        val matrix = orientationMatrix
+            ?.takeIf { it.size == 9 && it.all(Double::isFinite) }
+            ?: eulerOrientationMatrix(
+                rotationXRadians = rotationXRadians,
+                rotationYRadians = rotationYRadians,
+                rotationZRadians = rotationZRadians
+            )
+        for (index in 0 until 9) {
+            values[offset + 3 + index] = matrix[index]
+        }
+        values[offset + 12] = uniformScale
+        values[offset + 13] = rotationXRadians
+        values[offset + 14] = rotationYRadians
+        values[offset + 15] = rotationZRadians
+        return
+    }
     values[offset + 3] = rotationXRadians
     values[offset + 4] = rotationYRadians
     values[offset + 5] = rotationZRadians
     values[offset + 6] = uniformScale
 }
+
+private fun inferNativeModelTransformStride(values: DoubleArray, offset: Int): Int =
+    if (values.size == NativeModelTransformOutputStride && offset == 0) {
+        NativeModelTransformOutputStride
+    } else {
+        NativeModelTransformInputStride
+    }
 
 internal fun defaultNativeModelTransform(
     bounds: MeshBounds,
@@ -65,9 +128,17 @@ internal fun defaultNativeModelTransform(
         scale = scale,
         rotationXRadians = rotationXRadians,
         rotationYRadians = rotationYRadians,
-        rotationZRadians = rotationZRadians
+        rotationZRadians = rotationZRadians,
+        orientationMatrix = transform.orientationMatrix?.map { it.toDouble() }
     )
-    val transformedBounds = transformedBounds(bounds, scale, rotationXRadians, rotationYRadians, rotationZRadians)
+    val transformedBounds = transformedBounds(
+        bounds = bounds,
+        scale = scale,
+        rotationXRadians = rotationXRadians,
+        rotationYRadians = rotationYRadians,
+        rotationZRadians = rotationZRadians,
+        orientationMatrix = transform.orientationMatrix?.map { it.toDouble() }
+    )
     return NativeModelTransform(
         xMm = printerBed.originXmm.toDouble() + transform.centerXmm.toDouble() - transformedCenter.xMm,
         yMm = printerBed.originYmm.toDouble() + transform.centerYmm.toDouble() - transformedCenter.yMm,
@@ -75,7 +146,8 @@ internal fun defaultNativeModelTransform(
         rotationXRadians = rotationXRadians,
         rotationYRadians = rotationYRadians,
         rotationZRadians = rotationZRadians,
-        uniformScale = scale
+        uniformScale = scale,
+        orientationMatrix = transform.orientationMatrix?.map { it.toDouble() }
     )
 }
 
@@ -91,7 +163,8 @@ internal fun nativeModelTransformToViewerTransform(
         scale = nativeTransform.uniformScale,
         rotationXRadians = nativeTransform.rotationXRadians,
         rotationYRadians = nativeTransform.rotationYRadians,
-        rotationZRadians = nativeTransform.rotationZRadians
+        rotationZRadians = nativeTransform.rotationZRadians,
+        orientationMatrix = nativeTransform.orientationMatrix
     )
     return ViewerModelTransform(
         centerXmm = (nativeTransform.xMm - printerBed.originXmm.toDouble() + transformedCenter.xMm).toFloat(),
@@ -99,7 +172,8 @@ internal fun nativeModelTransformToViewerTransform(
         rotationXDegrees = Math.toDegrees(nativeTransform.rotationXRadians).toFloat(),
         rotationYDegrees = Math.toDegrees(nativeTransform.rotationYRadians).toFloat(),
         rotationZDegrees = Math.toDegrees(nativeTransform.rotationZRadians).toFloat(),
-        uniformScale = nativeTransform.uniformScale.toFloat()
+        uniformScale = nativeTransform.uniformScale.toFloat(),
+        orientationMatrix = nativeTransform.orientationMatrix?.map { it.toFloat() }
     )
 }
 
@@ -118,7 +192,8 @@ private fun transformedBounds(
     scale: Double,
     rotationXRadians: Double,
     rotationYRadians: Double,
-    rotationZRadians: Double
+    rotationZRadians: Double,
+    orientationMatrix: List<Double>? = null
 ): TransformedBoundsD {
     var minZ = Double.POSITIVE_INFINITY
     val xs = doubleArrayOf(bounds.minX.toDouble(), bounds.maxX.toDouble())
@@ -129,7 +204,7 @@ private fun transformedBounds(
             for (z in zs) {
                 minZ = min(
                     minZ,
-                    transformPoint(x, y, z, scale, rotationXRadians, rotationYRadians, rotationZRadians).zMm
+                    transformPoint(x, y, z, scale, rotationXRadians, rotationYRadians, rotationZRadians, orientationMatrix).zMm
                 )
             }
         }
@@ -144,11 +219,19 @@ private fun transformPoint(
     scale: Double,
     rotationXRadians: Double,
     rotationYRadians: Double,
-    rotationZRadians: Double
+    rotationZRadians: Double,
+    orientationMatrix: List<Double>? = null
 ): TransformedPointD {
     var tx = x * scale
     var ty = y * scale
     var tz = z * scale
+    if (orientationMatrix != null && orientationMatrix.size == 9) {
+        return TransformedPointD(
+            xMm = orientationMatrix[0] * tx + orientationMatrix[1] * ty + orientationMatrix[2] * tz,
+            yMm = orientationMatrix[3] * tx + orientationMatrix[4] * ty + orientationMatrix[5] * tz,
+            zMm = orientationMatrix[6] * tx + orientationMatrix[7] * ty + orientationMatrix[8] * tz
+        )
+    }
 
     val cosX = cos(rotationXRadians)
     val sinX = sin(rotationXRadians)
@@ -171,4 +254,46 @@ private fun transformPoint(
         yMm = tx * sinZ + ty * cosZ,
         zMm = tz
     )
+}
+
+private fun eulerOrientationMatrix(
+    rotationXRadians: Double,
+    rotationYRadians: Double,
+    rotationZRadians: Double
+): List<Double> {
+    val cosX = cos(rotationXRadians)
+    val sinX = sin(rotationXRadians)
+    val cosY = cos(rotationYRadians)
+    val sinY = sin(rotationYRadians)
+    val cosZ = cos(rotationZRadians)
+    val sinZ = sin(rotationZRadians)
+    val mx = doubleArrayOf(
+        1.0, 0.0, 0.0,
+        0.0, cosX, -sinX,
+        0.0, sinX, cosX
+    )
+    val my = doubleArrayOf(
+        cosY, 0.0, sinY,
+        0.0, 1.0, 0.0,
+        -sinY, 0.0, cosY
+    )
+    val mz = doubleArrayOf(
+        cosZ, -sinZ, 0.0,
+        sinZ, cosZ, 0.0,
+        0.0, 0.0, 1.0
+    )
+    return multiplyMatrix3(multiplyMatrix3(mz, my), mx).toList()
+}
+
+private fun multiplyMatrix3(left: DoubleArray, right: DoubleArray): DoubleArray {
+    val out = DoubleArray(9)
+    for (row in 0 until 3) {
+        for (col in 0 until 3) {
+            out[row * 3 + col] =
+                left[row * 3 + 0] * right[0 * 3 + col] +
+                    left[row * 3 + 1] * right[1 * 3 + col] +
+                    left[row * 3 + 2] * right[2 * 3 + col]
+        }
+    }
+    return out
 }

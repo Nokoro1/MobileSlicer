@@ -167,10 +167,10 @@ internal fun ProfilesSelectedTabContent(
 ) {
     when (selectedTab) {
                 ProfileTab.Printer -> DomainProfilesSection(
-                    title = "Printer Profiles",
+                    title = "Printer profiles",
                     subtitle = "",
-                    selectLabel = "Select Printer",
-                    actionLabel = "New Custom Printer",
+                    selectLabel = "Select printer",
+                    actionLabel = "New custom printer",
                     details = "",
                     onSelect = { onShowPrinterSelection() },
                     onAdd = {
@@ -203,7 +203,7 @@ internal fun ProfilesSelectedTabContent(
                 ) {
                     if (store.printers.isEmpty()) {
                         Text(
-                            text = "No printers added yet. Use Select Printer to import an Orca printer, or create a custom printer.",
+                            text = "No printers added yet. Select a printer preset or create a custom printer.",
                             style = MaterialTheme.typography.bodySmall,
                             color = bodyColor
                         )
@@ -259,10 +259,10 @@ internal fun ProfilesSelectedTabContent(
                 }
 
                 ProfileTab.Filament -> DomainProfilesSection(
-                    title = "Filament Profiles",
+                    title = "Filament profiles",
                     subtitle = "",
-                    selectLabel = "Select Filament",
-                    actionLabel = "New Custom Filament",
+                    selectLabel = "Select filament",
+                    actionLabel = "New custom filament",
                     details = "",
                     onSelect = { onShowFilamentSelection() },
                     onAdd = {
@@ -294,7 +294,7 @@ internal fun ProfilesSelectedTabContent(
                     val visibleFilaments = store.visibleFilamentsForSelectedPrinter()
                     if (visibleFilaments.isEmpty()) {
                         Text(
-                            text = "No filaments added for this printer yet. Use Select Filament to import a material, or create a custom filament.",
+                            text = "No filaments added for this printer yet. Select a material preset or create a custom filament.",
                             style = MaterialTheme.typography.bodySmall,
                             color = bodyColor
                         )
@@ -335,17 +335,17 @@ internal fun ProfilesSelectedTabContent(
                 }
 
                 ProfileTab.Process -> DomainProfilesSection(
-                    title = "Process Profiles",
+                    title = "Process profiles",
                     subtitle = "",
-                    selectLabel = "Process Presets",
-                    actionLabel = "New Custom Process",
+                    selectLabel = "Select process",
+                    actionLabel = "New custom process",
                     details = "",
                     onSelect = { onShowProcessSelection() },
                     onAdd = {
                         val base = store.visibleProcessesForSelectedPrinter().firstOrNull { it.id == store.selectedProcessId }
                             ?: store.visibleProcessesForSelectedPrinter().firstOrNull()
                         if (base == null) {
-                            Toast.makeText(context, "Import an Orca process preset before creating a custom process.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Import a process preset before creating a custom process.", Toast.LENGTH_SHORT).show()
                         } else {
                             onEditorRequest(
                             ProfileEditorRequest.Process(
@@ -373,7 +373,7 @@ internal fun ProfilesSelectedTabContent(
                     val visibleProcesses = store.visibleProcessesForSelectedPrinter()
                     if (store.selectedPrinterId.isBlank()) {
                         Text(
-                            text = "Select a printer to load its Orca process presets.",
+                            text = "Select a printer to load its process presets.",
                             style = MaterialTheme.typography.bodySmall,
                             color = bodyColor
                         )

@@ -872,7 +872,7 @@ internal enum class ProfileEditorSetting(
         ),
         visibility = ProfileSettingVisibility.Simple,
         source = "vendor/orcaslicer/src/libslic3r/PrintConfig.cpp: skirt/brim and base fuzzy-skin controls are simple/default visible",
-        overrideReason = "Skirts is app-backed by Orca skirt_loops, and default/simple fuzzy-skin controls are shown in Orca's regular Others page."
+        overrideReason = "Skirt values remain import/export visible and Android native output is covered by the skirt parity device matrix. Default/simple fuzzy-skin controls are shown in Orca's regular Others page."
     ),
     ProcessOthersAdvanced(
         orcaKeys = listOf(

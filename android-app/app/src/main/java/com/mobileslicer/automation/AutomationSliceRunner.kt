@@ -293,6 +293,7 @@ private fun String.sanitizeStatusToken(): String =
 
 internal class AutomationSliceRunner(
     private val ensureEngine: () -> Long,
+    private val resetEngineForRecovery: () -> Unit,
     private val stageModelFile: (File) -> File?,
     private val resolveConfigJson: (Intent) -> String,
     private val onModelLoaded: (File) -> Unit,
@@ -311,7 +312,7 @@ internal class AutomationSliceRunner(
             statusFile.writeText(message, StandardCharsets.UTF_8)
         }
 
-        val engineHandle = NativeEngineHandle.fromRaw(ensureEngine())
+        var engineHandle = NativeEngineHandle.fromRaw(ensureEngine())
         if (engineHandle == null) {
             writeStatus("failed: engine unavailable")
             return false
@@ -345,6 +346,19 @@ internal class AutomationSliceRunner(
         }
         val placementStartedAt = SystemClock.elapsedRealtime()
         val placement = automationNativeTransform(stagedModel, configJson)
+        val placementSummary = placement?.let {
+            String.format(
+                Locale.US,
+                " placement=(%.6f,%.6f,%.6f;rx=%.6f,ry=%.6f,rz=%.6f;s=%.6f)",
+                it.xMm,
+                it.yMm,
+                it.zMm,
+                it.rotationXRadians,
+                it.rotationYRadians,
+                it.rotationZRadians,
+                it.uniformScale
+            )
+        }.orEmpty()
         if (
             placement != null &&
             !NativeEngineCalls.setModelTransform(
@@ -372,18 +386,14 @@ internal class AutomationSliceRunner(
         val configMs = SystemClock.elapsedRealtime() - configStartedAt
 
         val nativeSliceStartedAt = SystemClock.elapsedRealtime()
-        var sliceResult = NativeEngineCalls.slice(engineHandle)
-        if (
-            sliceResult !is NativeEngineCallResult.Success &&
-            (sliceResult as? NativeEngineCallResult.Failure)?.error?.message.equals("vector", ignoreCase = true)
-        ) {
-            Log.w(TAG, "automation:native slice failed with vector; retrying full native slice once on same engine")
-            sliceResult = NativeEngineCalls.slice(engineHandle)
+        val sliceResult = NativeEngineCalls.slice(engineHandle)
+        if (sliceResult !is NativeEngineCallResult.Success) {
+            Log.w(TAG, "automation:native slice failed; not retrying")
         }
         val nativeSliceMs = SystemClock.elapsedRealtime() - nativeSliceStartedAt
         if (sliceResult !is NativeEngineCallResult.Success) {
             writeStatus(
-                "failed: ${sliceResult.statusMessage} fallback=${nativeSliceFailureStatus()} elapsedMs=${SystemClock.elapsedRealtime() - startedAt} config=$configJson"
+                "failed: ${sliceResult.statusMessage}$placementSummary fallback=${nativeSliceFailureStatus()} elapsedMs=${SystemClock.elapsedRealtime() - startedAt} config=$configJson"
             )
             return false
         }

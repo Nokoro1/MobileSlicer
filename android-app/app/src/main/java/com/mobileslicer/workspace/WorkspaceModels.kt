@@ -18,8 +18,40 @@ internal data class PlateObject(
     val mesh: StlMesh? = null,
     val viewerPreparationError: String? = null,
     val workspacePreparationTiming: WorkspacePreparationTiming? = null,
-    val transform: ViewerModelTransform
+    val transform: ViewerModelTransform,
+    val paint: PlateObjectPaint = PlateObjectPaint(),
+    val geometrySource: PlateObjectGeometrySource = PlateObjectGeometrySource.StagedFile
 )
+
+internal data class WorkspacePlate(
+    val id: Long,
+    val label: String,
+    val objects: List<PlateObject> = emptyList(),
+    val selectedObjectId: Long? = objects.firstOrNull()?.id,
+    val gcodeFilePath: String? = null,
+    val sliceSummary: SliceResultSummary? = null,
+    val sliceTiming: SlicePipelineTiming? = null,
+    val gcodeFileName: String = "mobile_slicer_output.gcode",
+    val slicePreviewKey: Long = 0L
+) {
+    val objectCount: Int get() = objects.size
+}
+
+internal fun defaultWorkspacePlateLabel(index: Int): String = "Plate ${index.coerceAtLeast(1)}"
+
+internal sealed class PlateObjectGeometrySource {
+    data object StagedFile : PlateObjectGeometrySource()
+    data class ThreeMfMeshExtract(
+        val originalPath: String,
+        val extractedStlPath: String
+    ) : PlateObjectGeometrySource()
+    data class NativeCutResult(
+        val cutGroupId: String,
+        val sourceMobileObjectId: Long,
+        val role: String,
+        val resultJson: String
+    ) : PlateObjectGeometrySource()
+}
 
 internal data class PlateFilamentSlot(
     val index: Int,
@@ -244,7 +276,8 @@ internal enum class AppScreen {
 
 internal enum class WorkspaceMode {
     Prepare,
-    Preview
+    Preview,
+    Paint
 }
 
 internal enum class ImportedModelFormat {

@@ -63,11 +63,13 @@ internal fun SettingsScreen(
     accentPalette: AccentPaletteOption,
     worldViewColor: WorldViewColorOption,
     showAdvancedProfileSettings: Boolean,
+    activeStylusPaintOnly: Boolean,
     gcodePreviewPerformanceMode: GcodePreviewPerformanceMode,
     onThemeModeSelected: (ThemeModeOption) -> Unit,
     onAccentPaletteSelected: (AccentPaletteOption) -> Unit,
     onWorldViewColorSelected: (WorldViewColorOption) -> Unit,
     onShowAdvancedProfileSettingsChanged: (Boolean) -> Unit,
+    onActiveStylusPaintOnlyChanged: (Boolean) -> Unit,
     onGcodePreviewPerformanceModeSelected: (GcodePreviewPerformanceMode) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
@@ -148,8 +150,10 @@ internal fun SettingsScreen(
                 )
                 SettingsTab.Advanced -> AdvancedSettingsSection(
                     showAdvancedProfileSettings = showAdvancedProfileSettings,
+                    activeStylusPaintOnly = activeStylusPaintOnly,
                     gcodePreviewPerformanceMode = gcodePreviewPerformanceMode,
                     onShowAdvancedProfileSettingsChanged = onShowAdvancedProfileSettingsChanged,
+                    onActiveStylusPaintOnlyChanged = onActiveStylusPaintOnlyChanged,
                     onGcodePreviewPerformanceModeSelected = onGcodePreviewPerformanceModeSelected
                 )
                 SettingsTab.Info -> InfoSettingsSection(
@@ -227,13 +231,13 @@ private fun AppearanceSettingsSection(
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         SettingsSectionCard(
             title = "Theme mode",
-            subtitle = "Choose how the app shell looks on this device right now."
+            subtitle = "Choose light, dark, or your device setting."
         ) {
             SettingsOptionRow(
                 options = listOf(
                     AppSettingOption(ThemeModeOption.System, "System", "Follow the device theme."),
-                    AppSettingOption(ThemeModeOption.Light, "Light", "Bright surface treatment for the shell."),
-                    AppSettingOption(ThemeModeOption.Dark, "Dark", "Dark card-first presentation.")
+                    AppSettingOption(ThemeModeOption.Light, "Light", "Use a bright app theme."),
+                    AppSettingOption(ThemeModeOption.Dark, "Dark", "Use a dark app theme.")
                 ),
                 selectedValue = themeMode,
                 accentColor = selectedAccentColor(accentPalette),
@@ -243,7 +247,7 @@ private fun AppearanceSettingsSection(
 
         SettingsSectionCard(
             title = "Accent color",
-            subtitle = "Use a curated accent palette for the app shell."
+            subtitle = "Choose the color used for buttons and selected controls."
         ) {
             SettingsOptionRow(
                 options = accentPaletteOptions(),
@@ -254,8 +258,8 @@ private fun AppearanceSettingsSection(
         }
 
         SettingsSectionCard(
-            title = "World view color",
-            subtitle = "Choose the 3D world space behind the bed and model."
+            title = "Workspace background",
+            subtitle = "Choose the background behind the bed and model."
         ) {
             SettingsOptionRow(
                 options = worldViewColorOptions(),
@@ -270,16 +274,18 @@ private fun AppearanceSettingsSection(
 @Composable
 private fun AdvancedSettingsSection(
     showAdvancedProfileSettings: Boolean,
+    activeStylusPaintOnly: Boolean,
     gcodePreviewPerformanceMode: GcodePreviewPerformanceMode,
     onShowAdvancedProfileSettingsChanged: (Boolean) -> Unit,
+    onActiveStylusPaintOnlyChanged: (Boolean) -> Unit,
     onGcodePreviewPerformanceModeSelected: (GcodePreviewPerformanceMode) -> Unit
 ) {
     val titleColor = appTitleColor()
     val bodyColor = appBodyColor()
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         SettingsSectionCard(
-            title = "Advanced Orca profile settings",
-            subtitle = "Hide deeper Orca-derived controls by default in the mobile editor."
+            title = "Advanced profile controls",
+            subtitle = "Show less common slicer options in the profile editors."
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
@@ -294,25 +300,58 @@ private fun AdvancedSettingsSection(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Show advanced profile settings",
+                            text = "Show advanced controls",
                             style = MaterialTheme.typography.titleSmall,
                             color = titleColor,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "Off by default. When enabled, advanced-tagged slicer controls become visible in profile editors.",
+                            text = "Adds detailed printer, filament, and process options for deeper tuning.",
                             style = MaterialTheme.typography.bodySmall,
                             color = bodyColor
                         )
                     }
                 }
-                SettingsPill(label = if (showAdvancedProfileSettings) "Enabled" else "Off by default")
+                SettingsPill(label = if (showAdvancedProfileSettings) "Shown" else "Hidden")
             }
         }
 
         SettingsSectionCard(
-            title = "GCODE Preview Performance",
-            subtitle = "Sets the exact G-code mesh preview budget. Lower values create more automatic layer chunks without reducing preview accuracy."
+            title = "Painting input",
+            subtitle = "Choose how touch and stylus input behave while painting."
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Checkbox(
+                        checked = activeStylusPaintOnly,
+                        onCheckedChange = onActiveStylusPaintOnlyChanged,
+                        enabled = true
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Stylus paints",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = titleColor,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "When on, an active stylus paints and fingers keep moving the camera.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = bodyColor
+                        )
+                    }
+                }
+                SettingsPill(label = if (activeStylusPaintOnly) "Stylus paints" else "Off by default")
+            }
+        }
+
+        SettingsSectionCard(
+            title = "G-code preview performance",
+            subtitle = "Choose how much G-code preview detail to load at once."
         ) {
             SettingsOptionRow(
                 options = GcodePreviewPerformanceMode.entries.map { mode ->
@@ -344,29 +383,66 @@ private fun InfoSettingsSection(
 ) {
     SettingsSectionCard(
         title = "Project info",
-        subtitle = "Product and build context for this Android app."
+        subtitle = "Local, touch-first slicing for Android."
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             LegalInfoRow(
-                title = "App info",
-                value = "Mobile Slicer $appVersion\nPackage: $appPackageName"
+                title = "Version",
+                value = "Mobile Slicer $appVersion"
             )
             HorizontalDivider(color = outlineColor)
             LegalInfoRow(
-                title = "Current scope",
-                value = "App shell, Profiles flow, and the proven import/load/slice/export/share path."
+                title = "App package",
+                value = appPackageName
             )
         }
     }
 
     SettingsSectionCard(
-        title = "Legal",
-        subtitle = "Project and slicer legal context."
+        title = "Privacy and legal",
+        subtitle = "Privacy, attribution, licenses, safety, and warranty."
     ) {
-        LegalInfoRow(
-            title = "About / legal",
-            value = "OrcaSlicer remains the source of truth for slicer concepts and terminology. This Settings screen is Android app-layer only and does not change the JNI or wrapper contract."
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LegalInfoRow(
+                title = "MobileSlicer",
+                value = "MobileSlicer is a local Android slicer for STL and 3MF files. It is not affiliated with, sponsored by, or endorsed by the OrcaSlicer project."
+            )
+            HorizontalDivider(color = outlineColor)
+            LegalInfoRow(
+                title = "OrcaSlicer attribution",
+                value = "MobileSlicer uses slicer technology derived from OrcaSlicer and related open-source slicer projects. OrcaSlicer concepts, profile behavior, and terminology are credited to their upstream authors."
+            )
+            HorizontalDivider(color = outlineColor)
+            LegalInfoRow(
+                title = "License",
+                value = "OrcaSlicer is licensed under the GNU Affero General Public License version 3. MobileSlicer keeps the required notices, license text, and source-availability obligations for AGPL-covered code."
+            )
+            HorizontalDivider(color = outlineColor)
+            LegalInfoRow(
+                title = "Source code",
+                value = "Source code and release license materials are provided with public MobileSlicer releases, including the corresponding source for AGPL-covered changes."
+            )
+            HorizontalDivider(color = outlineColor)
+            LegalInfoRow(
+                title = "Third-party notices",
+                value = "Android, Kotlin, Compose, native, and slicer-related dependencies keep their own licenses and notices in the release materials."
+            )
+            HorizontalDivider(color = outlineColor)
+            LegalInfoRow(
+                title = "Privacy",
+                value = "MobileSlicer does not require an account or automatic cloud slicing. Files stay on your device unless you choose to export, share, or send them."
+            )
+            HorizontalDivider(color = outlineColor)
+            LegalInfoRow(
+                title = "Print safety",
+                value = "Review generated G-code, printer settings, materials, and machine behavior before starting a print."
+            )
+            HorizontalDivider(color = outlineColor)
+            LegalInfoRow(
+                title = "Warranty",
+                value = "MobileSlicer is provided as-is, without warranty, to the extent allowed by the open-source licenses and applicable law."
+            )
+        }
     }
 }
 
@@ -374,67 +450,133 @@ private fun InfoSettingsSection(
 private fun SupportSettingsSection() {
     val uriHandler = LocalUriHandler.current
     val bodyColor = appBodyColor()
-    SettingsSectionCard(
-        title = "Support MobileSlicer.",
-        subtitle = ""
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        SettingsSectionCard(
+            title = "Support contact",
+            subtitle = "Get help, report issues, or send feedback."
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
-                    text = "MobileSlicer is committed to always being free, open source, and forever ad free.",
+                    text = "For issues, complaints, concerns, and questions, contact us by email or Discord.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = bodyColor
                 )
-                Text(
-                    text = "I will never add features that ruin the user experience or charge for certain features, ever.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = bodyColor
+                SettingsContactCard(
+                    eyebrow = "Email",
+                    title = "mobileslicerapp@gmail.com",
+                    detail = "Best for account, privacy, billing, or support questions.",
+                    onClick = { uriHandler.openUri("mailto:mobileslicerapp@gmail.com") }
                 )
-                Text(
-                    text = "Supporting is only optional if you really support the project and want to help develop it. All support goes 100% to project development, including testing on a wider range of phones and tablets, buying development equipment, and being able to invest more time into the project. I will never ask anyone to support this project through financial incentive.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = bodyColor
+                SettingsContactCard(
+                    eyebrow = "Discord",
+                    title = "Join the community",
+                    detail = "Good for feature requests, printer discussions, and quick help.",
+                    onClick = { uriHandler.openUri("https://discord.gg/ckAAYAhRxE") }
                 )
             }
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        uriHandler.openUri("https://ko-fi.com/mobileslicer")
-                    },
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.88f)
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+        }
+
+        SettingsSectionCard(
+            title = "Support MobileSlicer",
+            subtitle = ""
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Ko-fi",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = Color(0xFF08111E),
-                        fontWeight = FontWeight.SemiBold
+                        text = "MobileSlicer is free, open source, and ad free.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = bodyColor
                     )
                     Text(
-                        text = "Support MobileSlicer",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color(0xFF08111E),
-                        fontWeight = FontWeight.Bold
+                        text = "Paid support never unlocks app features or changes the free app experience.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = bodyColor
                     )
                     Text(
-                        text = "Opens ko-fi.com",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF1A3557),
-                        fontWeight = FontWeight.SemiBold
+                        text = "Optional support helps with device testing, printer coverage, development equipment, and continued Android slicer work.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = bodyColor
                     )
                 }
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            uriHandler.openUri("https://ko-fi.com/mobileslicer")
+                        },
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.88f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Ko-fi",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color(0xFF08111E),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Support MobileSlicer",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(0xFF08111E),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Opens ko-fi.com",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF1A3557),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                Text(
+                    text = "Support is optional and never unlocks app features.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = bodyColor
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingsContactCard(
+    eyebrow: String,
+    title: String,
+    detail: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = appCardColor())
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             Text(
-                text = "Support is optional and never unlocks app features.",
+                text = eyebrow,
+                style = MaterialTheme.typography.labelSmall,
+                color = appMutedColor(),
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = appTitleColor(),
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = detail,
                 style = MaterialTheme.typography.bodySmall,
-                color = bodyColor
+                color = appBodyColor()
             )
         }
     }
@@ -529,7 +671,7 @@ private fun <T> SettingsOptionRow(
                             color = bodyColor
                         )
                     }
-                    SettingsPill(label = if (option.value == selectedValue) "Selected" else "Tap to use")
+                    SettingsPill(label = if (option.value == selectedValue) "Selected" else "Use")
                 }
             }
         }
@@ -557,17 +699,8 @@ private fun LegalInfoRow(
     val titleColor = appTitleColor()
     val bodyColor = appBodyColor()
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            color = titleColor,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            color = bodyColor
-        )
+        Text(text = title, style = MaterialTheme.typography.labelLarge, color = titleColor, fontWeight = FontWeight.SemiBold)
+        Text(text = value, style = MaterialTheme.typography.bodySmall, color = bodyColor)
     }
 }
 
@@ -585,14 +718,14 @@ private fun selectedAccentColor(accentPalette: AccentPaletteOption): Color =
 
 private fun accentPaletteOptions(): List<AppSettingOption<AccentPaletteOption>> =
     listOf(
-        AppSettingOption(AccentPaletteOption.Blue, "Blue", "Clean product blue.", PanelBlue),
-        AppSettingOption(AccentPaletteOption.Cyan, "Cyan", "Sharp technical accent.", PanelCyan),
-        AppSettingOption(AccentPaletteOption.Green, "Green", "Classic utility green.", PanelGreen),
-        AppSettingOption(AccentPaletteOption.Yellow, "Yellow", "Bright caution-style accent.", PanelYellow),
-        AppSettingOption(AccentPaletteOption.Rose, "Rose", "Soft magenta accent.", PanelRose),
-        AppSettingOption(AccentPaletteOption.Red, "Red", "Direct high-visibility accent.", PanelRed),
-        AppSettingOption(AccentPaletteOption.Orange, "Orange", "Warm practical accent.", PanelOrange),
-        AppSettingOption(AccentPaletteOption.Graphite, "Graphite", "Neutral tool accent.", PanelGraphite)
+        AppSettingOption(AccentPaletteOption.Blue, "Blue", "Default action color.", PanelBlue),
+        AppSettingOption(AccentPaletteOption.Cyan, "Cyan", "Cool blue-green controls.", PanelCyan),
+        AppSettingOption(AccentPaletteOption.Green, "Green", "Green buttons and highlights.", PanelGreen),
+        AppSettingOption(AccentPaletteOption.Yellow, "Yellow", "Yellow buttons and highlights.", PanelYellow),
+        AppSettingOption(AccentPaletteOption.Rose, "Rose", "Rose buttons and highlights.", PanelRose),
+        AppSettingOption(AccentPaletteOption.Red, "Red", "Red buttons and highlights.", PanelRed),
+        AppSettingOption(AccentPaletteOption.Orange, "Orange", "Orange buttons and highlights.", PanelOrange),
+        AppSettingOption(AccentPaletteOption.Graphite, "Graphite", "Neutral gray controls.", PanelGraphite)
     )
 
 private fun selectedWorldColor(worldViewColor: WorldViewColorOption): Color =
@@ -609,12 +742,12 @@ private fun selectedWorldColor(worldViewColor: WorldViewColorOption): Color =
 
 private fun worldViewColorOptions(): List<AppSettingOption<WorldViewColorOption>> =
     listOf(
-        AppSettingOption(WorldViewColorOption.Slate, "Slate", "Default neutral gray-blue workspace.", selectedWorldColor(WorldViewColorOption.Slate)),
-        AppSettingOption(WorldViewColorOption.White, "White", "Clean bright 3D workspace.", selectedWorldColor(WorldViewColorOption.White)),
-        AppSettingOption(WorldViewColorOption.Mist, "Mist", "Soft light gray-blue workspace.", selectedWorldColor(WorldViewColorOption.Mist)),
-        AppSettingOption(WorldViewColorOption.Graphite, "Graphite", "Dark neutral workspace.", selectedWorldColor(WorldViewColorOption.Graphite)),
-        AppSettingOption(WorldViewColorOption.Deep, "Deep", "Deep blue world space for high contrast.", selectedWorldColor(WorldViewColorOption.Deep)),
-        AppSettingOption(WorldViewColorOption.Navy, "Navy", "Readable dark blue workspace.", selectedWorldColor(WorldViewColorOption.Navy)),
-        AppSettingOption(WorldViewColorOption.Charcoal, "Charcoal", "Classic dark workspace.", selectedWorldColor(WorldViewColorOption.Charcoal)),
-        AppSettingOption(WorldViewColorOption.Black, "Black", "Near-black 3D workspace.", selectedWorldColor(WorldViewColorOption.Black))
+        AppSettingOption(WorldViewColorOption.Slate, "Slate", "Default gray-blue background.", selectedWorldColor(WorldViewColorOption.Slate)),
+        AppSettingOption(WorldViewColorOption.White, "White", "Light background.", selectedWorldColor(WorldViewColorOption.White)),
+        AppSettingOption(WorldViewColorOption.Mist, "Mist", "Pale gray-blue background.", selectedWorldColor(WorldViewColorOption.Mist)),
+        AppSettingOption(WorldViewColorOption.Graphite, "Graphite", "Dark gray background.", selectedWorldColor(WorldViewColorOption.Graphite)),
+        AppSettingOption(WorldViewColorOption.Deep, "Deep", "Dark blue background.", selectedWorldColor(WorldViewColorOption.Deep)),
+        AppSettingOption(WorldViewColorOption.Navy, "Navy", "Navy background.", selectedWorldColor(WorldViewColorOption.Navy)),
+        AppSettingOption(WorldViewColorOption.Charcoal, "Charcoal", "Charcoal background.", selectedWorldColor(WorldViewColorOption.Charcoal)),
+        AppSettingOption(WorldViewColorOption.Black, "Black", "Black background.", selectedWorldColor(WorldViewColorOption.Black))
     )

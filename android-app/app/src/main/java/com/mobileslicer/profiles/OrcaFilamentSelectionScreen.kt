@@ -248,7 +248,7 @@ internal fun OrcaFilamentSelectionScreen(
                     }
                 }
                 Text(
-                    text = "Select Filament",
+                    text = "Select filament",
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleLarge,
                     color = titleColor,
@@ -262,8 +262,8 @@ internal fun OrcaFilamentSelectionScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
-                placeholder = { Text("Search Filaments") },
-                label = { Text("Filament Name") },
+                placeholder = { Text("Search filaments") },
+                label = { Text("Filament name") },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = appCardColor().copy(alpha = 0.72f),
                     unfocusedContainerColor = appCardColor().copy(alpha = 0.72f),
@@ -320,11 +320,11 @@ internal fun OrcaFilamentSelectionScreen(
                                     showRecommendedOnly && selectedPrinter != null && allRowsForQuery.isNotEmpty() ->
                                         "No recommended matches. ${allRowsForQuery.size} filament profiles are available in All."
                                     showRecommendedOnly && selectedPrinter != null ->
-                                        "No recommended Orca filaments match ${selectedPrinter.name}."
+                                        "No recommended filaments match ${selectedPrinter.name}."
                                     query.isNotBlank() ->
-                                        "No Orca filaments match \"$query\"."
+                                        "No filament presets match \"$query\"."
                                     else ->
-                                        "No Orca filaments are available."
+                                        "No filament presets are available."
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = appBodyColor()
@@ -375,7 +375,7 @@ internal fun OrcaFilamentSelectionScreen(
                                     onImport(profile)
                                 }.onFailure { error ->
                                     importingProfilePath = null
-                                    importError = error.localizedMessage ?: "Unable to read Orca filament preset data."
+                                    importError = error.localizedMessage ?: "Unable to read filament preset data."
                                 }
                             }
                         }
@@ -467,6 +467,6 @@ private fun filamentCompatibilityLabel(
 ): String? =
     when (compatibleWithSelectedPrinter) {
         true -> "Recommended for ${selectedPrinter?.name.orEmpty()}"
-        false -> if (showNonRecommendedWarning) "Available, but not an Orca-recommended match" else null
+        false -> if (showNonRecommendedWarning) "Available, but not recommended for this printer" else null
         null -> "Available for any printer"
     }

@@ -10,6 +10,7 @@ import com.mobileslicer.viewer.ViewerModelTransform
 import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateFlushVolumes
 import com.mobileslicer.workspace.PlateObject
+import com.mobileslicer.workspace.PrimeTowerPlacementOverride
 import com.mobileslicer.workspace.SliceResult
 import com.mobileslicer.workspace.WorkspaceMode
 
@@ -49,7 +50,7 @@ internal fun planModelLoaderSliceStart(
         return ModelLoaderSliceStartPlan.Fail(SliceResult(failure, sliced = false))
     }
     return ModelLoaderSliceStartPlan.Start(
-        statusMessage = "Slice in progress\nNative slice inputs: $nativeSliceTitle"
+        statusMessage = "Slicing\n$nativeSliceTitle"
     )
 }
 
@@ -70,6 +71,7 @@ internal data class ModelLoaderSliceRunInputs(
     val profileFilaments: List<FilamentProfile>,
     val activePlateSlots: List<PlateFilamentSlot>,
     val flushVolumes: PlateFlushVolumes?,
+    val primeTowerPlacementOverride: PrimeTowerPlacementOverride?,
     val printer: PrinterProfile,
     val modelFilePath: String?,
     val preparedMesh: StlMesh?,
@@ -111,6 +113,7 @@ internal fun captureModelLoaderSliceRunInputs(
     plateFilamentSlots: List<PlateFilamentSlot>,
     fallbackFilament: FilamentProfile,
     flushVolumes: PlateFlushVolumes?,
+    primeTowerPlacementOverride: PrimeTowerPlacementOverride?,
     printer: PrinterProfile,
     modelFilePath: String?,
     preparedMesh: StlMesh?,
@@ -127,6 +130,7 @@ internal fun captureModelLoaderSliceRunInputs(
             listOf(fallbackFilament.toPlateFilamentSlot(index = 1))
         },
         flushVolumes = flushVolumes,
+        primeTowerPlacementOverride = primeTowerPlacementOverride,
         printer = printer,
         modelFilePath = modelFilePath,
         preparedMesh = preparedMesh,

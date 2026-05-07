@@ -55,6 +55,7 @@ import com.mobileslicer.appCardColorMuted
 import com.mobileslicer.appMutedColor
 import com.mobileslicer.appOutlineColor
 import com.mobileslicer.appTitleColor
+import com.mobileslicer.profiles.GcodeFlavor
 import com.mobileslicer.profiles.ProfileStore
 import com.mobileslicer.profiles.activeConfiguration
 import org.json.JSONObject
@@ -69,7 +70,7 @@ internal enum class CalibrationType(
 ) {
     PressureAdvance(
         title = "Pressure Advance",
-        subtitle = "Orca PA line, pattern, and tower style calibration.",
+        subtitle = "Tune pressure advance with line, pattern, and tower tests.",
         defaultRange = "K-value range",
         overrideSummary = "Overrides PA values and calibration-specific speeds."
     ),
@@ -93,7 +94,7 @@ internal enum class CalibrationType(
     ),
     Vfa(
         title = "VFA",
-        subtitle = "Vertical fine artifact speed tower.",
+        subtitle = "Find speeds that reduce vertical fine artifacts.",
         defaultRange = "Speed bands",
         overrideSummary = "Overrides speed bands for artifact inspection."
     ),
@@ -120,6 +121,12 @@ internal enum class CalibrationType(
         subtitle = "Square-corner velocity calibration.",
         defaultRange = "Cornering speeds",
         overrideSummary = "Overrides speed and cornering stress-test parameters."
+    ),
+    Tolerance(
+        title = "Tolerance",
+        subtitle = "Check dimensional clearance and part fit.",
+        defaultRange = "Fit test",
+        overrideSummary = "Uses the bundled tolerance model with the selected profiles."
     )
 }
 
@@ -134,7 +141,9 @@ internal data class CalibrationOptions(
     val flowPass: String = FLOW_RATE_COMPLETE,
     val flowRatioBaseline: String = "1.00",
     val patternAccelerations: String = "",
-    val patternSpeeds: String = ""
+    val patternSpeeds: String = "",
+    val testModel: String = CALIBRATION_TEST_MODEL_RINGING,
+    val shaperType: String = ""
 ) {
     fun summary(type: CalibrationType): String = when (type) {
         CalibrationType.PressureAdvance ->
@@ -159,6 +168,8 @@ internal data class CalibrationOptions(
             "Damping $startValue to $endValue step $stepValue"
         CalibrationType.Cornering ->
             "Cornering $startValue to $endValue mm/s step $stepValue"
+        CalibrationType.Tolerance ->
+            "Tolerance test model"
     }
 
     fun toMetadataJson(type: CalibrationType): JSONObject = JSONObject()
@@ -175,10 +186,15 @@ internal data class CalibrationOptions(
         .put("flow_ratio_baseline", validatedFlowRatio(flowRatioBaseline))
         .put("pattern_accelerations", patternAccelerations)
         .put("pattern_speeds", patternSpeeds)
+        .put("test_model", testModel)
+        .put("shaper_type", shaperType)
 }
 
 internal const val FLOW_RATE_COMPLETE = "Complete Calibration"
 internal const val FLOW_RATE_FINE = "Fine Calibration based on flow ratio"
+internal const val CALIBRATION_TEST_MODEL_RINGING = "Ringing Tower"
+internal const val CALIBRATION_TEST_MODEL_FAST = "Fast Tower"
+internal const val CALIBRATION_TEST_MODEL_CORNERING = "Cornering"
 
 private fun validatedFlowRatio(value: String): String {
     val ratio = value.toDoubleOrNull()
@@ -260,6 +276,9 @@ internal data class CalibrationJob(
             CalibrationType.Cornering -> {
                 applyCorneringProfile(json)
             }
+            CalibrationType.Tolerance -> {
+                applyToleranceProfile(json)
+            }
         }
         return json.toString()
     }
@@ -267,6 +286,9 @@ internal data class CalibrationJob(
     private fun forcedProfileName(): String = "Calibration - ${type.title}"
 
     private fun applySharedForcedCalibrationProfile(json: JSONObject) {
+        if (type != CalibrationType.FlowRate) {
+            json.putBool("gcode_label_objects", false)
+        }
         json.putBool("resonance_avoidance", false)
         json.putBool("enable_wrapping_detection", false)
         json.putBool("overhang_reverse", false)
@@ -455,6 +477,8 @@ internal data class CalibrationJob(
         json.putStringValue("brim_type", "outer_only")
         json.putNumber("brim_width", 3.0)
         json.putNumber("brim_object_gap", 0.0)
+        json.putNumber("calibration_test_model", options.testModel.toOrcaCalibrationTestModelIndex(default = 0))
+        json.putStringValue("calibration_shaper_type", options.shaperType)
         json.putStringValue("calibration_input_shaping_mode", mode)
         json.putNumberString("calibration_input_shaping_start", options.startValue)
         json.putNumberString("calibration_input_shaping_end", options.endValue)
@@ -488,9 +512,15 @@ internal data class CalibrationJob(
         json.putStringValue("brim_type", "outer_only")
         json.putNumber("brim_width", 3.0)
         json.putNumber("brim_object_gap", 0.0)
+        json.putNumber("calibration_test_model", options.testModel.toOrcaCalibrationTestModelIndex(default = 2))
+        json.putStringValue("calibration_shaper_type", options.shaperType)
         json.putNumberString("calibration_cornering_start", options.startValue)
         json.putNumberString("calibration_cornering_end", options.endValue)
         json.putNumberString("calibration_cornering_step", options.stepValue)
+    }
+
+    private fun applyToleranceProfile(json: JSONObject) {
+        json.putBool("mobile_slicer_calibration_tolerance_model", true)
     }
 
     fun orcaCalibrationAssetPath(): String = orcaCalibrationAssetPaths().first()
@@ -533,9 +563,30 @@ internal data class CalibrationJob(
         CalibrationType.InputShapingFrequency -> listOf("calib_stl/input_shaping/ringing_tower.stl")
         CalibrationType.InputShapingDamping -> listOf("calib_stl/input_shaping/fast_tower_test.stl")
         CalibrationType.Cornering -> listOf("calib_stl/cornering/SCV-V2.stl")
+        CalibrationType.Tolerance -> listOf("calib_stl/tolerance/OrcaToleranceTest.stl")
     }
 
     fun preservesAssetPlacement(): Boolean = type == CalibrationType.FlowRate
+}
+
+internal fun CalibrationJob.unsupportedFirmwareMessage(gcodeFlavor: GcodeFlavor): String? {
+    if (type != CalibrationType.InputShapingFrequency && type != CalibrationType.InputShapingDamping) {
+        return null
+    }
+    return when (gcodeFlavor) {
+        GcodeFlavor.Marlin2,
+        GcodeFlavor.Klipper,
+        GcodeFlavor.RepRapFirmware -> null
+        GcodeFlavor.MarlinLegacy ->
+            "Input shaping requires firmware support.\nSet this printer profile's G-code flavor to Marlin 2, Klipper, or RepRapFirmware after confirming the printer firmware supports input shaping."
+    }
+}
+
+private fun String.toOrcaCalibrationTestModelIndex(default: Int): Int = when (this) {
+    CALIBRATION_TEST_MODEL_RINGING -> 0
+    CALIBRATION_TEST_MODEL_FAST -> 1
+    CALIBRATION_TEST_MODEL_CORNERING -> 2
+    else -> default
 }
 
 private fun JSONObject.putNumber(key: String, value: Number) {
@@ -567,15 +618,17 @@ internal fun defaultCalibrationOptions(type: CalibrationType, filamentName: Stri
     )
     CalibrationType.TemperatureTower -> {
         val material = filamentName.uppercase(Locale.US).substringBefore(" ")
-        val (start, end) = when {
-            "ABS" in material || "ASA" in material -> "270" to "230"
-            "PETG" in material || "PCTG" in material -> "260" to "220"
-            "TPU" in material -> "240" to "200"
-            "PA" in material -> "290" to "250"
-            else -> "230" to "190"
+        val (filamentType, start, end) = when {
+            "ABS" in material || "ASA" in material -> Triple("ABS/ASA", "270", "230")
+            "PCTG" in material -> Triple("PCTG", "280", "240")
+            "PETG" in material -> Triple("PETG", "250", "230")
+            "TPU" in material -> Triple("TPU", "240", "210")
+            "PA-CF" in material -> Triple("PA-CF", "320", "280")
+            "PET-CF" in material -> Triple("PET-CF", "320", "280")
+            else -> Triple("PLA", "230", "190")
         }
         CalibrationOptions(
-            filamentType = material.ifBlank { "PLA" },
+            filamentType = filamentType,
             startValue = start,
             endValue = end,
             stepValue = "5"
@@ -599,17 +652,25 @@ internal fun defaultCalibrationOptions(type: CalibrationType, filamentName: Stri
     CalibrationType.InputShapingFrequency -> CalibrationOptions(
         startValue = "15",
         endValue = "60",
-        stepValue = "5"
+        stepValue = "5",
+        testModel = CALIBRATION_TEST_MODEL_RINGING
     )
     CalibrationType.InputShapingDamping -> CalibrationOptions(
         startValue = "0.05",
         endValue = "0.30",
-        stepValue = "0.05"
+        stepValue = "0.05",
+        testModel = CALIBRATION_TEST_MODEL_FAST
     )
     CalibrationType.Cornering -> CalibrationOptions(
         startValue = "5",
         endValue = "20",
-        stepValue = "1"
+        stepValue = "1",
+        testModel = CALIBRATION_TEST_MODEL_CORNERING
+    )
+    CalibrationType.Tolerance -> CalibrationOptions(
+        startValue = "0",
+        endValue = "0",
+        stepValue = "0"
     )
 }
 

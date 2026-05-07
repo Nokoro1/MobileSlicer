@@ -36,7 +36,7 @@ internal fun ProcessMultimaterialTabContent(
     interfaceShells: Boolean,
     onInterfaceShellsChange: (Boolean) -> Unit,
 ) {
-    ProfileEditorSection("Multimaterial", "Prime tower and purge behavior in Orca order.") {
+    ProfileEditorSection("Multimaterial", "Prime tower, purge, and filament assignment behavior.") {
         if (ProfileEditorSetting.ProcessMultimaterialCore.isVisible(showAdvancedProfileSettings)) {
             ProfileGroupHeader("Prime tower")
             ProfileDropdownField(
@@ -46,6 +46,18 @@ internal fun ProcessMultimaterialTabContent(
                 onSelected = onEnablePrimeTowerChange
             )
             ProfileTextField(primeTowerWidth, onPrimeTowerWidthChange, "Prime tower width (mm)", KeyboardType.Decimal)
+            ProfileTextField(
+                primeTowerDetails.wipeTowerX,
+                { onPrimeTowerDetailsChange(primeTowerDetails.copy(wipeTowerX = it)) },
+                "Wipe tower X (mm)",
+                KeyboardType.Decimal
+            )
+            ProfileTextField(
+                primeTowerDetails.wipeTowerY,
+                { onPrimeTowerDetailsChange(primeTowerDetails.copy(wipeTowerY = it)) },
+                "Wipe tower Y (mm)",
+                KeyboardType.Decimal
+            )
             ProfileTextField(
                 primeTowerDetails.primeVolume,
                 { onPrimeTowerDetailsChange(primeTowerDetails.copy(primeVolume = it)) },

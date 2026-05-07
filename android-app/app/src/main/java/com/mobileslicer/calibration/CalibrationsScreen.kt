@@ -121,7 +121,7 @@ internal fun PrinterCalibrationsScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "Orca-style calibration prints with temporary overrides.",
+                            text = "Calibration prints for tuning the selected printer, filament, and process.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = appBodyColor()
                         )

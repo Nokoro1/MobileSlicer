@@ -11,7 +11,7 @@ class ModelLoaderCalibrationPlateTest {
             calibrationPlateCreationFailureStatus(IllegalStateException("Disk full"))
         )
         assertEquals(
-            "Calibration could not be created\nUnable to write Orca calibration model.",
+            "Calibration could not be created\nUnable to create the calibration model.",
             calibrationPlateCreationFailureStatus(Throwable())
         )
     }

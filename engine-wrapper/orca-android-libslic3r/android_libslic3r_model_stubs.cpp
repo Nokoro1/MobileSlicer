@@ -10,8 +10,8 @@
 #include "libslic3r/I18N.hpp"
 #include "libslic3r/MeshBoolean.hpp"
 #include "libslic3r/Model.hpp"
+#include "libslic3r/Preset.hpp"
 #include "libslic3r/TriangleMeshSlicer.hpp"
-#include "libslic3r/TriangleSelector.hpp"
 #include "libslic3r/Utils.hpp"
 
 #include <string>
@@ -33,6 +33,23 @@ extern "C" void orca_android_set_temporary_dir(const char* path)
 namespace I18N {
 translate_fn_type translate_fn = nullptr;
 } // namespace I18N
+
+std::string Preset::get_type_string(Preset::Type type)
+{
+    switch (type) {
+    case Preset::Type::TYPE_FILAMENT:
+        return "filament";
+    case Preset::Type::TYPE_PRINT:
+        return "process";
+    case Preset::Type::TYPE_PRINTER:
+        return "machine";
+    case Preset::Type::TYPE_PHYSICAL_PRINTER:
+        return "physical_printer";
+    case Preset::Type::TYPE_INVALID:
+    default:
+        return "invalid";
+    }
+}
 
 bool load_obj(const char * /* path */, TriangleMesh * /* mesh */, ObjInfo & /* vertex_colors */, std::string &message)
 {
@@ -145,71 +162,6 @@ void Step::update_process(int /* load_stage */, int /* current */, int /* total 
     cancel = false;
 }
 
-namespace MeshBoolean::mcut {
-void make_boolean(
-    const TriangleMesh & /* src_mesh */,
-    const TriangleMesh & /* cut_mesh */,
-    std::vector<TriangleMesh> &dst_mesh,
-    const std::string & /* boolean_opts */)
-{
-    dst_mesh.clear();
-}
-} // namespace MeshBoolean::mcut
-
 void FaceDetector::detect_exterior_face() {}
-
-TriangleSelector::TriangleSelector(const TriangleMesh &mesh, float edge_limit)
-    : m_mesh(mesh)
-    , m_neighbors()
-    , m_face_normals()
-    , m_edge_limit(edge_limit)
-    , m_invalid_triangles(0)
-    , m_edge_limit_sqr(edge_limit * edge_limit)
-{
-}
-
-void TriangleSelector::get_facets(std::vector<indexed_triangle_set> &facets_per_type) const
-{
-    facets_per_type.clear();
-}
-
-indexed_triangle_set TriangleSelector::get_facets(EnforcerBlockerType /* state */) const
-{
-    return {};
-}
-
-indexed_triangle_set TriangleSelector::get_facets_strict(EnforcerBlockerType /* state */) const
-{
-    return {};
-}
-
-bool TriangleSelector::has_facets(EnforcerBlockerType /* state */) const
-{
-    return false;
-}
-
-bool TriangleSelector::has_facets(const TriangleSplittingData & /* data */, EnforcerBlockerType /* test_state */)
-{
-    return false;
-}
-
-TriangleSelector::TriangleSplittingData TriangleSelector::serialize() const
-{
-    return {};
-}
-
-void TriangleSelector::deserialize(
-    const TriangleSplittingData & /* data */,
-    bool /* needs_reset */,
-    EnforcerBlockerType /* max_ebt */,
-    EnforcerBlockerType /* to_delete_filament */,
-    EnforcerBlockerType /* replace_filament */)
-{
-}
-
-void TriangleSelector::TriangleSplittingData::update_used_states(size_t /* bitstream_start_idx */)
-{
-    reset_used_states();
-}
 
 } // namespace Slic3r

@@ -7,6 +7,7 @@ import com.mobileslicer.profiles.applySingleFilamentSlotNativeRuntimeBoundary
 import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateFlushVolumes
 import com.mobileslicer.workspace.PlateObject
+import com.mobileslicer.workspace.paintHash
 import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
@@ -117,6 +118,7 @@ private data class PlateSliceConfigCacheKey(
     val configHash: Int,
     val slotSignature: Int,
     val objectSlotSignature: Int,
+    val activePaintSignature: Int,
     val filamentSignature: Int,
     val flushVolumesSignature: Int
 )
@@ -151,6 +153,7 @@ internal fun applyPlateFilamentSlotsToNativeConfigResult(
         configHash = configJson.hashCode(),
         slotSignature = sortedSlots.hashCode(),
         objectSlotSignature = plateObjects.map { it.id to it.filamentSlotIndex }.hashCode(),
+        activePaintSignature = plateObjects.map { it.id to it.paint.paintHash() }.hashCode(),
         filamentSignature = filaments.map { it.id to it.hashCode() }.hashCode(),
         flushVolumesSignature = flushVolumes.hashCode()
     )
@@ -237,6 +240,10 @@ internal fun applyPlateFilamentSlotsToNativeConfigResult(
         json.put(NativeConfigKeys.Temperature.SupertackPlate, singleNumber(NativeConfigKeys.Temperature.SupertackPlate) { filament?.supertackPlateTemperatureC ?: 35 })
         json.put(NativeConfigKeys.Temperature.TexturedPlateInitialLayer, singleNumber(NativeConfigKeys.Temperature.TexturedPlateInitialLayer) { filament?.texturedPlateTemperatureInitialLayerC ?: 45 })
         json.put(NativeConfigKeys.Temperature.TexturedPlate, singleNumber(NativeConfigKeys.Temperature.TexturedPlate) { filament?.texturedPlateTemperatureC ?: 45 })
+        json.applyPaintAwareConfigValidation(
+            plateObjects = plateObjects,
+            activeSlots = sortedSlots
+        )
         json.put(NativeConfigKeys.PrimeTower.SingleExtruderMultiMaterial, singlePhysicalNozzle)
         json.put(NativeConfigKeys.PrimeTower.SingleExtruderMultiMaterialPriming, false)
         json.put("flush_multiplier", JSONArray().apply {
@@ -306,11 +313,17 @@ internal fun applyPlateFilamentSlotsToNativeConfigResult(
         }
     }
 
+    val requestedPrimeTower = json.optBoolean(NativeConfigKeys.PrimeTower.Enable, false)
     val multiMaterialPlate = sortedSlots.size > 1
+    val primeTowerEnabled = multiMaterialPlate && requestedPrimeTower
+    json.applyPaintAwareConfigValidation(
+        plateObjects = plateObjects,
+        activeSlots = sortedSlots
+    )
     json.put(NativeConfigKeys.PrimeTower.SingleExtruderMultiMaterial, singlePhysicalNozzle)
     json.put(NativeConfigKeys.PrimeTower.SingleExtruderMultiMaterialPriming, false)
-    json.put(NativeConfigKeys.PrimeTower.Enable, multiMaterialPlate)
-    json.put(NativeConfigKeys.PrimeTower.Purge, multiMaterialPlate)
+    json.put(NativeConfigKeys.PrimeTower.Enable, primeTowerEnabled)
+    json.put(NativeConfigKeys.PrimeTower.Purge, primeTowerEnabled)
     json.put("exclude_object", false)
     json.put("gcode_label_objects", false)
     json.put(NativeConfigKeys.Mobile.ActiveFilamentSlotCount, sortedSlots.size)
@@ -451,17 +464,43 @@ internal fun applyPlateFilamentSlotsToNativeConfigResult(
     return PlateSliceConfigResult(json = result, cacheHit = false)
 }
 
-private fun activePlateFilamentSlots(
+internal fun activePlateFilamentSlots(
     slots: List<PlateFilamentSlot>,
     plateObjects: List<PlateObject>
 ): List<PlateFilamentSlot> {
     val sortedSlots = slots.sortedBy { it.index }
     if (sortedSlots.isEmpty()) return emptyList()
     val usedSlotIndexes = plateObjects
-        .map { it.filamentSlotIndex.coerceAtLeast(1) }
+        .flatMap { objectOnPlate ->
+            buildList {
+                add(objectOnPlate.filamentSlotIndex.coerceAtLeast(1))
+                objectOnPlate.paint.color
+                    ?.takeIf { layer -> !layer.isEmpty && !layer.isStale }
+                    ?.referencedSlotIndexes
+                    ?.filter { slotIndex -> slotIndex > 0 }
+                    ?.let { addAll(it) }
+            }
+        }
         .toSortedSet()
     if (usedSlotIndexes.isEmpty()) {
         return sortedSlots.take(1)
+    }
+    val paintedColorSlotIndexes = plateObjects
+        .flatMap { objectOnPlate ->
+            objectOnPlate.paint.color
+                ?.takeIf { layer -> !layer.isEmpty && !layer.isStale }
+                ?.referencedSlotIndexes
+                .orEmpty()
+        }
+        .filter { it > 0 }
+    if (paintedColorSlotIndexes.isNotEmpty()) {
+        val maxSlot = (usedSlotIndexes + paintedColorSlotIndexes)
+            .maxOrNull()
+            ?.coerceAtLeast(1)
+            ?: 1
+        return sortedSlots
+            .filter { it.index <= maxSlot }
+            .ifEmpty { sortedSlots.take(maxSlot.coerceAtMost(sortedSlots.size).coerceAtLeast(1)) }
     }
     if (usedSlotIndexes.size == 1 && usedSlotIndexes.first() == sortedSlots.first().index) {
         return sortedSlots.take(1)
@@ -469,6 +508,53 @@ private fun activePlateFilamentSlots(
     val matchedSlots = sortedSlots.filter { it.index in usedSlotIndexes }
     return matchedSlots.ifEmpty { sortedSlots.take(1) }
 }
+
+private fun JSONObject.applyPaintAwareConfigValidation(
+    plateObjects: List<PlateObject>,
+    activeSlots: List<PlateFilamentSlot>
+) {
+    val activeLayers = plateObjects.flatMap { objectOnPlate ->
+        objectOnPlate.paint.layers().filter { layer -> !layer.isEmpty && !layer.isStale }
+    }
+    if (activeLayers.isEmpty()) return
+
+    val warnings = JSONArray()
+    if (activeLayers.any { it.mode == com.mobileslicer.workspace.PaintMode.Support }) {
+        put("enable_support", true)
+        put("support_type", supportTypeForPaintedSupport(optString("support_type")))
+    }
+    if (activeLayers.any { it.mode == com.mobileslicer.workspace.PaintMode.Seam } && optString("seam_position").isBlank()) {
+        put("seam_position", "aligned")
+    }
+    val colorSlots = activeLayers
+        .filter { it.mode == com.mobileslicer.workspace.PaintMode.Color }
+        .flatMap { it.referencedSlotIndexes }
+        .filter { it > 0 }
+        .toSortedSet()
+    if (colorSlots.isNotEmpty()) {
+        val configuredSlots = activeSlots.map { it.index }.toSet()
+        val missingSlots = colorSlots.filterNot { it in configuredSlots }
+        if (missingSlots.isNotEmpty()) {
+            warnings.put("Color paint references missing filament slots: ${missingSlots.joinToString(", ")}")
+        }
+        if (configuredSlots.size < 2 && colorSlots.any { it > 1 }) {
+            warnings.put("Color paint requires a multi-filament native config.")
+        }
+    }
+    if (warnings.length() > 0) {
+        put("mobile_slicer_paint_config_warnings", warnings)
+    } else {
+        remove("mobile_slicer_paint_config_warnings")
+    }
+}
+
+private fun supportTypeForPaintedSupport(currentSupportType: String): String =
+    when (currentSupportType) {
+        "tree(auto)",
+        "tree(manual)" -> "tree(manual)"
+        "normal(manual)" -> "normal(manual)"
+        else -> "normal(manual)"
+    }
 
 internal fun ensureFlushVolumesForSlots(
     slots: List<PlateFilamentSlot>,

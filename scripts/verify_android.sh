@@ -16,7 +16,7 @@ PERIMETER_ARRAY_SLICE_SMOKE_STL="$ROOT_DIR/proof-fixtures/stage2_small_perimeter
 MEDIUM_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/volumetric_speed/SpeedTestStructure.stl"
 COMPLEX_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/vfa/vfa.stl"
 STRESS_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/temperature_tower/temperature_tower.stl"
-BENCHY_AUTOMATION_CONFIG='{"bed_width_mm":270,"bed_depth_mm":270,"max_height_mm":256,"nozzle_diameter":0.4000000059604645,"filament_diameter":1.75,"filament_type":"PLA","filament_max_volumetric_speed":50,"nozzle_temperature_initial_layer":210,"nozzle_temperature":210,"bed_temperature_initial_layer":60,"bed_temperature":60,"cooling_baseline":100,"close_fan_the_first_x_layers":1,"layer_height":0.20000000298023224,"first_layer_height":0.20000000298023224,"first_layer_print_speed":10,"first_layer_infill_speed":22.5,"initial_layer_travel_speed_percent":50,"slow_down_layers":0,"outer_wall_speed":30,"inner_wall_speed":30,"top_surface_speed":30,"travel_speed":120,"outer_wall_acceleration":500,"inner_wall_acceleration":10000,"top_surface_acceleration":500,"sparse_infill_acceleration":500,"bridge_speed":10,"small_perimeter_speed":15,"small_perimeter_threshold":0,"sparse_infill_speed":300,"internal_solid_infill_speed":30,"gap_infill_speed":15,"top_shell_layers":4,"bottom_shell_layers":3,"seam_position":"aligned","precise_outer_wall":true,"only_one_wall_top":true,"top_surface_pattern":"monotonicline","sparse_infill_density":15,"sparse_infill_pattern":"grid","wall_loops":2,"print_speed_baseline":60,"skirts":2,"brim_width":0}'
+BENCHY_AUTOMATION_CONFIG='{"bed_width_mm":270,"bed_depth_mm":270,"max_height_mm":256,"nozzle_diameter":0.4000000059604645,"filament_diameter":1.75,"filament_type":"PLA","filament_max_volumetric_speed":50,"nozzle_temperature_initial_layer":210,"nozzle_temperature":210,"bed_temperature_initial_layer":60,"bed_temperature":60,"cooling_baseline":100,"close_fan_the_first_x_layers":1,"layer_height":0.20000000298023224,"first_layer_height":0.20000000298023224,"first_layer_print_speed":10,"first_layer_infill_speed":22.5,"initial_layer_travel_speed_percent":50,"slow_down_layers":0,"outer_wall_speed":30,"inner_wall_speed":30,"top_surface_speed":30,"travel_speed":120,"outer_wall_acceleration":500,"inner_wall_acceleration":10000,"top_surface_acceleration":500,"sparse_infill_acceleration":500,"bridge_speed":10,"small_perimeter_speed":15,"small_perimeter_threshold":0,"sparse_infill_speed":300,"internal_solid_infill_speed":30,"gap_infill_speed":15,"top_shell_layers":4,"bottom_shell_layers":3,"seam_position":"aligned","precise_outer_wall":true,"only_one_wall_top":true,"top_surface_pattern":"monotonicline","sparse_infill_density":15,"sparse_infill_pattern":"grid","wall_loops":2,"print_speed_baseline":60,"skirts":0,"brim_width":0}'
 CURRENT_AUTOMATION_SERIAL=""
 CURRENT_AUTOMATION_LABEL=""
 CURRENT_AUTOMATION_OUTPUT_PATH=""
@@ -102,6 +102,7 @@ Usage:
   scripts/verify_android.sh device-automation [serial]
   scripts/verify_android.sh slice-lifecycle [serial]
   scripts/verify_android.sh slice-regression [serial]
+  scripts/verify_android.sh skirt-parity [serial]
   scripts/verify_android.sh profile-ui [serial]
   scripts/verify_android.sh responsiveness [serial]
   scripts/verify_android.sh responsiveness-slice [serial]
@@ -140,6 +141,11 @@ Modes:
           Build, install, run a physical-device slicing parameter matrix, pull
           emitted G-code, and assert expected geometry/G-code changes.
           Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  skirt-parity
+          Build, install, run baseline/combined/per-object/brim skirt slices on
+          device, pull emitted G-code, and assert Orca skirt features survive
+          Android export with finite in-bed first-layer geometry. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   profile-ui
           Build, install, cold-launch, and assert the process stays alive with
           an empty crash buffer. Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
@@ -314,6 +320,10 @@ run_script_tests() {
   (cd "$ROOT_DIR" && python3 scripts/test_analyze_mobile_performance.py)
   (cd "$ROOT_DIR" && python3 scripts/test_analyze_preview_responsiveness.py)
   (cd "$ROOT_DIR" && python3 scripts/test_gcode_preview_layer_counter.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_proof_fixtures.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_release_worktree_audit.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_validate_orca_profile_bundle.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_validate_orca_export_with_cli.py)
 }
 
 run_asset_generator_tests() {
@@ -1256,20 +1266,27 @@ run_automation_slice() {
   adb_device "$serial" shell run-as "$PACKAGE_NAME" rm -f "$output_path" "$status_path"
   adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
   adb_device "$serial" logcat -c
-  adb_device "$serial" shell "CONFIG='$config_json'; am start -W \
+  local start_output
+  start_output="$(adb_device "$serial" shell "CONFIG='$config_json'; am start -W \
     -a '$AUTOMATION_ACTION' \
     -n '$MAIN_ACTIVITY' \
     --es automation_model_path '$app_model_path' \
     --es automation_output_path '$output_path' \
     --es automation_status_path '$status_path' \
-    --es automation_config_json \"\$CONFIG\""
+    --es automation_config_json \"\$CONFIG\"")"
+  printf '%s\n' "$start_output"
+  if printf '%s\n' "$start_output" | grep -Eq '^(Error|Exception):'; then
+    fail "Automation activity did not start."
+  fi
 
   log "Automation status"
   local status
   if [[ "$collect_perf" == "1" ]]; then
     local status_tmp
+    local perf_status_attempts
+    perf_status_attempts="$(env_int_or_default MOBILE_SLICER_PERF_STATUS_ATTEMPTS 720)"
     status_tmp="$(mktemp)"
-    wait_for_status_with_memory "$serial" "$status_path" > "$status_tmp"
+    wait_for_status_with_memory "$serial" "$status_path" "$perf_status_attempts" 1 > "$status_tmp"
     status="$(cat "$status_tmp")"
     rm -f "$status_tmp"
   else
@@ -1759,9 +1776,9 @@ run_performance_gate() {
   default_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
   support_config="$(automation_config_with_overrides brim_width=0 enable_support=true support_type=normal\(auto\) support_style=default support_threshold_angle=10 support_on_build_plate_only=false)"
   perimeter_config="$(automation_config_with_overrides brim_width=0 wall_loops=3 sparse_infill_density=20 enable_support=false small_perimeter_speed=20)"
-  medium_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
-  complex_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
-  stress_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=10 enable_support=false)"
+  medium_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false max_height_mm=320 printable_height=320)"
+  complex_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false max_height_mm=320 printable_height=320)"
+  stress_config="$(automation_config_with_overrides brim_width=0 wall_loops=2 sparse_infill_density=10 enable_support=false max_height_mm=720 printable_height=720)"
 
   if [[ "$repeat_count" -gt 1 ]]; then
     log "Repeating performance slice cases $repeat_count times for memory-growth checks"
@@ -1842,7 +1859,7 @@ def parse(path):
     bed = set()
     types = set()
     for raw in text.splitlines():
-        if raw.startswith(";TYPE:"):
+        if raw.startswith(";TYPE:") or raw.startswith("; FEATURE:"):
             types.add(raw.split(":", 1)[1].strip())
             continue
         command = raw.split(";", 1)[0].strip()
@@ -1969,6 +1986,186 @@ run_slice_regression_matrix() {
   assert_no_crash_after_launch "$serial"
 }
 
+analyze_skirt_parity_matrix() {
+  local directory="$1"
+  python3 - "$directory" <<'PY'
+import math
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+word_re = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))", re.I)
+bed_min = -0.1
+bed_max = 270.1
+
+def update_bounds(bounds, px, py, x, y):
+    bounds[0] = min(bounds[0], px, x)
+    bounds[1] = max(bounds[1], px, x)
+    bounds[2] = min(bounds[2], py, y)
+    bounds[3] = max(bounds[3], py, y)
+
+def finish_bounds(bounds):
+    if not math.isfinite(bounds[0]) or not math.isfinite(bounds[2]):
+        return None
+    return {
+        "xmin": bounds[0],
+        "xmax": bounds[1],
+        "ymin": bounds[2],
+        "ymax": bounds[3],
+        "width": bounds[1] - bounds[0],
+        "depth": bounds[3] - bounds[2],
+    }
+
+def parse(path):
+    text = path.read_text(errors="replace")
+    x = y = z = e = 0.0
+    absolute_xyz = True
+    absolute_e = True
+    first_z = None
+    current_type = ""
+    types = set()
+    first_layer = [math.inf, -math.inf, math.inf, -math.inf]
+    first_layer_model = [math.inf, -math.inf, math.inf, -math.inf]
+    first_layer_skirt = [math.inf, -math.inf, math.inf, -math.inf]
+    for raw in text.splitlines():
+        if raw.startswith(";TYPE:") or raw.startswith("; FEATURE:"):
+            current_type = raw.split(":", 1)[1].strip()
+            types.add(current_type)
+            continue
+        command = raw.split(";", 1)[0].strip()
+        if not command:
+            continue
+        upper = command.upper()
+        if upper == "G90":
+            absolute_xyz = True
+            continue
+        if upper == "G91":
+            absolute_xyz = False
+            continue
+        if upper == "M82":
+            absolute_e = True
+            continue
+        if upper == "M83":
+            absolute_e = False
+            continue
+        words = {key.upper(): float(value) for key, value in word_re.findall(command)}
+        if upper.startswith(("G0", "G1", "G2", "G3")):
+            px, py, pe = x, y, e
+            if "X" in words:
+                x = words["X"] if absolute_xyz else x + words["X"]
+            if "Y" in words:
+                y = words["Y"] if absolute_xyz else y + words["Y"]
+            if "Z" in words:
+                z = words["Z"] if absolute_xyz else z + words["Z"]
+            if "E" in words:
+                e = words["E"] if absolute_e else e + words["E"]
+            if e - pe <= 0:
+                continue
+            if first_z is None:
+                first_z = z
+            if abs(z - first_z) > 0.001:
+                continue
+            update_bounds(first_layer, px, py, x, y)
+            type_lower = current_type.lower()
+            if "skirt" in type_lower:
+                update_bounds(first_layer_skirt, px, py, x, y)
+            elif "brim" not in type_lower:
+                update_bounds(first_layer_model, px, py, x, y)
+    return {
+        "bytes": path.stat().st_size,
+        "types": types,
+        "first_layer": finish_bounds(first_layer),
+        "model": finish_bounds(first_layer_model),
+        "skirt": finish_bounds(first_layer_skirt),
+    }
+
+def has_type(item, needle):
+    return any(needle in value.lower() for value in item["types"])
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+def require_in_bed(bounds, name):
+    require(bounds is not None, f"{name}: missing extrusion bounds")
+    for axis in ("xmin", "xmax", "ymin", "ymax"):
+        value = bounds[axis]
+        require(math.isfinite(value), f"{name}: non-finite {axis}={value}")
+    require(bed_min <= bounds["xmin"] <= bed_max, f"{name}: xmin outside bed: {bounds}")
+    require(bed_min <= bounds["xmax"] <= bed_max, f"{name}: xmax outside bed: {bounds}")
+    require(bed_min <= bounds["ymin"] <= bed_max, f"{name}: ymin outside bed: {bounds}")
+    require(bed_min <= bounds["ymax"] <= bed_max, f"{name}: ymax outside bed: {bounds}")
+
+metrics = {path.stem: parse(path) for path in root.glob("*.gcode")}
+required = {"baseline", "combined", "perobject", "brim_skirt"}
+missing = required - set(metrics)
+require(not missing, f"missing skirt parity outputs: {sorted(missing)}")
+
+baseline = metrics["baseline"]
+combined = metrics["combined"]
+perobject = metrics["perobject"]
+brim_skirt = metrics["brim_skirt"]
+
+require(baseline["bytes"] > 1024, f"baseline too small: {baseline}")
+require(not has_type(baseline, "skirt"), f"baseline unexpectedly emitted skirt: {baseline['types']}")
+require(has_type(combined, "skirt"), f"combined skirt missing: {combined['types']}")
+require(has_type(perobject, "skirt"), f"per-object skirt missing: {perobject['types']}")
+require(has_type(brim_skirt, "skirt"), f"brim+skirt missing skirt: {brim_skirt['types']}")
+require(has_type(brim_skirt, "brim"), f"brim+skirt missing brim: {brim_skirt['types']}")
+
+for name, item in metrics.items():
+    require_in_bed(item["first_layer"], f"{name} first layer")
+    if item["skirt"] is not None:
+        require_in_bed(item["skirt"], f"{name} skirt")
+
+require(combined["first_layer"]["width"] > baseline["first_layer"]["width"] + 1.0,
+        f"combined skirt did not expand first-layer width: baseline={baseline['first_layer']} combined={combined['first_layer']}")
+require(combined["first_layer"]["depth"] > baseline["first_layer"]["depth"] + 1.0,
+        f"combined skirt did not expand first-layer depth: baseline={baseline['first_layer']} combined={combined['first_layer']}")
+
+for name in sorted(metrics):
+    item = metrics[name]
+    skirt = item["skirt"]
+    skirt_summary = "none" if skirt is None else f"{skirt['width']:.2f}x{skirt['depth']:.2f}"
+    first = item["first_layer"]
+    print(
+        f"{name}: bytes={item['bytes']} firstLayer={first['width']:.2f}x{first['depth']:.2f} "
+        f"skirt={skirt_summary} types={','.join(sorted(item['types']))}"
+    )
+PY
+}
+
+run_skirt_parity_matrix() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "default slice smoke STL"
+  install_apk "$serial"
+
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' RETURN
+
+  local baseline_config combined_config perobject_config brim_skirt_config
+  baseline_config="$(automation_config_with_overrides skirts=0 skirt_loops=0 brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
+  combined_config="$(automation_config_with_overrides skirts=2 skirt_loops=2 skirt_type=combined skirt_distance=2 min_skirt_length=0 skirt_height=1 brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
+  perobject_config="$(automation_config_with_overrides skirts=2 skirt_loops=2 skirt_type=perobject skirt_distance=2 min_skirt_length=0 skirt_height=1 brim_width=0 wall_loops=2 sparse_infill_density=15 enable_support=false)"
+  brim_skirt_config="$(automation_config_with_overrides skirts=2 skirt_loops=2 skirt_type=combined skirt_distance=2 min_skirt_length=0 skirt_height=1 brim_width=4 brim_type=outer_only wall_loops=2 sparse_infill_density=15 enable_support=false)"
+
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "skirt-baseline" "0" "$baseline_config"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$tmp_dir/baseline.gcode"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "skirt-combined" "0" "$combined_config"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$tmp_dir/combined.gcode"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "skirt-perobject" "0" "$perobject_config"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$tmp_dir/perobject.gcode"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "skirt-brim" "0" "$brim_skirt_config"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$tmp_dir/brim_skirt.gcode"
+
+  log "Analyzing pulled skirt parity G-code"
+  analyze_skirt_parity_matrix "$tmp_dir"
+  assert_no_crash_after_launch "$serial"
+}
+
 run_slice_lifecycle_regression() {
   local serial="$1"
   require_device_automation
@@ -2045,6 +2242,9 @@ case "$mode" in
     ;;
   slice-regression)
     run_slice_regression_matrix "$(device_serial "${2:-}")"
+    ;;
+  skirt-parity)
+    run_skirt_parity_matrix "$(device_serial "${2:-}")"
     ;;
   profile-ui)
     run_profile_ui_smoke "$(device_serial "${2:-}")"

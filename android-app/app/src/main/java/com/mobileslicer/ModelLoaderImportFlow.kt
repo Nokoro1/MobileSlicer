@@ -113,7 +113,8 @@ internal fun planModelImportApplication(
             mesh = reusableObject?.mesh,
             viewerPreparationError = reusableObject?.viewerPreparationError,
             workspacePreparationTiming = reusableObject?.workspacePreparationTiming,
-            transform = defaultTransform(retainedPlateObjects.size)
+            transform = defaultTransform(retainedPlateObjects.size),
+            geometrySource = result.geometrySource
         )
         return ModelLoaderImportApplication(
             loadedLabel = loadedLabel,

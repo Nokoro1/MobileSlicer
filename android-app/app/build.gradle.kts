@@ -110,7 +110,13 @@ android {
             isJniDebuggable = true
             isMinifyEnabled = false
             versionNameSuffix = "-workspace-surface-v1"
+            buildConfigField("boolean", "AUTOMATION_ENABLED", "true")
             buildConfigField("String", "VIEWER_BUILD_STAMP", "\"viewer-build: surface-thread-workspace-v1\"")
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DMOBILE_SLICER_BUILD_NATIVE_PAINT_PROBES=ON"
+                }
+            }
         }
         create("perfDebug") {
             initWith(getByName("debug"))
@@ -118,7 +124,13 @@ android {
             isMinifyEnabled = false
             matchingFallbacks += listOf("debug")
             versionNameSuffix = "-perf"
+            buildConfigField("boolean", "AUTOMATION_ENABLED", "true")
             buildConfigField("String", "VIEWER_BUILD_STAMP", "\"viewer-build: perf\"")
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DMOBILE_SLICER_BUILD_NATIVE_PAINT_PROBES=ON"
+                }
+            }
         }
         release {
             isMinifyEnabled = true
@@ -129,6 +141,7 @@ android {
             if (hasReleaseSigningConfig) {
                 signingConfig = signingConfigs.getByName("release")
             }
+            buildConfigField("boolean", "AUTOMATION_ENABLED", "false")
             buildConfigField("String", "VIEWER_BUILD_STAMP", "\"viewer-build: release\"")
         }
     }

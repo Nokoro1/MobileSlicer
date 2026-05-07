@@ -2,6 +2,7 @@ package com.mobileslicer
 
 import android.content.Context
 import com.mobileslicer.calibration.CalibrationJob
+import com.mobileslicer.calibration.CalibrationType
 import com.mobileslicer.calibration.writeOrcaCalibrationModels
 import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.PrinterBedSpec
@@ -18,7 +19,7 @@ internal data class ModelLoaderCalibrationPlateBuildResult(
 )
 
 internal fun calibrationPlateCreationFailureStatus(error: Throwable): String =
-    "Calibration could not be created\n${error.localizedMessage ?: "Unable to write Orca calibration model."}"
+    "Calibration could not be created\n${error.localizedMessage ?: "Unable to create the calibration model."}"
 
 private data class PendingCalibrationObject(
     val modelFile: File,
@@ -36,7 +37,9 @@ internal fun buildModelLoaderCalibrationPlate(
 ): Result<ModelLoaderCalibrationPlateBuildResult> = runCatching {
     val modelFiles = writeOrcaCalibrationModels(context, calibrationDir, job)
     val pendingCalibrationObjects = modelFiles.mapNotNull { modelFile ->
-        val mesh = runCatching { StlMeshParser.parseForDisplay(modelFile).mesh }.getOrNull()
+        val mesh = runCatching {
+            calibrationPreviewMesh(job, StlMeshParser.parseForDisplay(modelFile).mesh)
+        }.getOrNull()
         val bounds = mesh?.bounds ?: runCatching { StlMeshParser.parseBounds(modelFile) }.getOrNull()
         bounds?.let { PendingCalibrationObject(modelFile = modelFile, mesh = mesh, bounds = it) }
     }
@@ -82,4 +85,81 @@ internal fun buildModelLoaderCalibrationPlate(
         objects = calibrationObjects,
         nextObjectId = nextObjectId
     )
+}
+
+private fun calibrationPreviewMesh(job: CalibrationJob, mesh: StlMesh): StlMesh =
+    when (job.type) {
+        CalibrationType.TemperatureTower -> {
+            val start = job.options.startValue.toDoubleOrNull() ?: 230.0
+            val end = job.options.endValue.toDoubleOrNull() ?: 190.0
+            val minZ = mesh.bounds.minZ + (kotlin.math.round((500.0 - start) / 5.0) * 10.0).toFloat()
+            val maxZ = mesh.bounds.minZ + (kotlin.math.round((500.0 - end) / 5.0 + 1.0) * 10.0).toFloat()
+            cropPreviewMeshZ(mesh, minZ, maxZ, shiftDownBy = minZ - mesh.bounds.minZ)
+        }
+        else -> mesh
+    }
+
+private fun cropPreviewMeshZ(
+    mesh: StlMesh,
+    minZ: Float,
+    maxZ: Float,
+    shiftDownBy: Float = 0f
+): StlMesh {
+    if (minZ >= maxZ || (minZ <= mesh.bounds.minZ && maxZ >= mesh.bounds.maxZ)) return mesh
+    val keptTriangles = ArrayList<Int>(mesh.triangleCount)
+    var triangle = 0
+    while (triangle < mesh.triangleCount) {
+        val base = triangle * 9
+        val z0 = mesh.vertices[base + 2]
+        val z1 = mesh.vertices[base + 5]
+        val z2 = mesh.vertices[base + 8]
+        if (z0 >= minZ && z0 <= maxZ && z1 >= minZ && z1 <= maxZ && z2 >= minZ && z2 <= maxZ) {
+            keptTriangles.add(triangle)
+        }
+        triangle++
+    }
+    if (keptTriangles.isEmpty()) return mesh
+
+    val vertices = FloatArray(keptTriangles.size * 9)
+    val normals = FloatArray(keptTriangles.size * 9)
+    keptTriangles.forEachIndexed { index, sourceTriangle ->
+        val sourceBase = sourceTriangle * 9
+        val targetBase = index * 9
+        mesh.vertices.copyInto(vertices, destinationOffset = targetBase, startIndex = sourceBase, endIndex = sourceBase + 9)
+        mesh.normals.copyInto(normals, destinationOffset = targetBase, startIndex = sourceBase, endIndex = sourceBase + 9)
+        if (shiftDownBy != 0f) {
+            vertices[targetBase + 2] -= shiftDownBy
+            vertices[targetBase + 5] -= shiftDownBy
+            vertices[targetBase + 8] -= shiftDownBy
+        }
+    }
+    return StlMesh(
+        vertices = vertices,
+        normals = normals,
+        triangleCount = keptTriangles.size,
+        bounds = boundsForVertices(vertices)
+    )
+}
+
+private fun boundsForVertices(vertices: FloatArray): MeshBounds {
+    var minX = Float.POSITIVE_INFINITY
+    var minY = Float.POSITIVE_INFINITY
+    var minZ = Float.POSITIVE_INFINITY
+    var maxX = Float.NEGATIVE_INFINITY
+    var maxY = Float.NEGATIVE_INFINITY
+    var maxZ = Float.NEGATIVE_INFINITY
+    var index = 0
+    while (index + 2 < vertices.size) {
+        val x = vertices[index]
+        val y = vertices[index + 1]
+        val z = vertices[index + 2]
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (z < minZ) minZ = z
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+        if (z > maxZ) maxZ = z
+        index += 3
+    }
+    return MeshBounds(minX, minY, minZ, maxX, maxY, maxZ)
 }

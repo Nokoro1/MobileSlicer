@@ -95,7 +95,7 @@ extern "C" void orca_clear_generated_gcode(OrcaEngine* engine)
     }
 }
 
-extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const* paths, const double* transforms, const int* extruder_ids, int count, const char*, int, double* out_transforms)
+extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const* paths, const double* transforms, int, const int* extruder_ids, int count, const char*, int, double* out_transforms)
 {
     if (engine == nullptr || paths == nullptr || transforms == nullptr || extruder_ids == nullptr || out_transforms == nullptr || count <= 0) {
         return ORCA_ERROR_INVALID_ARGUMENT;
@@ -104,13 +104,18 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
     return ORCA_ERROR_LOAD_MODEL;
 }
 
-extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const* paths, const double* transforms, const int* extruder_ids, int count, const char*, double* out_transforms)
+extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const* paths, const double* transforms, int, const int* extruder_ids, int count, const char*, double* out_transforms)
 {
     if (engine == nullptr || paths == nullptr || transforms == nullptr || extruder_ids == nullptr || out_transforms == nullptr || count <= 0) {
         return ORCA_ERROR_INVALID_ARGUMENT;
     }
     engine->last_error = "native Orca auto-orient is unavailable in the reduced Android wrapper";
     return ORCA_ERROR_LOAD_MODEL;
+}
+
+extern "C" int orca_cancel_planning(OrcaEngine* engine)
+{
+    return engine == nullptr ? ORCA_ERROR_INVALID_ARGUMENT : ORCA_SUCCESS;
 }
 
 extern "C" int orca_set_model_placement(OrcaEngine* engine, double, double, double)

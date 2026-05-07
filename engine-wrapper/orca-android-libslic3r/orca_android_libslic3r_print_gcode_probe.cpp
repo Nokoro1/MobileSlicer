@@ -3,8 +3,11 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <cstdint>
+#include <limits>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "nlohmann/json.hpp"
@@ -16,6 +19,7 @@
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Slicing.hpp"
+#include "libslic3r/TriangleSelector.hpp"
 
 namespace {
 
@@ -190,9 +194,11 @@ bool apply_reference_json_to_full_config(const std::string &body, Slic3r::Dynami
     double brim_width = 0.0;
     std::string filament_type;
     std::string seam_position;
+    std::string support_type;
     std::string top_surface_pattern;
     std::string sparse_infill_pattern;
     bool precise_outer_wall = false;
+    bool enable_support = false;
 
     const bool has_bed_width = optional_numeric(root, "bed_width_mm", errors, bed_width_mm);
     const bool has_bed_depth = optional_numeric(root, "bed_depth_mm", errors, bed_depth_mm);
@@ -213,9 +219,11 @@ bool apply_reference_json_to_full_config(const std::string &body, Slic3r::Dynami
     const bool has_brim_width = optional_numeric(root, "brim_width", errors, brim_width);
     const bool has_filament_type = optional_string(root, "filament_type", errors, filament_type);
     const bool has_seam_position = optional_string(root, "seam_position", errors, seam_position);
+    const bool has_support_type = optional_string(root, "support_type", errors, support_type);
     const bool has_top_surface_pattern = optional_string(root, "top_surface_pattern", errors, top_surface_pattern);
     const bool has_sparse_infill_pattern = optional_string(root, "sparse_infill_pattern", errors, sparse_infill_pattern);
     const bool has_precise_outer_wall = optional_bool(root, "precise_outer_wall", errors, precise_outer_wall);
+    const bool has_enable_support = optional_bool(root, "enable_support", errors, enable_support);
 
     if (!errors.empty())
         return false;
@@ -250,6 +258,10 @@ bool apply_reference_json_to_full_config(const std::string &body, Slic3r::Dynami
         set_string_option(config, "filament_type", filament_type);
     if (has_seam_position)
         set_string_option(config, "seam_position", seam_position);
+    if (has_enable_support)
+        set_string_option(config, "enable_support", enable_support ? "1" : "0");
+    if (has_support_type)
+        set_string_option(config, "support_type", support_type);
     if (has_top_surface_pattern)
         set_string_option(config, "top_surface_pattern", top_surface_pattern);
     if (has_sparse_infill_pattern)
@@ -296,6 +308,16 @@ std::string first_nonempty_line(const std::string &text)
     return {};
 }
 
+std::uint64_t fnv1a64(const std::string &text)
+{
+    std::uint64_t hash = 1469598103934665603ull;
+    for (const unsigned char ch : text) {
+        hash ^= ch;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 template <typename Vec3Like>
 std::string format_vec3(const Vec3Like &v)
 {
@@ -313,6 +335,184 @@ std::string format_layer_pairs(const std::vector<double> &layers)
         out << "[" << layers[idx] << "," << layers[idx + 1] << "]";
     }
     return out.str();
+}
+
+Slic3r::Vec3f facet_center(const Slic3r::TriangleMesh &mesh, int facet_idx)
+{
+    const Slic3r::Vec3i32 face = mesh.its.indices[facet_idx];
+    return (mesh.its.vertices[face[0]] + mesh.its.vertices[face[1]] + mesh.its.vertices[face[2]]) / 3.f;
+}
+
+Slic3r::Vec3f facet_normal(const Slic3r::TriangleMesh &mesh, int facet_idx)
+{
+    const Slic3r::Vec3i32 face = mesh.its.indices[facet_idx];
+    Slic3r::Vec3f normal = (mesh.its.vertices[face[1]] - mesh.its.vertices[face[0]])
+        .cross(mesh.its.vertices[face[2]] - mesh.its.vertices[face[0]]);
+    const float length = normal.norm();
+    return length > 1e-8f ? normal / length : Slic3r::Vec3f(0.f, 0.f, 1.f);
+}
+
+int first_downward_facet_above_bed(const Slic3r::TriangleMesh &mesh)
+{
+    int best_facet = 0;
+    float best_z = 1.f;
+    float min_vertex_z = std::numeric_limits<float>::max();
+    float max_vertex_z = std::numeric_limits<float>::lowest();
+    for (const Slic3r::Vec3f &vertex : mesh.its.vertices) {
+        min_vertex_z = std::min(min_vertex_z, vertex.z());
+        max_vertex_z = std::max(max_vertex_z, vertex.z());
+    }
+    const float min_center_z = min_vertex_z + std::max(0.5f, (max_vertex_z - min_vertex_z) * 0.05f);
+    for (int facet = 0; facet < int(mesh.facets_count()); ++facet) {
+        const Slic3r::Vec3f center = facet_center(mesh, facet);
+        if (center.z() <= min_center_z)
+            continue;
+        const float normal_z = facet_normal(mesh, facet).z();
+        if (normal_z < best_z) {
+            best_z = normal_z;
+            best_facet = facet;
+        }
+    }
+    return best_facet;
+}
+
+std::vector<std::pair<int, std::string>> serialized_annotation_triangles(
+    const Slic3r::FacetsAnnotation &annotation,
+    int facet_count)
+{
+    std::vector<std::pair<int, std::string>> result;
+    for (int facet = 0; facet < facet_count; ++facet) {
+        std::string payload = annotation.get_triangle_as_string(facet);
+        if (!payload.empty())
+            result.emplace_back(facet, std::move(payload));
+    }
+    return result;
+}
+
+bool apply_probe_paint(Slic3r::Model &model, const std::string &mode, std::string &error)
+{
+    if (model.objects.empty() || model.objects.front() == nullptr || model.objects.front()->volumes.empty()) {
+        error = "paint probe model has no target volume";
+        return false;
+    }
+
+    Slic3r::ModelVolume *volume = model.objects.front()->volumes.front();
+    if (volume == nullptr || volume->mesh().empty()) {
+        error = "paint probe target volume has no mesh";
+        return false;
+    }
+
+    const Slic3r::TriangleMesh &mesh = volume->mesh();
+    const int facet = first_downward_facet_above_bed(mesh);
+    const Slic3r::Vec3f center = facet_center(mesh, facet);
+    const Slic3r::Vec3f normal = facet_normal(mesh, facet);
+    const Slic3r::Vec3f camera = center + normal * 100.f;
+    const Slic3r::Transform3d identity = Slic3r::Transform3d::Identity();
+    const Slic3r::TriangleSelector::ClippingPlane clipping;
+
+    Slic3r::TriangleSelector selector(mesh);
+    Slic3r::EnforcerBlockerType paint_state = Slic3r::EnforcerBlockerType::ENFORCER;
+    if (mode == "color")
+        paint_state = Slic3r::EnforcerBlockerType::Extruder2;
+    else if (mode == "fuzzy")
+        paint_state = Slic3r::EnforcerBlockerType::FUZZY_SKIN;
+
+    if (mode == "color") {
+        selector.bucket_fill_select_triangles(center, facet, clipping, 180.f, true, true);
+        selector.seed_fill_apply_on_triangles(paint_state);
+    } else {
+        selector.select_patch(
+            facet,
+            Slic3r::TriangleSelector::SinglePointCursor::cursor_factory(
+                center,
+                camera,
+                12.0f,
+                Slic3r::TriangleSelector::CursorType::CIRCLE,
+                identity,
+                clipping),
+            paint_state,
+            identity,
+            true,
+            0.f);
+    }
+
+    if (!selector.has_facets(paint_state)) {
+        error = "paint probe TriangleSelector produced no target-state facets";
+        return false;
+    }
+
+    Slic3r::FacetsAnnotation *annotation = nullptr;
+    if (mode == "support") {
+        annotation = &volume->supported_facets;
+    } else if (mode == "seam") {
+        annotation = &volume->seam_facets;
+    } else if (mode == "color") {
+        annotation = &volume->mmu_segmentation_facets;
+    } else if (mode == "fuzzy") {
+        annotation = &volume->fuzzy_skin_facets;
+    } else {
+        error = "paint probe mode must be support, seam, color, or fuzzy";
+        return false;
+    }
+
+    if (!annotation->set(selector)) {
+        error = "paint probe FacetsAnnotation rejected selector data";
+        return false;
+    }
+    const std::vector<std::pair<int, std::string>> replay_triangles =
+        serialized_annotation_triangles(*annotation, int(mesh.facets_count()));
+    if (replay_triangles.empty()) {
+        error = "paint probe annotation produced no serialized triangle payload";
+        return false;
+    }
+
+    annotation->reset();
+    annotation->reserve(int(mesh.facets_count()));
+    for (const auto &triangle : replay_triangles)
+        annotation->set_triangle_from_string(triangle.first, triangle.second);
+    annotation->shrink_to_fit();
+
+    std::cerr << "debug: paint_probe mode=" << mode
+              << " facet=" << facet
+              << " normal=" << format_vec3(normal)
+              << " replay_triangles=" << replay_triangles.size()
+              << " payload_triangle=" << replay_triangles.front().first
+              << " payload_hex_len=" << replay_triangles.front().second.size()
+              << "\n";
+    return true;
+}
+
+void configure_mode_for_probe(const std::string &paint_mode, Slic3r::DynamicPrintConfig &config)
+{
+    if (paint_mode == "color") {
+        set_string_option(config, "wall_generator", "classic");
+        set_scalar_option(config, "line_width", 0.42);
+        set_scalar_option(config, "inner_wall_line_width", 0.42);
+        set_scalar_option(config, "outer_wall_line_width", 0.42);
+        set_scalar_option(config, "sparse_infill_line_width", 0.42);
+        set_scalar_option(config, "internal_solid_infill_line_width", 0.42);
+        set_scalar_option(config, "top_surface_line_width", 0.42);
+        set_scalar_option(config, "support_line_width", 0.42);
+        config.option<Slic3r::ConfigOptionFloats>("nozzle_diameter", true)->values = { 0.4, 0.4, 0.4 };
+        config.option<Slic3r::ConfigOptionFloats>("filament_diameter", true)->values = { 1.75, 1.75, 1.75 };
+        config.option<Slic3r::ConfigOptionStrings>("filament_colour", true)->values = { "#FF5038", "#2A8CFF", "#06D6A0" };
+        config.option<Slic3r::ConfigOptionStrings>("filament_type", true)->values = { "PLA", "PLA", "PLA" };
+        config.option<Slic3r::ConfigOptionInts>("nozzle_temperature", true)->values = { 210, 210, 210 };
+        config.option<Slic3r::ConfigOptionInts>("nozzle_temperature_initial_layer", true)->values = { 210, 210, 210 };
+        config.option<Slic3r::ConfigOptionStrings>("filament_start_gcode", true)->values = { "", "", "" };
+        config.option<Slic3r::ConfigOptionStrings>("filament_end_gcode", true)->values = { "", "", "" };
+        config.option<Slic3r::ConfigOptionFloats>("flush_volumes_matrix", true)->values = {
+              0.f, 120.f, 120.f,
+            120.f,   0.f, 120.f,
+            120.f, 120.f,   0.f,
+        };
+        config.option<Slic3r::ConfigOptionFloats>("flush_multiplier", true)->values = { 1.f };
+    } else if (paint_mode == "fuzzy") {
+        set_string_option(config, "fuzzy_skin", "none");
+        set_scalar_option(config, "fuzzy_skin_thickness", 0.2);
+        set_scalar_option(config, "fuzzy_skin_point_distance", 0.3);
+        set_string_option(config, "fuzzy_skin_mode", "displacement");
+    }
 }
 
 void dump_probe_state(const Slic3r::Model &model, const Slic3r::DynamicPrintConfig &config, const Slic3r::Print &print)
@@ -375,8 +575,8 @@ void dump_probe_state(const Slic3r::Model &model, const Slic3r::DynamicPrintConf
 
 int main(int argc, char **argv)
 {
-    if (argc != 3) {
-        std::cerr << "usage: orca_android_libslic3r_print_gcode_probe <input.stl> <config.json>\n";
+    if (argc != 3 && argc != 4) {
+        std::cerr << "usage: orca_android_libslic3r_print_gcode_probe <input.stl> <config.json> [paint-support|paint-seam|paint-color|paint-fuzzy]\n";
         return 2;
     }
 
@@ -397,6 +597,29 @@ int main(int argc, char **argv)
             object->ensure_on_bed();
         }
 
+        std::string paint_mode;
+        if (argc == 4) {
+            const std::string paint_arg(argv[3]);
+            if (paint_arg == "paint-support") {
+                paint_mode = "support";
+            } else if (paint_arg == "paint-seam") {
+                paint_mode = "seam";
+            } else if (paint_arg == "paint-color") {
+                paint_mode = "color";
+            } else if (paint_arg == "paint-fuzzy") {
+                paint_mode = "fuzzy";
+            } else {
+                std::cerr << "error: unsupported paint mode argument: " << paint_arg << "\n";
+                return 2;
+            }
+
+            std::string paint_error;
+            if (!apply_probe_paint(model, paint_mode, paint_error)) {
+                std::cerr << "error: " << paint_error << "\n";
+                return 1;
+            }
+        }
+
         const std::string json_body = read_file_to_string(argv[2]);
         if (json_body.empty()) {
             std::cerr << "error: failed to read config JSON from " << argv[2] << "\n";
@@ -408,6 +631,13 @@ int main(int argc, char **argv)
         if (!apply_reference_json_to_full_config(json_body, config, config_errors)) {
             for (const std::string &error : config_errors)
                 std::cerr << "error: " << error << "\n";
+            return 1;
+        }
+        configure_mode_for_probe(paint_mode, config);
+        const std::map<std::string, std::string> mode_validation_errors = config.validate(false);
+        if (!mode_validation_errors.empty()) {
+            for (const auto &entry : mode_validation_errors)
+                std::cerr << "error: " << entry.first << ": " << entry.second << "\n";
             return 1;
         }
 
@@ -447,7 +677,10 @@ int main(int argc, char **argv)
                   << " volumes=" << model.objects.front()->volumes.size()
                   << " facets=" << model.objects.front()->volumes.front()->mesh().facets_count()
                   << "\n";
+        if (!paint_mode.empty())
+            std::cout << "paint_mode=" << paint_mode << "\n";
         std::cout << "gcode_bytes=" << gcode.size() << "\n";
+        std::cout << "gcode_fnv1a64=" << fnv1a64(gcode) << "\n";
         std::cout << "gcode_first_line=" << first_nonempty_line(gcode) << "\n";
         return 0;
     } catch (const std::exception &error) {

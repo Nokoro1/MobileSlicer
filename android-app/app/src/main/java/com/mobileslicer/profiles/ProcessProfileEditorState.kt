@@ -1,6 +1,8 @@
 package com.mobileslicer.profiles
 
 internal data class PrimeTowerDetailsDraft(
+    val wipeTowerX: String,
+    val wipeTowerY: String,
     val primeTowerSkipPoints: Boolean,
     val primeVolume: String,
     val primeTowerBrimWidth: String,
@@ -18,6 +20,8 @@ internal data class PrimeTowerDetailsDraft(
 ) {
     companion object {
         fun fromProfile(profile: ProcessProfile): PrimeTowerDetailsDraft = PrimeTowerDetailsDraft(
+            wipeTowerX = profile.wipeTowerXmm.toString(),
+            wipeTowerY = profile.wipeTowerYmm.toString(),
             primeTowerSkipPoints = profile.primeTowerSkipPoints,
             primeVolume = profile.primeVolumeMm3.toString(),
             primeTowerBrimWidth = profile.primeTowerBrimWidthMm.toString(),
@@ -36,6 +40,8 @@ internal data class PrimeTowerDetailsDraft(
     }
 
     fun toDetails(initial: ProcessProfile): ProcessPrimeTowerDetails = ProcessPrimeTowerDetails(
+        wipeTowerXmm = wipeTowerX.parseFloatAtLeastForProcessDraft(0f) ?: initial.wipeTowerXmm,
+        wipeTowerYmm = wipeTowerY.parseFloatAtLeastForProcessDraft(0f) ?: initial.wipeTowerYmm,
         primeTowerSkipPoints = primeTowerSkipPoints,
         primeVolumeMm3 = primeVolume.parseFloatAtLeastForProcessDraft(1f) ?: initial.primeVolumeMm3,
         primeTowerBrimWidthMm = primeTowerBrimWidth.parseFloatAtLeastForProcessDraft(-1f) ?: initial.primeTowerBrimWidthMm,

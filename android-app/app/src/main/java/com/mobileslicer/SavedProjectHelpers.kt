@@ -219,8 +219,12 @@ internal fun detectCalibrationGcodeFileName(gcodeFilePath: String): String? {
         }
     }.getOrDefault("")
     return when {
-        "flowrate_" in sample || "calib_flowrate_topinfill_special_order" in sample ->
-            "Filament Flow Rate Calibration.gcode"
+        "; start pressure advance pattern for layer" in sample || "pressure advance pattern" in sample ->
+            calibrationGcodeFileNameForType("PressureAdvance")
+        "Calib_Retraction_tower" in sample ->
+            calibrationGcodeFileNameForType("Retraction")
+        Regex("""flowrate_(?:m)?\d+\.stl""").containsMatchIn(sample) || "flowrate-test" in sample ->
+            calibrationGcodeFileNameForType("FlowRate")
         else -> null
     }
 }
@@ -255,7 +259,8 @@ internal fun transformedObjectBoundsOnPlate(
         scale = scale,
         rotationXRadians = rotationXRadians,
         rotationYRadians = rotationYRadians,
-        rotationZRadians = rotationZRadians
+        rotationZRadians = rotationZRadians,
+        orientationMatrix = transform.orientationMatrix
     )
 
     var rotatedMinX = Float.POSITIVE_INFINITY
@@ -277,7 +282,8 @@ internal fun transformedObjectBoundsOnPlate(
                     scale = scale,
                     rotationXRadians = rotationXRadians,
                     rotationYRadians = rotationYRadians,
-                    rotationZRadians = rotationZRadians
+                    rotationZRadians = rotationZRadians,
+                    orientationMatrix = transform.orientationMatrix
                 )
                 rotatedMinX = minOf(rotatedMinX, point.x)
                 rotatedMaxX = maxOf(rotatedMaxX, point.x)
@@ -309,11 +315,19 @@ internal fun rotateScaledPoint(
     scale: Float,
     rotationXRadians: Double,
     rotationYRadians: Double,
-    rotationZRadians: Double
+    rotationZRadians: Double,
+    orientationMatrix: List<Float>? = null
 ): RotatedPoint {
     var tx = x.toDouble() * scale
     var ty = y.toDouble() * scale
     var tz = z.toDouble() * scale
+    if (orientationMatrix != null && orientationMatrix.size == 9) {
+        return RotatedPoint(
+            x = (orientationMatrix[0] * tx + orientationMatrix[1] * ty + orientationMatrix[2] * tz).toFloat(),
+            y = (orientationMatrix[3] * tx + orientationMatrix[4] * ty + orientationMatrix[5] * tz).toFloat(),
+            z = (orientationMatrix[6] * tx + orientationMatrix[7] * ty + orientationMatrix[8] * tz).toFloat()
+        )
+    }
 
     val cosX = cos(rotationXRadians)
     val sinX = sin(rotationXRadians)

@@ -41,7 +41,7 @@ internal fun workspaceMeshPreparingStatus(
             )
         )
         append('\n')
-        append("Preparing workspace mesh in the background...")
+        append("Preparing the workspace preview...")
     }
 
 internal fun workspaceMeshPreparedStatus(
@@ -59,7 +59,7 @@ internal fun workspaceMeshPreparedStatus(
         )
         result.timing?.let {
             append('\n')
-            append(if (it.cacheHit) "Viewer mesh prep cache hit: " else "Viewer mesh prep: ")
+            append(if (it.cacheHit) "Preview loaded from cache: " else "Preview prepared: ")
             append(formatDurationMs(it.viewerMeshPrepMs))
             if (it.reducedForDisplay && it.sourceTriangleCount != null && it.displayTriangleCount != null) {
                 append(" • display LOD ")
@@ -71,11 +71,11 @@ internal fun workspaceMeshPreparedStatus(
         }
         if (!result.viewerPreparationError.isNullOrBlank()) {
             append('\n')
-            append("Workspace mesh preparation failed: ")
+            append("The model loaded, but the workspace preview could not be prepared: ")
             append(result.viewerPreparationError)
         } else {
             append('\n')
-            append("Workspace mesh prepared. Waiting for first visible frame.")
+            append("Workspace preview ready. Waiting for the first frame.")
         }
     }
 

@@ -197,7 +197,7 @@ internal enum class InternalBridgeFilterMode(
     val displayLabel: String,
     val description: String
 ) {
-    Filter("disabled", "Filter", "Default Orca filtering for small internal bridges"),
+    Filter("disabled", "Filter", "Default filtering for small internal bridges"),
     Limited("limited", "Limited filtering", "Create internal bridges on more difficult overhang regions only"),
     NoFilter("nofilter", "No filtering", "Create internal bridges for every potential internal overhang");
 
@@ -399,7 +399,7 @@ internal enum class SupportStyle(
     val displayLabel: String,
     val detailLabel: String
 ) {
-    Default("default", "Default", "Default Orca style for the chosen support type"),
+    Default("default", "Default", "Default style for the chosen support type"),
     Grid("grid", "Grid", "Regular grid support style"),
     Snug("snug", "Snug", "Material-saving snug support towers"),
     Organic("organic", "Organic", "Organic tree support style"),
@@ -418,7 +418,7 @@ internal enum class SupportInterfacePattern(
     val displayLabel: String,
     val detailLabel: String
 ) {
-    Auto("auto", "Default", "Default Orca support interface pattern"),
+    Auto("auto", "Default", "Default support interface pattern"),
     Rectilinear("rectilinear", "Rectilinear", "Rectilinear support interface pattern"),
     Concentric("concentric", "Concentric", "Concentric support interface pattern"),
     RectilinearInterlaced("rectilinear_interlaced", "Rectilinear Interlaced", "Rectilinear-interlaced support interface pattern"),
@@ -435,7 +435,7 @@ internal enum class SupportBasePattern(
     val displayLabel: String,
     val detailLabel: String
 ) {
-    Default("default", "Default", "Default Orca support base pattern"),
+    Default("default", "Default", "Default support base pattern"),
     Rectilinear("rectilinear", "Rectilinear", "Rectilinear support base pattern"),
     RectilinearGrid("rectilinear-grid", "Rectilinear Grid", "Rectilinear-grid support base pattern"),
     Honeycomb("honeycomb", "Honeycomb", "Honeycomb support base pattern"),

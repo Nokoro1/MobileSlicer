@@ -203,21 +203,29 @@ internal fun JSONObject.toImportedDeviceOrcaFilamentProfile(
     currentStore: ProfileStore
 ): FilamentProfile {
     val printer = currentStore.printers.firstOrNull { it.id == currentStore.selectedPrinterId }
-        ?: error("Select a printer before importing an Orca filament preset.")
-    val prettyName = optString(NativeConfigKeys.Printer.Name).ifBlank {
+        ?: error("Select a printer before importing a filament preset.")
+    val prettyName = profileConfigString(NativeConfigKeys.Filament.SettingsId).ifBlank {
+        profileConfigString(NativeConfigKeys.Printer.Name)
+    }.ifBlank {
         sourceName.substringAfterLast('/').removeSuffix(".json").removeSuffix(".JSON")
     }.ifBlank { "Imported Filament" }
-    val printerBaseline = findMobileSlicerFilamentBaseline(currentStore, this, prettyName)
     val parentBundle = findInheritedOrcaFilamentBundle(context, this)
     val parentJson = parentBundle
         ?.resolvedFilamentJson
         ?.let { runCatching { JSONObject(it) }.getOrNull() }
-    val resolved = when {
-        printerBaseline != null && parentJson != null -> printerBaseline.copyWithOverlay(parentJson).copyWithOverlay(this)
-        printerBaseline != null -> printerBaseline.copyWithOverlay(this)
-        parentJson != null -> parentJson.copyWithOverlay(this)
-        else -> error("Select or create a ${prettyName.detectFilamentMaterial() ?: "base"} filament for ${printer.name} before importing this partial Orca filament preset.")
-    }
+    val resolved = resolveDeviceOrcaFilamentJson(
+        currentStore = currentStore,
+        json = this,
+        displayName = prettyName,
+        printerId = printer.id,
+        parentJson = parentJson,
+        printerDefaultJson = findPrinterDefaultOrcaFilamentBaseline(
+            context = context,
+            json = this,
+            displayName = prettyName,
+            printer = printer
+        )
+    )
     val material = resolved.profileConfigString(NativeConfigKeys.Filament.Type, prettyName)
     val sourcePath = "device://${sourceName}#${toString().hashCode().toUInt().toString(16)}"
     val preset = OrcaFilamentPreset(
@@ -251,9 +259,11 @@ internal fun JSONObject.toImportedDeviceOrcaProcessProfile(
     currentStore: ProfileStore
 ): ProcessProfile {
     val printer = currentStore.printers.firstOrNull { it.id == currentStore.selectedPrinterId }
-        ?: error("Select a printer before importing an Orca process preset.")
+        ?: error("Select a printer before importing a process preset.")
     val nozzle = printer?.nozzleDiameterMm ?: 0.4f
-    val prettyName = optString(NativeConfigKeys.Printer.Name).ifBlank {
+    val prettyName = profileConfigString(NativeConfigKeys.Process.SettingsId).ifBlank {
+        profileConfigString(NativeConfigKeys.Printer.Name)
+    }.ifBlank {
         sourceName.substringAfterLast('/').removeSuffix(".json").removeSuffix(".JSON")
     }.ifBlank { "Imported Process" }
     val sourcePath = "device://${sourceName}#${toString().hashCode().toUInt().toString(16)}"

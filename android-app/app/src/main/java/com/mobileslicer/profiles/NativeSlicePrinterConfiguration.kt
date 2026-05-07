@@ -2,6 +2,16 @@ package com.mobileslicer.profiles
 
 import org.json.JSONObject
 
+private fun PrintHostType.orcaNativeConfigValue(): String =
+    when (this) {
+        // Bambu LAN is an app runtime connection mode. Orca does not define a
+        // PrintHostType enum value for Bambu LAN, so native config must carry
+        // a valid Orca host_type while the app keeps BambuLan for upload/device
+        // behavior.
+        PrintHostType.BambuLan -> PrintHostType.OctoPrint.configValue
+        else -> configValue
+    }
+
 internal fun JSONObject.putNativePrinterConfiguration(printer: PrinterProfile): JSONObject = apply {
     put("bed_width_mm", printer.bedWidthMm.toDouble())
             .put("bed_depth_mm", printer.bedDepthMm.toDouble())
@@ -110,7 +120,7 @@ internal fun JSONObject.putNativePrinterConfiguration(printer: PrinterProfile): 
             .put("thumbnails_format", thumbnailFormatFromThumbnails(thumbnailsForExport(printer)))
             .put("thumbnails_internal", printer.thumbnailsInternal)
             .put("thumbnails_internal_switch", printer.thumbnailsInternalSwitch)
-            .put("host_type", printer.printHostType.configValue)
+            .put("host_type", printer.printHostType.orcaNativeConfigValue())
             .put("printer_agent", printer.printerAgent)
             .put("print_host", printer.printHost)
             .put("print_host_webui", printer.printHostWebUi)

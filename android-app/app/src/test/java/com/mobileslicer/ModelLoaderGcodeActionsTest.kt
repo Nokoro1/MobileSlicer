@@ -54,7 +54,7 @@ class ModelLoaderGcodeActionsTest {
     fun calibrationGcodeFileActionUsesDetectedCalibrationFilename() {
         val file = File.createTempFile("mobileslicer-calibration-", ".gcode")
         try {
-            file.writeText("; calib_flowrate_topinfill_special_order\nG1 X0 Y0\n")
+            file.writeText("; printing object selected-model-flowrate_20.stl\nG1 X0 Y0\n")
 
             val action = planGcodeFileAction(
                 gcodeFilePath = file.absolutePath,
@@ -149,7 +149,7 @@ class ModelLoaderGcodeActionsTest {
     fun uploadRequestUsesCalibrationFilenameWhenAvailable() {
         val file = File.createTempFile("mobileslicer-calibration-", ".gcode")
         try {
-            file.writeText("; calib_flowrate_topinfill_special_order\nG1 X0 Y0\n")
+            file.writeText("; printing object selected-model-flowrate_20.stl\nG1 X0 Y0\n")
             val request = planPrinterUploadRequest(
                 gcodeFilePath = file.absolutePath,
                 sendToPrinterInProgress = false,
@@ -161,6 +161,27 @@ class ModelLoaderGcodeActionsTest {
 
             assertEquals("Filament Flow Rate Calibration.gcode", request?.remoteFileName)
             assertEquals(PrinterUploadAction.UploadAndStart, request?.uploadAction)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun calibrationGcodeFileActionDoesNotLetFlowConfigOverrideCalibrationJobType() {
+        val file = File.createTempFile("mobileslicer-calibration-", ".gcode")
+        try {
+            file.writeText("; calib_flowrate_topinfill_special_order = 0\nM104 S230\n")
+
+            val action = planGcodeFileAction(
+                gcodeFilePath = file.absolutePath,
+                calibrationJob = calibrationJob(CalibrationType.TemperatureTower),
+                plateObjects = emptyList(),
+                summary = null,
+                filamentMaterial = "PLA",
+                fallbackName = "fallback.gcode"
+            )
+
+            assertEquals("Temperature Tower Calibration.gcode", action?.fileName)
         } finally {
             file.delete()
         }
@@ -227,9 +248,9 @@ class ModelLoaderGcodeActionsTest {
             transform = ViewerModelTransform(centerXmm = 5f, centerYmm = 5f)
         )
 
-    private fun calibrationJob(): CalibrationJob =
+    private fun calibrationJob(type: CalibrationType = CalibrationType.FlowRate): CalibrationJob =
         CalibrationJob(
-            type = CalibrationType.FlowRate,
+            type = type,
             printerName = "Printer",
             filamentName = "PLA",
             processName = "Process",

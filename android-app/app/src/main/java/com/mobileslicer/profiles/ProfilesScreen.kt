@@ -139,7 +139,6 @@ import com.mobileslicer.ui.theme.ThemeModeOption
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.nio.charset.StandardCharsets
 import java.util.Collections
 import java.util.Locale
 import java.util.zip.ZipInputStream
@@ -208,7 +207,9 @@ internal fun ProfilesScreen(
     var profileTransferMessage by remember { mutableStateOf<String?>(null) }
     var importProfilesInProgress by remember { mutableStateOf(false) }
     var exportProfilesInProgress by remember { mutableStateOf(false) }
-    var confirmExportProfiles by remember { mutableStateOf(false) }
+    var showingExportProfiles by remember { mutableStateOf(false) }
+    var pendingOrcaExportOption by remember { mutableStateOf<OrcaProfileExportOption?>(null) }
+    val orcaExportOptions = remember(store) { store.orcaProfileExportOptions() }
     val scope = rememberCoroutineScope()
     val importProfilesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -291,21 +292,26 @@ internal fun ProfilesScreen(
         }
     }
     val exportProfilesLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument(PROFILE_STORE_DEVICE_TRANSFER_MIME_TYPE)
-    ) { uri ->
-        if (uri == null) {
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val exportOption = pendingOrcaExportOption
+        pendingOrcaExportOption = null
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
             exportProfilesInProgress = false
             return@rememberLauncherForActivityResult
         }
         scope.launch {
             runCatching {
+                require(exportOption != null) { "Choose a profile export first." }
                 withContext(Dispatchers.IO) {
+                    val bytes = store.exportOrcaProfileOption(exportOption)
                     context.contentResolver.openOutputStream(uri)?.use { output ->
-                        output.write(store.toDeviceTransferJson(includePrinterSecrets = false).toByteArray(StandardCharsets.UTF_8))
+                        output.write(bytes)
                     } ?: error("Unable to open profile export destination.")
                 }
             }.onSuccess {
-                profileTransferMessage = "Exported profiles without printer API keys, access codes, usernames, or passwords."
+                profileTransferMessage = "Exported ${exportOption?.kind?.label.orEmpty()}."
             }.onFailure { error ->
                 profileTransferError = error.localizedMessage ?: "Unable to export profiles."
             }
@@ -313,27 +319,100 @@ internal fun ProfilesScreen(
         }
     }
 
-    if (confirmExportProfiles) {
+    if (showingExportProfiles) {
         AlertDialog(
-            onDismissRequest = { confirmExportProfiles = false },
-            title = { Text("Export profiles") },
+            onDismissRequest = { showingExportProfiles = false },
+            title = { Text("Export linked profiles") },
             text = {
-                Text("Printer API keys, Bambu access codes, usernames, and passwords will not be included in this export.")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmExportProfiles = false
-                        exportProfilesInProgress = true
-                        exportProfilesLauncher.launch(PROFILE_STORE_DEVICE_TRANSFER_FILE_NAME)
+                if (orcaExportOptions.isEmpty()) {
+                    Text("No linked printer, filament, or process profiles are available to export.")
+                } else {
+                    val groupedOptions = orcaExportOptions.groupBy { it.kind.groupLabel }
+                    val exportGroupOrder = listOf("Printer", "Filament", "Process")
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = ".orca_printer is the full linked printer export. ZIP choices write standalone preset JSON files.",
+                            color = appMutedColor(),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 360.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            exportGroupOrder.forEach { group ->
+                                val options = groupedOptions[group].orEmpty()
+                                if (options.isNotEmpty()) {
+                                    item(key = "header_$group") {
+                                        Text(
+                                            text = group,
+                                            color = appMutedColor(),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                                        )
+                                    }
+                                    items(options, key = { it.id }) { option ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    showingExportProfiles = false
+                                                    pendingOrcaExportOption = option
+                                                    exportProfilesInProgress = true
+                                                    exportProfilesLauncher.launch(
+                                                        Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                                            addCategory(Intent.CATEGORY_OPENABLE)
+                                                            type = option.kind.createDocumentMimeType
+                                                            putExtra(Intent.EXTRA_TITLE, option.fileName)
+                                                        }
+                                                    )
+                                                }
+                                                .padding(horizontal = 2.dp, vertical = 10.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                            ) {
+                                                Text(
+                                                    text = option.kind.label,
+                                                    color = titleColor,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = option.title,
+                                                    color = bodyColor,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = option.subtitle,
+                                                    color = appMutedColor(),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            Text(
+                                                text = option.kind.formatLabel,
+                                                color = appMutedColor(),
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                ) {
-                    Text("Export")
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { confirmExportProfiles = false }) {
-                    Text("Cancel")
+            confirmButton = {
+                TextButton(onClick = { showingExportProfiles = false }) {
+                    Text("Close")
                 }
             }
         )
@@ -702,13 +781,13 @@ internal fun ProfilesScreen(
                 shape = RoundedCornerShape(18.dp),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
             ) {
-                Text("Import Profiles")
+                Text("Import profiles")
             }
             TextButton(
                 onClick = {
-                    confirmExportProfiles = true
+                    showingExportProfiles = true
                 },
-                enabled = !importProfilesInProgress && !exportProfilesInProgress
+                enabled = !importProfilesInProgress && !exportProfilesInProgress && orcaExportOptions.isNotEmpty()
             ) {
                 Text("Export")
             }

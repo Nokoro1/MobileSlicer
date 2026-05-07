@@ -67,6 +67,57 @@ class ReleaseHardeningTest {
         assertNotNull(exportedComponents.single().children("intent-filter").singleOrNull())
     }
 
+    @Test
+    fun manifestCleartextIsDocumentedAndRuntimeGatedForPrinterNetworking() {
+        val application = androidManifest().documentElement.children("application").single()
+        assertEquals("true", application.androidAttr("usesCleartextTraffic"))
+
+        val securityDoc = repoFile("README/SECURITY.md").readText()
+        assertTrue(securityDoc.contains("Runtime printer networking refuses cleartext `http://` for non-local hosts"))
+
+        val urlGuards = File("src/main/java/com/mobileslicer/printerconnection/PrinterConnectionUrls.kt").readText()
+        assertTrue(urlGuards.contains("requireAllowedPrinterBaseUrl"))
+        assertTrue(urlGuards.contains("requireAllowedPrinterNetworkUrl"))
+        assertTrue(urlGuards.contains("Cleartext HTTP is only allowed for local printer addresses"))
+
+        val repository = File("src/main/java/com/mobileslicer/printerconnection/PrinterConnectionRepository.kt").readText()
+        assertTrue(repository.contains("requireAllowedPrinterNetworkUrl(url)"))
+    }
+
+    @Test
+    fun skirtOutputSupportIsVisibleInReleaseClaims() {
+        val releaseStatus = repoFile("README/RELEASE_STATUS.md").readText()
+        val truthRows = File("src/main/java/com/mobileslicer/profiles/ProfileSettingTruthRows.kt").readText()
+        val wrapperAdhesion = repoFile("engine-wrapper/orca_wrapper_config_adhesion_helpers.h").readText()
+        val releaseGateScript = repoFile("scripts/verify_android.sh").readText()
+
+        assertTrue(releaseStatus.contains("Skirt output is device-tested through the skirt parity matrix"))
+        assertTrue(truthRows.contains("Current skirt parity proof"))
+        assertTrue(wrapperAdhesion.contains("""config.set_deserialize_strict("skirt_loops", std::to_string(loops))"""))
+        assertTrue(wrapperAdhesion.contains("""extract_number(json, "skirts")"""))
+        assertTrue(releaseGateScript.contains("skirt-parity"))
+        assertTrue(releaseGateScript.contains("brim_skirt_config"))
+        assertTrue(releaseGateScript.contains(""""skirts":0"""))
+    }
+
+    @Test
+    fun automationIsExplicitlyDisabledForReleaseBuilds() {
+        val buildGradle = File("build.gradle.kts").readText()
+        assertTrue(buildGradle.contains("""buildConfigField("boolean", "AUTOMATION_ENABLED", "true")"""))
+        assertTrue(buildGradle.contains("""buildConfigField("boolean", "AUTOMATION_ENABLED", "false")"""))
+
+        val automationSource = File("src/main/java/com/mobileslicer/MainActivityAutomation.kt").readText()
+        assertTrue(automationSource.contains("BuildConfig.AUTOMATION_ENABLED"))
+        assertFalse(automationSource.contains("BuildConfig.DEBUG"))
+
+        val paintAutomationSource = File("src/main/java/com/mobileslicer/PaintInteractionAutomation.kt").readText()
+        val previewAutomationSource = File("src/main/java/com/mobileslicer/PreviewInteractionAutomation.kt").readText()
+        assertTrue(paintAutomationSource.contains("BuildConfig.AUTOMATION_ENABLED"))
+        assertTrue(previewAutomationSource.contains("BuildConfig.AUTOMATION_ENABLED"))
+        assertFalse(paintAutomationSource.contains("BuildConfig.DEBUG"))
+        assertFalse(previewAutomationSource.contains("BuildConfig.DEBUG"))
+    }
+
     private fun androidManifest() = parseXml(File("src/main/AndroidManifest.xml"))
 
     private fun resourceXml(relativePath: String) = parseXml(File("src/main/res", relativePath))
@@ -106,5 +157,11 @@ class ReleaseHardeningTest {
 
     private companion object {
         const val AndroidNamespace = "http://schemas.android.com/apk/res/android"
+
+        fun repoFile(relativePath: String): File =
+            generateSequence(File(".").absoluteFile) { it.parentFile }
+                .map { File(it, relativePath) }
+                .firstOrNull { it.exists() }
+                ?: File(relativePath)
     }
 }

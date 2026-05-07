@@ -3,7 +3,14 @@ add_library(orca_wrapper STATIC
     orca_wrapper_calibration.cpp
     orca_wrapper_gcode.cpp
     orca_wrapper_model_overrides.cpp
+    orca_native_paint.cpp
+    orca_wrapper_internal.cpp
+    orca_wrapper_paint_cut_api.cpp
+    orca_wrapper_planning_api.cpp
+    orca_wrapper_preview_api.cpp
     orca_wrapper_printable_validation.cpp
+    orca_wrapper_runtime.cpp
+    orca_wrapper_slice_export_api.cpp
     orca_wrapper_utils.cpp
 )
 

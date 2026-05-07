@@ -83,7 +83,7 @@ class ModelLoaderSliceActionsTest {
         )
 
         val start = plan as ModelLoaderSliceStartPlan.Start
-        assertEquals("Slice in progress\nNative slice inputs: Printer / PLA / 0.20mm", start.statusMessage)
+        assertEquals("Slicing\nPrinter / PLA / 0.20mm", start.statusMessage)
     }
 
     @Test
@@ -115,6 +115,7 @@ class ModelLoaderSliceActionsTest {
             plateFilamentSlots = emptyList(),
             fallbackFilament = store.activeConfiguration().filament,
             flushVolumes = null,
+            primeTowerPlacementOverride = null,
             printer = store.activeConfiguration().printer,
             modelFilePath = "/tmp/model.stl",
             preparedMesh = null,
@@ -153,6 +154,7 @@ class ModelLoaderSliceActionsTest {
             plateFilamentSlots = listOf(slot),
             fallbackFilament = store.activeConfiguration().filament,
             flushVolumes = null,
+            primeTowerPlacementOverride = null,
             printer = store.activeConfiguration().printer,
             modelFilePath = null,
             preparedMesh = null,
@@ -203,7 +205,7 @@ class ModelLoaderSliceActionsTest {
     fun calibrationSliceCompletionUsesDetectedCalibrationName() {
         val file = File.createTempFile("mobileslicer-calibration-", ".gcode")
         try {
-            file.writeText("; calib_flowrate_topinfill_special_order\nG1 X0 Y0\n")
+            file.writeText("; printing object selected-model-flowrate_20.stl\nG1 X0 Y0\n")
 
             val plan = planModelLoaderSliceCompletion(
                 result = SliceResult(
@@ -224,9 +226,39 @@ class ModelLoaderSliceActionsTest {
         }
     }
 
-    private fun calibrationJob(): CalibrationJob =
+    @Test
+    fun calibrationSliceCompletionDoesNotMisclassifyPressureAdvanceAsFlowRate() {
+        val file = File.createTempFile("mobileslicer-calibration-", ".gcode")
+        try {
+            file.writeText(
+                """
+                ; start pressure advance pattern for layer
+                ; calib_flowrate_topinfill_special_order = 0
+                G1 X0 Y0
+                """.trimIndent()
+            )
+
+            val plan = planModelLoaderSliceCompletion(
+                result = SliceResult(
+                    message = "Slice successful",
+                    sliced = true,
+                    gcodeFilePath = file.absolutePath,
+                    fileName = "ignored.gcode"
+                ),
+                calibrationJob = calibrationJob(CalibrationType.PressureAdvance),
+                fallbackFileName = "fallback.gcode",
+                previousPreviewKey = 0L
+            )
+
+            assertEquals("Pressure Advance Calibration.gcode", plan.gcodeFileName)
+        } finally {
+            file.delete()
+        }
+    }
+
+    private fun calibrationJob(type: CalibrationType = CalibrationType.FlowRate): CalibrationJob =
         CalibrationJob(
-            type = CalibrationType.FlowRate,
+            type = type,
             printerName = "Printer",
             filamentName = "PLA",
             processName = "Process",

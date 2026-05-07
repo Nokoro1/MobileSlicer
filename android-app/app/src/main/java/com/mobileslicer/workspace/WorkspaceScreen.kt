@@ -1,65 +1,64 @@
 package com.mobileslicer.workspace
 
+import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.util.Log
-import com.mobileslicer.appBackgroundGradient
+import androidx.activity.compose.BackHandler
 import com.mobileslicer.profiles.ActiveSlicerConfiguration
 import com.mobileslicer.profiles.FilamentProfile
 import com.mobileslicer.profiles.PrinterProfile
 import com.mobileslicer.printerconnection.BambuLanPrintOptions
 import com.mobileslicer.printerconnection.PrinterUploadAction
-import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import com.mobileslicer.appBodyColor
 import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.StlMesh
 import com.mobileslicer.nativebridge.NativeEngineBridge
-import com.mobileslicer.nativebridge.NativeEngineCalls
 import com.mobileslicer.nativebridge.NativeEngineHandle
+import com.mobileslicer.nativebridge.NativePaintCalls
 import com.mobileslicer.viewer.PrinterBedSpec
 import com.mobileslicer.viewer.GcodePreviewDisplayMode
 import com.mobileslicer.viewer.GcodePreviewPerformanceMode
-import com.mobileslicer.viewer.PreviewRangeSuggestion
 import com.mobileslicer.viewer.TouchModelViewerView
-import com.mobileslicer.viewer.ViewerFailure
 import com.mobileslicer.viewer.ViewerModelTransform
-import com.mobileslicer.viewer.ViewerPlateObject
-import com.mobileslicer.viewer.parsePreviewRangePlan
+import com.mobileslicer.viewer.ViewerPaintAction
+import com.mobileslicer.viewer.ViewerPaintBrushShape
+import com.mobileslicer.viewer.ViewerPaintMode
+import com.mobileslicer.viewer.ViewerPaintOverlay
+import com.mobileslicer.viewer.ViewerPaintSession
 import com.mobileslicer.ui.theme.LocalAppDarkTheme
 import com.mobileslicer.ui.theme.WorldViewColorOption
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-
-private const val PreviewRangePlanningByteThreshold = 8_000_000
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@SuppressLint("SuspiciousIndentation")
 internal fun WorkspaceScreen(
     modelLabel: String,
     modelFilePath: String?,
@@ -85,16 +84,29 @@ internal fun WorkspaceScreen(
     sliceTiming: SlicePipelineTiming?,
     previewEngineHandle: Long,
     previewSliceKey: Long,
+    nativeEngineHandle: Long,
     gcodePreviewPerformanceMode: GcodePreviewPerformanceMode,
+    activeStylusPaintOnly: Boolean,
     worldViewColor: WorldViewColorOption,
     modelTransform: ViewerModelTransform?,
+    workspacePlates: List<WorkspacePlate>,
+    activePlateId: Long,
     plateObjects: List<PlateObject>,
     filamentSlots: List<PlateFilamentSlot>,
     availableFilaments: List<FilamentProfile>,
     selectedPlateObjectId: Long?,
+    primeTowerPlacementOverride: PrimeTowerPlacementOverride?,
     onWorkspaceModeChanged: (WorkspaceMode) -> Unit,
     onModelTransformChanged: (ViewerModelTransform?) -> Unit,
+    onActivePlateChanged: (Long) -> Unit,
+    onAddPlate: () -> Unit,
+    onDuplicateActivePlate: () -> Unit,
+    onDeleteActivePlate: () -> Unit,
+    onRenameActivePlate: (String) -> Unit,
+    onMoveObjectToPlate: (Long, Long) -> Unit,
+    onMoveObjectToNewPlate: (Long) -> Unit,
     onPlateObjectSelected: (Long?) -> Unit,
+    onPrimeTowerPlacementChanged: (PrimeTowerPlacementOverride?, Boolean) -> Unit,
     onAddFilamentSlot: () -> Unit,
     onAssignFilamentSlotToSelected: (Int) -> Unit,
     onUpdateFilamentSlotColor: (Int, String) -> Unit,
@@ -105,7 +117,7 @@ internal fun WorkspaceScreen(
     onDeleteSelectedObject: () -> Unit,
     onCloneSelectedObject: () -> Unit,
     onAutoOrientObjects: () -> Unit,
-    onAutoArrangeObjects: () -> Unit,
+    onAutoArrangeObjects: (Boolean) -> Unit,
     onAddObject: () -> Unit,
     onOpenProfiles: () -> Unit,
     onSavePlate: (Bitmap?) -> Unit,
@@ -118,7 +130,12 @@ internal fun WorkspaceScreen(
     onOpenPrinter: () -> Unit,
     onPrinterStatus: suspend (PrinterProfile) -> String,
     onShare: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onPrepareNativePaintSessionRequested: (List<PlateObject>, PrinterBedSpec) -> Boolean = { _, _ -> true },
+    onNativePaintPayloadCommitted: (Long, ViewerPaintMode, String) -> Unit = { _, _, _ -> },
+    onCutRequested: (PlateObject, WorkspaceCutRequest) -> Unit = { _, _ -> },
+    onSplitToObjectsRequested: (PlateObject) -> Unit = {},
+    onSplitToPartsRequested: (PlateObject) -> Unit = {}
 ) {
     val darkTheme = LocalAppDarkTheme.current
     val configuration = LocalConfiguration.current
@@ -126,226 +143,287 @@ internal fun WorkspaceScreen(
     val accentColor = MaterialTheme.colorScheme.primary.toArgb()
     val worldColor = selectedWorkspaceWorldColor(worldViewColor).toArgb()
     var showTransformSheet by remember { mutableStateOf(false) }
+    var activeTransformTab by rememberSaveable { mutableStateOf(TransformToolTab.Move) }
+    var directMoveUnlocked by rememberSaveable { mutableStateOf(false) }
+    var primeTowerSelected by rememberSaveable { mutableStateOf(false) }
+    var layFacePickPending by remember { mutableStateOf(false) }
+    var cutPreviewRequest by remember { mutableStateOf<WorkspaceCutRequest?>(null) }
+    var cutOffsetOverride by remember { mutableStateOf<Float?>(null) }
     var showPrinterSendSheet by remember { mutableStateOf(false) }
     var showPreviewInfoSheet by remember { mutableStateOf(false) }
     var showObjectListSheet by remember { mutableStateOf(false) }
+    var showPlateSettingsSheet by remember { mutableStateOf(false) }
     var selectedFilamentSlotSheetIndex by remember { mutableStateOf<Int?>(null) }
     var missingPrinterConnectionDialog by remember { mutableStateOf(false) }
     var printerStatusMessage by remember(selectedPrinter.id) { mutableStateOf<String?>(null) }
     var workspaceControlsExpanded by rememberSaveable(workspaceMode, previewSliceKey, isLandscape) { mutableStateOf(!isLandscape) }
-    val selectedPlateObject = selectedPlateObjectId?.let { selectedId ->
-        plateObjects.firstOrNull { it.id == selectedId }
-    } ?: plateObjects.singleOrNull()
-    val filamentSlotsByIndex = filamentSlots.associateBy { it.index }
-    val viewerPlateObjects = plateObjects.mapNotNull { objectOnPlate ->
-        objectOnPlate.mesh?.let { mesh ->
-            ViewerPlateObject(
-                id = objectOnPlate.id,
-                label = objectOnPlate.label,
-                mesh = mesh,
-                transform = objectOnPlate.transform,
-                colorInt = filamentSlotsByIndex[objectOnPlate.filamentSlotIndex]?.colorHex?.let { slotColor(it).toArgb() },
-                selected = objectOnPlate.id == selectedPlateObject?.id
-            )
+    var activePaintMode by rememberSaveable { mutableStateOf<ViewerPaintMode?>(null) }
+    var paintControlsExpanded by rememberSaveable(activePaintMode, isLandscape) { mutableStateOf(true) }
+    var paintBrushShape by rememberSaveable { mutableStateOf(ViewerPaintBrushShape.Circle) }
+    var paintBrushRadiusMm by rememberSaveable { mutableFloatStateOf(PaintBrushDefaultRadiusMm) }
+    var paintBrushRadiusMigrated by remember { mutableStateOf(false) }
+    var paintSmartFillAngleDeg by rememberSaveable { mutableFloatStateOf(30f) }
+    var paintOverhangAngleDeg by rememberSaveable { mutableFloatStateOf(0f) }
+    var paintClippingEnabled by rememberSaveable { mutableStateOf(false) }
+    var paintSectionViewPosition by rememberSaveable { mutableFloatStateOf(1f) }
+    var paintAction by rememberSaveable { mutableStateOf(ViewerPaintAction.Paint) }
+    var activePaintColorSlotIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var paintModePrepareInProgress by remember { mutableStateOf(false) }
+    var nativePaintSessionActive by remember { mutableStateOf(false) }
+    var nativePaintAvailable by remember { mutableStateOf<Boolean?>(null) }
+    var nativePaintStatus by remember { mutableStateOf<String?>(null) }
+    var nativePaintOverlay by remember { mutableStateOf(ViewerPaintOverlay.Empty) }
+    var nativePaintSourceBounds by remember { mutableStateOf<MeshBounds?>(null) }
+    val paintModeOverlayCache = remember { mutableStateMapOf<ViewerPaintMode, ViewerPaintOverlay>() }
+    val livePaintOverlayRef = remember { arrayOf(ViewerPaintOverlay.Empty) }
+    var nativePaintUndoAvailable by remember { mutableStateOf(false) }
+    var nativePaintRedoAvailable by remember { mutableStateOf(false) }
+    val paintRuntime = remember { PaintRuntimeState() }
+    val paintCoroutineScope = rememberCoroutineScope()
+    val paintNativeHandle = NativeEngineHandle.fromRaw(nativeEngineHandle)
+    LaunchedEffect(Unit) {
+        if (!paintBrushRadiusMigrated) {
+            paintBrushRadiusMigrated = true
+            if (paintBrushRadiusMm !in PaintBrushMinRadiusMm..PaintBrushMaxRadiusMm) {
+                paintBrushRadiusMm = PaintBrushDefaultRadiusMm
+            }
         }
     }
+    val sceneState = rememberWorkspaceSceneState(
+        modelFilePath = modelFilePath,
+        modelFormat = modelFormat,
+        modelLoaded = modelLoaded,
+        preparedMesh = preparedMesh,
+        modelBounds = modelBounds,
+        viewerPreparationError = viewerPreparationError,
+        selectedPrinter = selectedPrinter,
+        activeConfiguration = activeConfiguration,
+        workspaceMode = workspaceMode,
+        sliceInProgress = sliceInProgress,
+        modelTransform = modelTransform,
+        workspacePlates = workspacePlates,
+        activePlateId = activePlateId,
+        plateObjects = plateObjects,
+        filamentSlots = filamentSlots,
+        selectedPlateObjectId = selectedPlateObjectId,
+        primeTowerPlacementOverride = primeTowerPlacementOverride,
+        showTransformSheet = showTransformSheet,
+        activeTransformTab = activeTransformTab,
+        directMoveUnlocked = directMoveUnlocked,
+        primeTowerSelected = primeTowerSelected,
+        activePaintMode = activePaintMode,
+        paintBrushShape = paintBrushShape,
+        paintBrushRadiusMm = paintBrushRadiusMm,
+        paintAction = paintAction,
+        activePaintColorSlotIndex = activePaintColorSlotIndex,
+        nativePaintOverlay = nativePaintOverlay,
+        livePaintOverlay = livePaintOverlayRef[0]
+    )
+    val selectedPlateObject = sceneState.selectedPlateObject
+    val activePlateLabel = sceneState.activePlateLabel
+    val filamentSlotsByIndex = sceneState.filamentSlotsByIndex
+    val paintModeActive = sceneState.paintModeActive
+    val paintSession = sceneState.paintSession
+    val viewerPlateObjects = sceneState.viewerPlateObjects
+    val viewerState = sceneState.viewerState
+    val canDragSelectedPlateObject = sceneState.canDragSelectedPlateObject
+    val loadedMesh = sceneState.loadedMesh
+    val effectiveModelTransform = sceneState.effectiveModelTransform
+    val meshSummary = sceneState.meshSummary
+    val sliceReady = sceneState.sliceReady
+    val transformReady = sceneState.transformReady
+    val cutPreviewBounds = sceneState.cutPreviewBounds
+    val primeTowerViewerState = sceneState.primeTowerViewerState
+    val primeTowerPlacement = primeTowerViewerState.placement
+    val canDragPrimeTower = primeTowerViewerState.canDrag
     val viewerSceneKey = when (workspaceMode) {
         WorkspaceMode.Preview -> "preview:$previewSliceKey:$previewEngineHandle"
         WorkspaceMode.Prepare -> "prepare:${selectedPrinter.id}:${modelFilePath.orEmpty()}"
+        WorkspaceMode.Paint -> "paint:${selectedPlateObject?.id}:${activePaintMode?.name}:${selectedPrinter.id}"
     }
     var runtimeViewerFailure by remember(viewerSceneKey) { mutableStateOf<com.mobileslicer.viewer.ViewerFailure?>(null) }
     var runtimeViewerReady by remember(viewerSceneKey) { mutableStateOf(false) }
+    var runtimeViewerEverReady by remember(viewerSceneKey) { mutableStateOf(false) }
     var viewerView by remember { mutableStateOf<TouchModelViewerView?>(null) }
     var previewPathVisibility by remember(previewSliceKey) { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     var previewDisplayMode by remember(previewSliceKey) { mutableStateOf(GcodePreviewDisplayMode.Auto) }
-    val viewerState = when {
-        modelFormat == ImportedModelFormat.ThreeMf -> WorkspaceViewerState.Unsupported
-        !modelLoaded || modelFilePath == null -> WorkspaceViewerState.Empty
-        modelFormat != ImportedModelFormat.Stl -> WorkspaceViewerState.Error(
-            title = "Unsupported viewer format",
-            message = "Viewer format not supported in this build."
-        )
-        selectedPlateObject?.mesh != null -> WorkspaceViewerState.Loaded(selectedPlateObject.mesh)
-        preparedMesh != null -> WorkspaceViewerState.Loaded(preparedMesh)
-        !viewerPreparationError.isNullOrBlank() -> WorkspaceViewerState.Error(
-            title = "STL parse failed",
-            message = viewerPreparationError
-        )
-        else -> WorkspaceViewerState.Preparing
-    }
-    val loadedMesh = (viewerState as? WorkspaceViewerState.Loaded)?.mesh
-    val effectiveModelTransform = selectedPlateObject?.transform ?: modelTransform ?: defaultViewerModelTransform(selectedPrinter.toBedSpec())
-    val meshSummary = loadedMesh?.let { formatMeshSummary(it, modelFormat) }
-    val sliceReady = loadedMesh != null || modelBounds != null || selectedPlateObject?.bounds != null
-    val transformReady = selectedPlateObject != null || loadedMesh != null || preparedMesh != null || modelBounds != null
+    val cutSession = workspaceCutSession(
+        workspaceMode = workspaceMode,
+        showTransformSheet = showTransformSheet,
+        activeTransformTab = activeTransformTab,
+        selectedPlateObject = selectedPlateObject,
+        cutPreviewBounds = cutPreviewBounds,
+        cutPreviewRequest = cutPreviewRequest
+    )
+    val cutToolActive = cutSession != null
+    val toolsActive = showTransformSheet && workspaceMode == WorkspaceMode.Prepare
     val previewLayerCount = (sliceSummary?.layerChangeCount ?: 0).coerceAtLeast(1)
     val exactPreviewVertexBudget = gcodePreviewPerformanceMode.vertexBudget
     val maxRangeLayerSpan = Int.MAX_VALUE
-    var previewLayerSelection by remember(previewSliceKey, previewLayerCount) {
-        mutableStateOf(
-            PreviewLayerSelection(
-                mode = PreviewLayerMode.Range,
-                singleLayer = previewLayerCount,
-                rangeStartLayer = 1,
-                rangeEndLayer = previewLayerCount
-            )
-        )
-    }
-    var previewLayerReloadToken by remember(previewSliceKey, previewLayerCount) { mutableLongStateOf(0L) }
-    var exactPreviewPlanReady by remember(previewSliceKey, previewLayerCount) { mutableStateOf(false) }
-    var autoPreviewRanges by remember(previewSliceKey, previewLayerCount) {
-        mutableStateOf<List<PreviewRangeSuggestion>>(emptyList())
-    }
-    var autoPreviewRangeIndex by remember(previewSliceKey, previewLayerCount) { mutableIntStateOf(0) }
+    val previewRuntime = rememberWorkspacePreviewRuntime(previewSliceKey, previewLayerCount)
     val suppressPreviewRangeFailure = workspaceMode == WorkspaceMode.Preview &&
-        autoPreviewRanges.size > 1 &&
+        previewRuntime.autoRanges.size > 1 &&
         runtimeViewerFailure?.isGcodePreviewRangeTooLarge() == true
     val effectiveRuntimeViewerFailure = runtimeViewerFailure.takeUnless { suppressPreviewRangeFailure }
     val effectiveViewerState = effectiveRuntimeViewerFailure?.let { failure ->
         WorkspaceViewerState.Error(failure.title, failure.detail)
     } ?: when {
-        loadedMesh != null && !runtimeViewerReady -> WorkspaceViewerState.Preparing
+        loadedMesh != null && !runtimeViewerReady && !runtimeViewerEverReady -> WorkspaceViewerState.Preparing
         else -> viewerState
     }
-    val selectedPreviewLayerRange = when (previewLayerSelection.mode) {
-        PreviewLayerMode.Single -> {
-            val layer = previewLayerSelection.singleLayer.coerceIn(1, previewLayerCount)
-            (layer - 1).toLong() to (layer - 1).toLong()
-        }
-        PreviewLayerMode.Range -> {
-            val start = previewLayerSelection.rangeStartLayer.coerceIn(1, previewLayerCount)
-            val unclampedEnd = previewLayerSelection.rangeEndLayer.coerceIn(start, previewLayerCount)
-            val end = if (maxRangeLayerSpan >= previewLayerCount) {
-                unclampedEnd
-            } else {
-                unclampedEnd.coerceAtMost(start + maxRangeLayerSpan - 1)
-            }
-            (start - 1).toLong() to (end - 1).toLong()
-        }
-    }
-    val activePreviewChunkBounds = autoPreviewRanges
-        .getOrNull(autoPreviewRangeIndex)
+    val selectedPreviewLayerRange = selectedPreviewLayerRange(
+        selection = previewRuntime.layerSelection,
+        previewLayerCount = previewLayerCount,
+        maxRangeLayerSpan = maxRangeLayerSpan
+    )
+    val activePreviewChunkBounds = previewRuntime.autoRanges
+        .getOrNull(previewRuntime.autoRangeIndex)
         ?.let { it.startLayer..it.endLayer }
     fun applyPreviewLayerSelection(selection: PreviewLayerSelection) {
-        if (autoPreviewRanges.isNotEmpty()) {
+        if (previewRuntime.autoRanges.isNotEmpty()) {
             val nextIndex = previewRangeIndexForSelection(
                 selection = selection,
-                ranges = autoPreviewRanges,
-                currentIndex = autoPreviewRangeIndex,
+                ranges = previewRuntime.autoRanges,
+                currentIndex = previewRuntime.autoRangeIndex,
                 layerCount = previewLayerCount
             )
-            if (nextIndex != autoPreviewRangeIndex) {
-                autoPreviewRangeIndex = nextIndex
-                previewLayerReloadToken++
+            if (nextIndex != previewRuntime.autoRangeIndex) {
+                previewRuntime.autoRangeIndex = nextIndex
+                previewRuntime.layerReloadToken++
             }
         }
-        previewLayerSelection = selection
+        previewRuntime.layerSelection = selection
     }
-    LaunchedEffect(workspaceMode, previewSliceKey, previewLayerCount, previewEngineHandle, sliceSummary?.byteCount, exactPreviewVertexBudget) {
-        if (workspaceMode != WorkspaceMode.Preview || previewSliceKey <= 0L || previewEngineHandle == 0L) {
-            exactPreviewPlanReady = workspaceMode != WorkspaceMode.Preview
-            return@LaunchedEffect
-        }
-        if (
-            exactPreviewVertexBudget >= GcodePreviewPerformanceMode.HARD_VERTEX_CEILING &&
-            (sliceSummary?.byteCount ?: 0) in 1 until PreviewRangePlanningByteThreshold
-        ) {
-            autoPreviewRanges = emptyList()
-            autoPreviewRangeIndex = 0
-            previewLayerSelection = PreviewLayerSelection(
-                mode = PreviewLayerMode.Range,
-                singleLayer = previewLayerCount,
-                rangeStartLayer = 1,
-                rangeEndLayer = previewLayerCount
-            )
-            exactPreviewPlanReady = true
-            return@LaunchedEffect
-        }
-        exactPreviewPlanReady = false
-        runtimeViewerFailure = null
-        val plannedRanges = withContext(Dispatchers.Default) {
-            val handle = NativeEngineHandle.fromRaw(previewEngineHandle) ?: return@withContext emptyList()
-            val rawPlan = NativeEngineCalls.planLatestSlicePreviewRanges(
-                handle = handle,
-                minLayer = 0L,
-                maxLayer = (previewLayerCount - 1).toLong(),
-                vertexBudget = exactPreviewVertexBudget
-            )
-            parsePreviewRangePlan(rawPlan)
-        }
-        if (plannedRanges.size > 1) {
-            autoPreviewRanges = plannedRanges
-            autoPreviewRangeIndex = 0
-            previewLayerSelection = plannedRanges.first().toPreviewLayerSelection()
-        } else {
-            autoPreviewRanges = emptyList()
-            autoPreviewRangeIndex = 0
-            previewLayerSelection = PreviewLayerSelection(
-                mode = PreviewLayerMode.Range,
-                singleLayer = previewLayerCount,
-                rangeStartLayer = 1,
-                rangeEndLayer = previewLayerCount
-            )
-        }
-        exactPreviewPlanReady = true
-    }
-    LaunchedEffect(showPreviewInfoSheet, workspaceMode, previewSliceKey, previewEngineHandle, sliceSummary?.previewInfo?.hasRichData, sliceInProgress) {
-        if (sliceInProgress || !showPreviewInfoSheet || workspaceMode != WorkspaceMode.Preview || previewSliceKey <= 0L || previewEngineHandle == 0L) return@LaunchedEffect
-        if (sliceSummary?.previewInfo?.hasRichData == true) return@LaunchedEffect
-        val enrichedSummary = withContext(Dispatchers.Default) {
-            val handle = NativeEngineHandle.fromRaw(previewEngineHandle) ?: return@withContext null
-            GcodeSummaryParser.fromNativeSummary(NativeEngineCalls.getEnrichedGcodeSummary(handle))
-        }
-        if (enrichedSummary != null) {
-            onSliceSummaryChanged(enrichedSummary)
-        }
-    }
-    LaunchedEffect(runtimeViewerReady, loadedMesh) {
-        if (runtimeViewerReady && loadedMesh != null) {
-            onFirstVisibleWorkspaceFrame()
-        }
-    }
+    WorkspacePreviewEffects(
+        workspaceMode = workspaceMode,
+        previewSliceKey = previewSliceKey,
+        previewLayerCount = previewLayerCount,
+        previewEngineHandle = previewEngineHandle,
+        previewVertexBudget = exactPreviewVertexBudget,
+        sliceSummary = sliceSummary,
+        sliceInProgress = sliceInProgress,
+        showPreviewInfoSheet = showPreviewInfoSheet,
+        loadedMesh = loadedMesh,
+        runtimeViewerReady = runtimeViewerReady,
+        runtimeViewerFailure = runtimeViewerFailure,
+        previewPathVisibility = previewPathVisibility,
+        viewerView = viewerView,
+        previewRuntime = previewRuntime,
+        onRuntimeViewerFailureChanged = { runtimeViewerFailure = it },
+        onSliceSummaryChanged = onSliceSummaryChanged,
+        onFirstVisibleWorkspaceFrame = onFirstVisibleWorkspaceFrame,
+        onFirstVisiblePreviewFrame = onFirstVisiblePreviewFrame
+    )
     LaunchedEffect(loadedMesh, selectedPrinter.id, modelTransform, plateObjects.size) {
         if (plateObjects.isEmpty() && loadedMesh != null && modelTransform == null) {
             onModelTransformChanged(defaultViewerModelTransform(selectedPrinter.toBedSpec()))
         }
     }
-    LaunchedEffect(runtimeViewerReady, workspaceMode, previewSliceKey) {
-        if (runtimeViewerReady && workspaceMode == WorkspaceMode.Preview && previewSliceKey > 0L) {
-            onFirstVisiblePreviewFrame()
-        }
-    }
-    LaunchedEffect(runtimeViewerFailure, workspaceMode, previewSliceKey) {
-        val suggestions = runtimeViewerFailure?.previewRangeSuggestions.orEmpty()
-        if (workspaceMode != WorkspaceMode.Preview || suggestions.isEmpty()) {
-            return@LaunchedEffect
-        }
-        val chunkRanges = suggestions.filter { it.label.startsWith("Range ") }.ifEmpty { suggestions }
-        val firstRange = chunkRanges.firstOrNull() ?: return@LaunchedEffect
-        autoPreviewRanges = chunkRanges
-        autoPreviewRangeIndex = 0
-        previewLayerSelection = firstRange.toPreviewLayerSelection()
-        previewLayerReloadToken++
-        runtimeViewerFailure = null
-    }
-    LaunchedEffect(viewerView, previewPathVisibility, workspaceMode, previewSliceKey, sliceSummary) {
-        val view = viewerView ?: return@LaunchedEffect
-        if (workspaceMode != WorkspaceMode.Preview || previewSliceKey <= 0L) return@LaunchedEffect
-        sliceSummary?.previewInfo?.lineTypes.orEmpty().forEach { row ->
-            val key = previewLineVisibilityKey(row)
-            previewPathVisibility[key]?.let { visible ->
-                view.setGcodePathVisibility(row.kind.nativeKind, row.nativeId, visible)
-            }
-        }
-    }
     LaunchedEffect(workspaceMode) {
         if (workspaceMode != WorkspaceMode.Prepare) {
             showTransformSheet = false
+            directMoveUnlocked = false
         }
         if (workspaceMode != WorkspaceMode.Preview) {
             showPrinterSendSheet = false
             showPreviewInfoSheet = false
         }
+        if (workspaceMode != WorkspaceMode.Paint) {
+            activePaintMode = null
+        } else {
+            showTransformSheet = false
+            showObjectListSheet = false
+            selectedFilamentSlotSheetIndex = null
+        }
+    }
+    LaunchedEffect(plateObjects.size, selectedPlateObjectId) {
+        if (plateObjects.size == 1 && selectedPlateObjectId != plateObjects.first().id) {
+            onPlateObjectSelected(plateObjects.first().id)
+        }
+    }
+    LaunchedEffect(primeTowerPlacement) {
+        if (primeTowerPlacement == null) {
+            primeTowerSelected = false
+        }
+    }
+    LaunchedEffect(filamentSlots, activePaintColorSlotIndex) {
+        val currentSlot = activePaintColorSlotIndex
+        if (currentSlot == null || filamentSlots.none { it.index == currentSlot }) {
+            activePaintColorSlotIndex = filamentSlots.firstOrNull()?.index
+        }
+    }
+    LaunchedEffect(activePaintMode, paintBrushShape, paintAction) {
+        val mode = activePaintMode ?: return@LaunchedEffect
+        val normalizedTool = normalizedPaintToolState(mode, paintBrushShape, paintAction)
+        paintBrushShape = normalizedTool.brushShape
+        paintAction = normalizedTool.action
+    }
+    val paintController = WorkspacePaintRuntimeController(
+        paintRuntime = paintRuntime,
+        paintCoroutineScope = paintCoroutineScope,
+        paintNativeHandle = paintNativeHandle,
+        paintSession = paintSession,
+        activePaintMode = activePaintMode,
+        paintBrushShape = paintBrushShape,
+        paintBrushRadiusMm = paintBrushRadiusMm,
+        paintSmartFillAngleDeg = paintSmartFillAngleDeg,
+        paintOverhangAngleDeg = paintOverhangAngleDeg,
+        paintClippingEnabled = paintClippingEnabled,
+        paintSectionViewPosition = paintSectionViewPosition,
+        paintAction = paintAction,
+        activePaintColorSlotIndex = activePaintColorSlotIndex,
+        nativePaintSessionActive = nativePaintSessionActive,
+        nativePaintOverlay = nativePaintOverlay,
+        nativePaintSourceBounds = nativePaintSourceBounds,
+        nativePaintOverlayProvider = { nativePaintOverlay },
+        nativePaintSourceBoundsProvider = { nativePaintSourceBounds },
+        nativePaintSessionActiveProvider = { nativePaintSessionActive },
+        paintModeOverlayCache = paintModeOverlayCache,
+        livePaintOverlayRef = livePaintOverlayRef,
+        selectedPlateObject = selectedPlateObject,
+        plateObjects = plateObjects,
+        filamentSlots = filamentSlots,
+        selectedPrinter = selectedPrinter,
+        modelTransform = modelTransform,
+        workspaceMode = workspaceMode,
+        activeStylusPaintOnly = activeStylusPaintOnly,
+        viewerView = viewerView,
+        viewerViewProvider = { viewerView },
+        onNativePaintSessionActiveChanged = { nativePaintSessionActive = it },
+        onNativePaintAvailableChanged = { nativePaintAvailable = it },
+        onNativePaintStatusChanged = { nativePaintStatus = it },
+        onNativePaintOverlayChanged = { nativePaintOverlay = it },
+        onNativePaintSourceBoundsChanged = { nativePaintSourceBounds = it },
+        onNativePaintUndoAvailableChanged = { nativePaintUndoAvailable = it },
+        onNativePaintRedoAvailableChanged = { nativePaintRedoAvailable = it },
+        onPaintModePrepareInProgressChanged = { paintModePrepareInProgress = it },
+        onActivePaintModeChanged = { activePaintMode = it },
+        onPaintBrushShapeChanged = { paintBrushShape = it },
+        onPaintActionChanged = { paintAction = it },
+        onActivePaintColorSlotIndexChanged = { activePaintColorSlotIndex = it },
+        onPrepareNativePaintSessionRequested = onPrepareNativePaintSessionRequested,
+        onNativePaintPayloadCommitted = onNativePaintPayloadCommitted,
+        onPlateObjectSelected = onPlateObjectSelected,
+        onWorkspaceModeChanged = onWorkspaceModeChanged
+    )
+    LaunchedEffect(paintModeActive, selectedPlateObject?.id, activePaintMode, nativeEngineHandle) {
+        paintController.prepareNativeSessionForCurrentSelection()
+    }
+    LaunchedEffect(
+        paintBrushShape,
+        paintBrushRadiusMm,
+        paintSmartFillAngleDeg,
+        paintOverhangAngleDeg,
+        paintClippingEnabled,
+        paintAction,
+        activePaintColorSlotIndex,
+        nativePaintSessionActive
+    ) {
+        if (!nativePaintSessionActive) return@LaunchedEffect
+        paintController.configureNativePaintTool()
+    }
+    BackHandler(enabled = paintModeActive) {
+        paintController.exitPaintMode()
     }
     LaunchedEffect(sliceInProgress) {
         if (sliceInProgress) {
@@ -362,17 +440,7 @@ internal fun WorkspaceScreen(
             delay(3_000)
         }
     }
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = appBackgroundGradient()
-                )
-            )
-            .statusBarsPadding()
-            .navigationBarsPadding()
-    ) {
+    WorkspaceScreenFrame(modifier = modifier) {
         WorkspaceViewerSurface(
             modelFormat = modelFormat,
             preparedMesh = if (viewerPlateObjects.isEmpty()) loadedMesh else null,
@@ -383,17 +451,32 @@ internal fun WorkspaceScreen(
             worldColor = worldColor,
             modelTransform = if (viewerPlateObjects.isEmpty()) effectiveModelTransform else null,
             plateObjects = viewerPlateObjects,
-            previewEngineHandle = if (workspaceMode == WorkspaceMode.Preview && exactPreviewPlanReady) previewEngineHandle else 0L,
-            previewSliceKey = if (workspaceMode == WorkspaceMode.Preview && exactPreviewPlanReady) previewSliceKey else 0L,
+            previewEngineHandle = if (workspaceMode == WorkspaceMode.Preview && previewRuntime.exactPlanReady) previewEngineHandle else 0L,
+            previewSliceKey = if (workspaceMode == WorkspaceMode.Preview && previewRuntime.exactPlanReady) previewSliceKey else 0L,
             gcodePreviewVertexBudget = exactPreviewVertexBudget,
             gcodeLayerMin = selectedPreviewLayerRange.first,
             gcodeLayerMax = selectedPreviewLayerRange.second,
-            gcodeLayerReloadToken = previewLayerReloadToken,
+            gcodeLayerReloadToken = previewRuntime.layerReloadToken,
             gcodeDisplayMode = if (sliceInProgress) null else previewDisplayMode,
+            paintSession = paintSession,
+            activeStylusPaintOnly = activeStylusPaintOnly,
+            cutSession = cutSession,
+            onCutOffsetChanged = { nextOffset ->
+                cutOffsetOverride = nextOffset
+                cutPreviewRequest = cutPreviewRequest?.copy(heightMm = nextOffset)
+            },
+            onCutConnectorPointAdded = { point ->
+                val currentRequest = cutPreviewRequest
+                if (currentRequest != null && currentRequest.connectorKind != WorkspaceCutConnectorKind.None) {
+                    cutPreviewRequest = currentRequest.copy(
+                        connectorPositions = (currentRequest.connectorPositions + point).takeLast(64)
+                    )
+                }
+            },
             onRuntimeFailureChanged = { failure ->
                 runtimeViewerFailure = if (
                     workspaceMode == WorkspaceMode.Preview &&
-                    autoPreviewRanges.size > 1 &&
+                    previewRuntime.autoRanges.size > 1 &&
                     failure?.isGcodePreviewRangeTooLarge() == true
                 ) {
                     null
@@ -401,7 +484,12 @@ internal fun WorkspaceScreen(
                     failure
                 }
             },
-            onViewerReadyChanged = { runtimeViewerReady = it },
+            onViewerReadyChanged = { ready ->
+                runtimeViewerReady = ready
+                if (ready) {
+                    runtimeViewerEverReady = true
+                }
+            },
             onPreviewRuntimeMetrics = { metrics ->
                 Log.i(
                     "MobileSlicerPerf",
@@ -426,23 +514,114 @@ internal fun WorkspaceScreen(
                 )
             },
             onObjectSelected = { objectId ->
-                onPlateObjectSelected(objectId)
+                if (!paintModeActive) {
+                    if (objectId == PrimeTowerVirtualObjectId) {
+                        primeTowerSelected = true
+                        if (selectedPlateObject == null) {
+                            plateObjects.firstOrNull()?.id?.let(onPlateObjectSelected)
+                        }
+                    } else {
+                        primeTowerSelected = false
+                        onPlateObjectSelected(objectId)
+                    }
+                }
             },
-            onViewerViewChanged = { view -> viewerView = view }
+            onObjectDrag = { objectId, deltaXmm, deltaYmm, finished ->
+                if (objectId == PrimeTowerVirtualObjectId && primeTowerPlacement != null) {
+                    if (finished) {
+                        onPrimeTowerPlacementChanged(primeTowerPlacementOverride, true)
+                    } else if (canDragPrimeTower) {
+                        val margin = 5f + primeTowerPlacement.brimWidthMm
+                        val nextX = (primeTowerPlacement.xMm + deltaXmm)
+                            .coerceIn(margin, selectedPrinter.toBedSpec().widthMm - primeTowerPlacement.widthMm - margin)
+                        val nextY = (primeTowerPlacement.yMm + deltaYmm)
+                            .coerceIn(margin, selectedPrinter.toBedSpec().depthMm - primeTowerPlacement.depthMm - margin)
+                        onPrimeTowerPlacementChanged(PrimeTowerPlacementOverride(nextX, nextY), false)
+                    }
+                } else if (!finished && canDragSelectedPlateObject && objectId == selectedPlateObject?.id) {
+                    selectedPlateObject?.transform?.let { currentTransform ->
+                        onModelTransformChanged(
+                            currentTransform.copy(
+                                centerXmm = (currentTransform.centerXmm + deltaXmm)
+                                    .coerceIn(0f, selectedPrinter.toBedSpec().widthMm),
+                                centerYmm = (currentTransform.centerYmm + deltaYmm)
+                                    .coerceIn(0f, selectedPrinter.toBedSpec().depthMm)
+                            )
+                        )
+                    }
+                }
+            },
+            onObjectHitSelected = { hit ->
+                if (!layFacePickPending) {
+                    false
+                } else {
+                    layFacePickPending = false
+                    val targetObject = selectedPlateObject
+                    if (hit != null && targetObject != null && hit.objectId == targetObject.id) {
+                        val layFaceNormal = targetObject.mesh?.let { mesh ->
+                            clusteredLayFaceNormal(
+                                mesh = mesh,
+                                triangleIndex = hit.triangleIndex,
+                                transform = targetObject.transform,
+                                fallbackWorldNormal = hit.normal
+                            )
+                        } ?: hit.normal
+                        layFaceOnBedTransform(
+                            transform = targetObject.transform,
+                            worldNormalX = layFaceNormal.xMm,
+                            worldNormalY = layFaceNormal.yMm,
+                            worldNormalZ = layFaceNormal.zMm,
+                            bounds = targetObject.mesh?.bounds ?: targetObject.bounds
+                        )?.let { next ->
+                            onModelTransformChanged(next)
+                        }
+                    }
+                    true
+                }
+            },
+            onPaintHitTest = paintController::hitTest,
+            onPaintStrokeBegin = paintController::beginPaintStroke,
+            onPaintStrokeMove = paintController::enqueuePaintMove,
+            onPaintStrokeEnd = { committed ->
+                paintController.commitNativePaintStroke(committed)
+            },
+            onViewerViewChanged = { view ->
+                val previousView = viewerView
+                viewerView = view
+                if (view != null && view !== previousView && workspaceMode == WorkspaceMode.Paint) {
+                    view.setPaintOverlay(paintController.currentPaintDisplayOverlay())
+                }
+            }
         )
-        WorkspaceTopBar(
-            onBack = onBack,
-            printerTitle = selectedPrinter.name,
-            printerBed = selectedPrinter.toBedSpec(),
+        if (paintModeActive && isLandscape && paintControlsExpanded) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .noRippleTap { paintControlsExpanded = false }
+            )
+        }
+        WorkspaceHeaderChrome(
+            paintModeActive = paintModeActive,
+            paintSession = paintSession,
+            paintObjectLabel = paintHeaderLabel(nativePaintStatus, selectedPlateObject?.label.orEmpty()),
+            nativePaintSessionActive = nativePaintSessionActive,
+            nativePaintAvailable = nativePaintAvailable,
+            nativePaintUndoAvailable = nativePaintUndoAvailable,
+            nativePaintRedoAvailable = nativePaintRedoAvailable,
+            selectedPrinter = selectedPrinter,
             workspaceMode = workspaceMode,
-            previewEnabled = hasGeneratedGcode,
-            transformEnabled = workspaceMode == WorkspaceMode.Prepare && transformReady && !sliceInProgress,
-            deleteEnabled = workspaceMode == WorkspaceMode.Prepare && selectedPlateObject != null && !sliceInProgress,
-            cloneEnabled = workspaceMode == WorkspaceMode.Prepare && selectedPlateObject != null && !sliceInProgress,
+            hasGeneratedGcode = hasGeneratedGcode,
+            transformReady = transformReady,
+            sliceInProgress = sliceInProgress,
+            selectedPlateObject = selectedPlateObject,
             canSendToPrinter = canSendToPrinter,
             sendToPrinterInProgress = sendToPrinterInProgress,
-            printerStatusLabel = compactPrinterStatusLabel(printerStatusMessage),
-            showPreviewInfo = workspaceMode == WorkspaceMode.Preview && sliceSummary != null && !sliceInProgress,
+            printerStatusMessage = printerStatusMessage,
+            sliceSummary = sliceSummary,
+            onBack = onBack,
+            onPaintBack = paintController::exitPaintMode,
+            onUndo = { paintController.runNativePaintHistoryCommand(NativePaintCalls::undo) },
+            onRedo = { paintController.runNativePaintHistoryCommand(NativePaintCalls::redo) },
             onTransformClick = { showTransformSheet = !showTransformSheet },
             onDeleteObject = onDeleteSelectedObject,
             onCloneObject = onCloneSelectedObject,
@@ -462,226 +641,309 @@ internal fun WorkspaceScreen(
                 }
             },
             onOpenPreviewInfo = { showPreviewInfoSheet = true },
-            onModeClick = {
-                val nextMode = if (workspaceMode == WorkspaceMode.Prepare) {
-                    WorkspaceMode.Preview
-                } else {
-                    WorkspaceMode.Prepare
-                }
-                onWorkspaceModeChanged(nextMode)
-            },
+            onWorkspaceModeChanged = onWorkspaceModeChanged,
             modifier = Modifier.align(Alignment.TopStart)
         )
-        Column(
-            modifier = Modifier.align(Alignment.BottomCenter),
-            verticalArrangement = Arrangement.spacedBy(0.dp)
-        ) {
-            if (workspaceMode == WorkspaceMode.Prepare && filamentSlots.isNotEmpty()) {
-                WorkspaceFilamentStrip(
-                    slots = filamentSlots,
-                    selectedSlotIndex = selectedPlateObject?.filamentSlotIndex ?: 1,
-                    onSlotClick = { selectedFilamentSlotSheetIndex = it },
-                    onAddSlot = onAddFilamentSlot
-                )
-            }
-            WorkspaceControlPanel(
-                modelLabel = modelLabel,
-                printerTitle = selectedPrinter.name,
-                printerBed = selectedPrinter.toBedSpec(),
-                modelFormat = modelFormat,
-                viewerState = effectiveViewerState,
-                meshSummary = meshSummary,
-                importTiming = importTiming,
-                workspacePreparationTiming = workspacePreparationTiming,
-                firstVisibleWorkspaceFrameMs = firstVisibleWorkspaceFrameMs,
-                firstVisiblePreviewFrameMs = firstVisiblePreviewFrameMs,
-                activeConfiguration = activeConfiguration,
-                workspaceStatus = workspaceStatus,
-                workspaceMode = workspaceMode,
-                sliceInProgress = sliceInProgress,
-                sendToPrinterInProgress = sendToPrinterInProgress,
-                sliceReady = sliceReady,
-                hasGeneratedGcode = hasGeneratedGcode,
-                canSendToPrinter = canSendToPrinter,
-                sliceSummary = sliceSummary,
-                sliceTiming = sliceTiming,
-                previewLayerCount = previewLayerCount,
-                previewLayerSelection = previewLayerSelection,
-                maxRangeLayerSpan = maxRangeLayerSpan,
-                previewRangeSliderBounds = activePreviewChunkBounds,
-                previewRangeChunks = autoPreviewRanges,
-                previewRangeChunkIndex = autoPreviewRangeIndex,
-                printerStatusLabel = compactPrinterStatusLabel(printerStatusMessage),
-                controlsExpanded = workspaceControlsExpanded,
-                compactControlsEnabled = isLandscape,
-                modelTransform = effectiveModelTransform,
-                objectCount = plateObjects.size,
-                selectedObjectLabel = selectedPlateObject?.label,
-                onPreviewLayerSelectionChanged = { applyPreviewLayerSelection(it) },
-                onPreviewLayerSelectionCommitted = {
-                    // Range scrubbing must remain live. Commit records the final
-                    // value only; rebuilding the native preview here makes
-                    // bottom-to-top scrubbing visibly stall on large G-code.
-                    applyPreviewLayerSelection(it)
-                },
-                onPreviousPreviewRangeChunk = {
-                    if (autoPreviewRanges.isNotEmpty()) {
-                        val nextIndex = if (autoPreviewRangeIndex <= 0) {
-                            autoPreviewRanges.lastIndex
-                        } else {
-                            autoPreviewRangeIndex - 1
-                        }
-                        val nextRange = autoPreviewRanges[nextIndex]
-                        autoPreviewRangeIndex = nextIndex
-                        previewLayerSelection = nextRange.toPreviewLayerSelection()
-                        previewLayerReloadToken++
-                    }
-                },
-                onNextPreviewRangeChunk = {
-                    if (autoPreviewRanges.isNotEmpty()) {
-                        val nextIndex = (autoPreviewRangeIndex + 1) % autoPreviewRanges.size
-                        val nextRange = autoPreviewRanges[nextIndex]
-                        autoPreviewRangeIndex = nextIndex
-                        previewLayerSelection = nextRange.toPreviewLayerSelection()
-                        previewLayerReloadToken++
-                    }
-                },
-                onControlsExpandedChange = { workspaceControlsExpanded = it },
-                onModelTransformChanged = onModelTransformChanged,
-                onOpenObjectList = { showObjectListSheet = true },
-                onOpenProfiles = onOpenProfiles,
-                onSavePlate = {
-                    val view = viewerView
-                    if (view == null) {
-                        onSavePlate(null)
-                    } else {
-                        view.captureCurrentFrame { bitmap ->
-                            onSavePlate(bitmap)
-                        }
-                    }
-                },
-                onSlice = onSlice,
-                onExport = onExport,
-                onShare = onShare
+        if (layFacePickPending) {
+            LayFacePickHint(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = if (toolsActive) 150.dp else 62.dp)
             )
         }
-        if (showTransformSheet && workspaceMode == WorkspaceMode.Prepare) {
+        if (workspaceMode == WorkspaceMode.Prepare && selectedPlateObject != null && !paintModeActive && !showTransformSheet) {
+            DirectMoveLockButton(
+                unlocked = directMoveUnlocked,
+                enabled = !sliceInProgress,
+                onToggle = { directMoveUnlocked = !directMoveUnlocked },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 62.dp, end = 12.dp)
+            )
+        }
+        if (toolsActive) {
             TransformPopoverContent(
                 printerBed = selectedPrinter.toBedSpec(),
-                transform = effectiveModelTransform,
+                transform = effectiveModelTransform ?: defaultViewerModelTransform(selectedPrinter.toBedSpec()),
+                selectedTab = activeTransformTab,
+                onSelectedTabChanged = { activeTransformTab = it },
                 onTransformChanged = onModelTransformChanged,
                 onAutoOrientObjects = onAutoOrientObjects,
                 onAutoArrangeObjects = onAutoArrangeObjects,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 64.dp, start = 24.dp, end = 24.dp)
-            )
-        }
-        if (showPrinterSendSheet && workspaceMode == WorkspaceMode.Preview) {
-            PrinterSendSheet(
-                sending = sendToPrinterInProgress,
-                suggestedFileName = currentGcodeFileName,
-                printerProfile = selectedPrinter,
-                onUpload = { remoteFileName, bambuOptions ->
-                    showPrinterSendSheet = false
-                    onSendToPrinter(PrinterUploadAction.UploadOnly, remoteFileName, bambuOptions)
+                onLayFaceRequested = {
+                    layFacePickPending = true
                 },
-                onUploadAndStart = { remoteFileName, bambuOptions ->
-                    showPrinterSendSheet = false
-                    onSendToPrinter(PrinterUploadAction.UploadAndStart, remoteFileName, bambuOptions)
+                onPaintModeSelected = { mode ->
+                    showTransformSheet = false
+                    paintController.enterPaintMode(mode, paintModePrepareInProgress)
                 },
-                onQueue = { remoteFileName, bambuOptions ->
-                    showPrinterSendSheet = false
-                    onSendToPrinter(PrinterUploadAction.Queue, remoteFileName, bambuOptions)
-                },
-                onDismiss = { showPrinterSendSheet = false }
-            )
-        }
-        if (showPreviewInfoSheet && workspaceMode == WorkspaceMode.Preview && sliceSummary != null && !sliceInProgress) {
-            PreviewInfoSheet(
-                summary = sliceSummary,
-                lineVisibility = previewPathVisibility,
-                displayMode = previewDisplayMode,
-                onDisplayModeChanged = { mode ->
-                    previewDisplayMode = mode
-                    viewerView?.setGcodeDisplayMode(mode)
-                },
-                onLineVisibilityChanged = { row, visible ->
-                    val key = previewLineVisibilityKey(row)
-                    previewPathVisibility = previewPathVisibility.toMutableMap().apply { put(key, visible) }
-                    viewerView?.setGcodePathVisibility(row.kind.nativeKind, row.nativeId, visible)
-                },
-                onDismiss = { showPreviewInfoSheet = false }
-            )
-        }
-        if (showObjectListSheet && workspaceMode == WorkspaceMode.Prepare && plateObjects.size > 1) {
-            PlateObjectListSheet(
-                plateObjects = plateObjects,
-                filamentSlots = filamentSlots,
-                selectedPlateObjectId = selectedPlateObject?.id,
-                onObjectSelected = { objectId ->
-                    onPlateObjectSelected(objectId)
-                    showObjectListSheet = false
-                },
-                onDismiss = { showObjectListSheet = false }
-            )
-        }
-        selectedFilamentSlotSheetIndex?.let { slotIndex ->
-            val slot = filamentSlots.firstOrNull { it.index == slotIndex }
-            if (slot != null && workspaceMode == WorkspaceMode.Prepare) {
-                FilamentSlotSheet(
-                    slot = slot,
-                    selectedObjectLabel = selectedPlateObject?.label,
-                    availableFilaments = availableFilaments,
-                    physicalNozzleCount = selectedPrinter.physicalNozzleCount(),
-                    onAssignToSelected = {
-                        onAssignFilamentSlotToSelected(slot.index)
-                        selectedFilamentSlotSheetIndex = null
-                    },
-                    onColorSelected = { colorHex ->
-                        onUpdateFilamentSlotColor(slot.index, colorHex)
-                    },
-                    onFilamentSelected = { filament ->
-                        onUpdateFilamentSlotProfile(slot.index, filament)
-                        selectedFilamentSlotSheetIndex = null
-                    },
-                    onNozzleSelected = { physicalNozzleIndex ->
-                        onUpdateFilamentSlotNozzle(slot.index, physicalNozzleIndex)
-                    },
-                    onRemoveSlot = {
-                        onRemoveFilamentSlot(slot.index)
-                        selectedFilamentSlotSheetIndex = null
-                    },
-                    onDismiss = { selectedFilamentSlotSheetIndex = null }
-                )
-            }
-        }
-        if (missingPrinterConnectionDialog) {
-            AlertDialog(
-                onDismissRequest = { missingPrinterConnectionDialog = false },
-                confirmButton = {
-                    TextButton(onClick = { missingPrinterConnectionDialog = false }) {
-                        Text("OK")
+                onSplitToObjectsRequested = {
+                    selectedPlateObject?.let { objectOnPlate ->
+                        showTransformSheet = false
+                        onSplitToObjectsRequested(objectOnPlate)
                     }
                 },
-                title = { Text("Printer Connection") },
-                text = {
-                    Text("No printer connection established, go to Profiles, Printer, Connection to establish a connection.")
-                }
+                onSplitToPartsRequested = {
+                    selectedPlateObject?.let { objectOnPlate ->
+                        showTransformSheet = false
+                        onSplitToPartsRequested(objectOnPlate)
+                    }
+                },
+                cutBounds = selectedPlateObject?.mesh?.bounds ?: selectedPlateObject?.bounds,
+                cutOffsetOverride = cutOffsetOverride,
+                onCutPreviewChanged = { request ->
+                    cutPreviewRequest = mergeCutPreviewRequest(cutPreviewRequest, request)
+                    if (request == null) {
+                        cutOffsetOverride = null
+                    }
+                },
+                onCutRequested = { request ->
+                    selectedPlateObject?.let { objectOnPlate ->
+                        val mergedRequest = mergeSubmittedCutRequest(cutPreviewRequest, request)
+                        showTransformSheet = false
+                        cutPreviewRequest = null
+                        cutOffsetOverride = null
+                        onCutRequested(objectOnPlate, mergedRequest)
+                    }
+                },
+                showTabRow = false,
+                compactLayout = isLandscape,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .widthIn(max = if (isLandscape) 760.dp else 620.dp)
+                    .navigationBarsPadding()
+                    .padding(
+                        start = if (isLandscape) 42.dp else 24.dp,
+                        end = if (isLandscape) 42.dp else 24.dp,
+                        bottom = if (isLandscape) 8.dp else 12.dp
+                    )
             )
+        } else {
+            WorkspaceBottomChrome(
+            paintModeActive = paintModeActive,
+            paintSession = paintSession,
+            isLandscape = isLandscape,
+            activePaintMode = activePaintMode,
+            paintControlsExpanded = paintControlsExpanded,
+            paintBrushShape = paintBrushShape,
+            paintBrushRadiusMm = paintBrushRadiusMm,
+            paintSmartFillAngleDeg = paintSmartFillAngleDeg,
+            paintOverhangAngleDeg = paintOverhangAngleDeg,
+            paintClippingEnabled = paintClippingEnabled,
+            paintSectionViewPosition = paintSectionViewPosition,
+            paintAction = paintAction,
+            filamentSlots = filamentSlots,
+            activePaintColorSlotIndex = activePaintColorSlotIndex,
+            nativePaintSessionActive = nativePaintSessionActive,
+            nativePaintAvailable = nativePaintAvailable,
+            workspaceMode = workspaceMode,
+            selectedPlateObject = selectedPlateObject,
+            modelLabel = modelLabel,
+            selectedPrinter = selectedPrinter,
+            modelFormat = modelFormat,
+            effectiveViewerState = effectiveViewerState,
+            meshSummary = meshSummary,
+            importTiming = importTiming,
+            workspacePreparationTiming = workspacePreparationTiming,
+            firstVisibleWorkspaceFrameMs = firstVisibleWorkspaceFrameMs,
+            firstVisiblePreviewFrameMs = firstVisiblePreviewFrameMs,
+            activeConfiguration = activeConfiguration,
+            workspaceStatus = workspaceStatus,
+            sliceInProgress = sliceInProgress,
+            sendToPrinterInProgress = sendToPrinterInProgress,
+            sliceReady = sliceReady,
+            hasGeneratedGcode = hasGeneratedGcode,
+            canSendToPrinter = canSendToPrinter,
+            sliceSummary = sliceSummary,
+            sliceTiming = sliceTiming,
+            previewLayerCount = previewLayerCount,
+            previewLayerSelection = previewRuntime.layerSelection,
+            maxRangeLayerSpan = maxRangeLayerSpan,
+            activePreviewChunkBounds = activePreviewChunkBounds,
+            autoPreviewRanges = previewRuntime.autoRanges,
+            autoPreviewRangeIndex = previewRuntime.autoRangeIndex,
+            printerStatusMessage = printerStatusMessage,
+            workspaceControlsExpanded = workspaceControlsExpanded,
+            effectiveModelTransform = effectiveModelTransform ?: defaultViewerModelTransform(selectedPrinter.toBedSpec()),
+            objectCount = plateObjects.size,
+            activePlateLabel = activePlateLabel,
+            onPaintControlsExpandedChange = { paintControlsExpanded = it },
+            onBrushShapeChanged = { paintBrushShape = it },
+            onBrushRadiusChanged = { paintBrushRadiusMm = effectivePaintBrushRadiusMm(it) },
+            onSmartFillAngleChanged = { paintSmartFillAngleDeg = it },
+            onOverhangAngleChanged = { paintOverhangAngleDeg = it },
+            onClippingEnabledChanged = { paintClippingEnabled = it },
+            onSectionViewPositionChanged = { paintSectionViewPosition = it.coerceIn(0f, 1f) },
+            onActionChanged = { paintAction = it },
+            onColorSlotSelected = { activePaintColorSlotIndex = it },
+            onUnsupportedOption = { message -> nativePaintStatus = message },
+            onClear = { paintController.runNativePaintHistoryCommand(NativePaintCalls::clear) },
+            onFilamentSlotClick = { selectedFilamentSlotSheetIndex = it },
+            onAddFilamentSlot = onAddFilamentSlot,
+            onPreviewLayerSelectionChanged = { applyPreviewLayerSelection(it) },
+            onPreviousPreviewRangeChunk = {
+                if (previewRuntime.autoRanges.isNotEmpty()) {
+                    val nextIndex = if (previewRuntime.autoRangeIndex <= 0) {
+                        previewRuntime.autoRanges.lastIndex
+                    } else {
+                        previewRuntime.autoRangeIndex - 1
+                    }
+                    val nextRange = previewRuntime.autoRanges[nextIndex]
+                    previewRuntime.autoRangeIndex = nextIndex
+                    previewRuntime.layerSelection = nextRange.toPreviewLayerSelection()
+                    previewRuntime.layerReloadToken++
+                }
+            },
+            onNextPreviewRangeChunk = {
+                if (previewRuntime.autoRanges.isNotEmpty()) {
+                    val nextIndex = (previewRuntime.autoRangeIndex + 1) % previewRuntime.autoRanges.size
+                    val nextRange = previewRuntime.autoRanges[nextIndex]
+                    previewRuntime.autoRangeIndex = nextIndex
+                    previewRuntime.layerSelection = nextRange.toPreviewLayerSelection()
+                    previewRuntime.layerReloadToken++
+                }
+            },
+            onWorkspaceControlsExpandedChange = { workspaceControlsExpanded = it },
+            onModelTransformChanged = onModelTransformChanged,
+            onOpenObjectList = { showObjectListSheet = true },
+            onOpenPlateSettings = { showPlateSettingsSheet = true },
+            onOpenProfiles = onOpenProfiles,
+            onSavePlate = {
+                val view = viewerView
+                if (view == null) {
+                    onSavePlate(null)
+                } else {
+                    view.captureCurrentFrame { bitmap -> onSavePlate(bitmap) }
+                }
+            },
+            onSlice = onSlice,
+            onExport = onExport,
+            onShare = onShare,
+            modifier = if (paintModeActive && isLandscape) {
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .widthIn(max = 680.dp)
+                    .navigationBarsPadding()
+            } else {
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+            }
+        )
         }
+        WorkspaceSheetsChrome(
+            workspaceMode = workspaceMode,
+            showTransformSheet = showTransformSheet,
+            activeTransformTab = activeTransformTab,
+            showPrinterSendSheet = showPrinterSendSheet,
+            showPreviewInfoSheet = showPreviewInfoSheet,
+            showObjectListSheet = showObjectListSheet,
+            showPlateSettingsSheet = showPlateSettingsSheet,
+            activePlateLabel = activePlateLabel,
+            workspacePlates = workspacePlates,
+            activePlateId = activePlateId,
+            selectedFilamentSlotSheetIndex = selectedFilamentSlotSheetIndex,
+            missingPrinterConnectionDialog = missingPrinterConnectionDialog,
+            isLandscape = isLandscape,
+            selectedPrinter = selectedPrinter,
+            effectiveModelTransform = effectiveModelTransform,
+            sendToPrinterInProgress = sendToPrinterInProgress,
+            currentGcodeFileName = currentGcodeFileName,
+            sliceSummary = sliceSummary,
+            sliceInProgress = sliceInProgress,
+            previewPathVisibility = previewPathVisibility,
+            previewDisplayMode = previewDisplayMode,
+            plateObjects = plateObjects,
+            filamentSlots = filamentSlots,
+            selectedPlateObject = selectedPlateObject,
+            availableFilaments = availableFilaments,
+            onTransformSheetDismiss = { showTransformSheet = false },
+            onTransformTabChanged = { activeTransformTab = it },
+            onTransformChanged = onModelTransformChanged,
+            onAutoOrientObjects = onAutoOrientObjects,
+            onAutoArrangeObjects = onAutoArrangeObjects,
+            onLayFaceRequested = {
+                layFacePickPending = true
+            },
+            onPaintModeSelected = { mode ->
+                showTransformSheet = false
+                paintController.enterPaintMode(mode, paintModePrepareInProgress)
+            },
+            cutOffsetOverride = cutOffsetOverride,
+            onCutPreviewChanged = { request ->
+                cutPreviewRequest = mergeCutPreviewRequest(cutPreviewRequest, request)
+                if (request == null) {
+                    cutOffsetOverride = null
+                }
+            },
+            onCutRequested = { request ->
+                selectedPlateObject?.let { objectOnPlate ->
+                    val mergedRequest = mergeSubmittedCutRequest(cutPreviewRequest, request)
+                    showTransformSheet = false
+                    cutPreviewRequest = null
+                    cutOffsetOverride = null
+                    onCutRequested(objectOnPlate, mergedRequest)
+                }
+            },
+            onSendToPrinter = { action, remoteFileName, bambuOptions ->
+                showPrinterSendSheet = false
+                onSendToPrinter(action, remoteFileName, bambuOptions)
+            },
+            onPrinterSendDismiss = { showPrinterSendSheet = false },
+            onPreviewDisplayModeChanged = { mode ->
+                previewDisplayMode = mode
+                viewerView?.setGcodeDisplayMode(mode)
+            },
+            onPreviewLineVisibilityChanged = { row: PreviewLineTypeRow, visible ->
+                val key = previewLineVisibilityKey(row)
+                previewPathVisibility = previewPathVisibility.toMutableMap().apply { put(key, visible) }
+                viewerView?.setGcodePathVisibility(row.kind.nativeKind, row.nativeId, visible)
+            },
+            onPreviewInfoDismiss = { showPreviewInfoSheet = false },
+            onObjectSelected = { objectId ->
+                onPlateObjectSelected(objectId)
+                showObjectListSheet = false
+            },
+            onObjectListDismiss = { showObjectListSheet = false },
+            onPlateSettingsDismiss = { showPlateSettingsSheet = false },
+            onActivePlateChanged = { plateId ->
+                showPlateSettingsSheet = false
+                onActivePlateChanged(plateId)
+            },
+            onAddPlate = {
+                showPlateSettingsSheet = false
+                onAddPlate()
+            },
+            onDuplicateActivePlate = {
+                showPlateSettingsSheet = false
+                onDuplicateActivePlate()
+            },
+            onDeleteActivePlate = {
+                showPlateSettingsSheet = false
+                onDeleteActivePlate()
+            },
+            onRenameActivePlate = onRenameActivePlate,
+            onMoveObjectToPlate = onMoveObjectToPlate,
+            onMoveObjectToNewPlate = onMoveObjectToNewPlate,
+            onFilamentSheetDismiss = { selectedFilamentSlotSheetIndex = null },
+            onAssignFilamentSlotToSelected = { slotIndex ->
+                onAssignFilamentSlotToSelected(slotIndex)
+                selectedFilamentSlotSheetIndex = null
+            },
+            onUpdateFilamentSlotColor = onUpdateFilamentSlotColor,
+            onUpdateFilamentSlotProfile = { slotIndex, filament ->
+                onUpdateFilamentSlotProfile(slotIndex, filament)
+                selectedFilamentSlotSheetIndex = null
+            },
+            onUpdateFilamentSlotNozzle = onUpdateFilamentSlotNozzle,
+            onRemoveFilamentSlot = { slotIndex ->
+                onRemoveFilamentSlot(slotIndex)
+                selectedFilamentSlotSheetIndex = null
+            },
+            onMissingPrinterConnectionDismiss = { missingPrinterConnectionDialog = false }
+        )
     }
 }
-
-private fun PreviewRangeSuggestion.toPreviewLayerSelection(): PreviewLayerSelection =
-    PreviewLayerSelection(
-        mode = PreviewLayerMode.Range,
-        singleLayer = startLayer,
-        rangeStartLayer = startLayer,
-        rangeEndLayer = endLayer
-    )
-
-private fun ViewerFailure.isGcodePreviewRangeTooLarge(): Boolean =
-    title.contains("G-code preview range too large", ignoreCase = true) ||
-        detail.contains("G-code preview is too large", ignoreCase = true) ||
-        detail.contains("Vertex limit:", ignoreCase = true)

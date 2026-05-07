@@ -33,15 +33,25 @@ internal class TouchModelViewerView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : SurfaceView(context, attrs), SurfaceHolder.Callback {
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private val paintMoveMinScreenDistancePx = 1f
+    private val objectDragMinBedDistanceMm = 0.15f
 
     private var renderThread: WorkspaceRenderThread? = null
     private var onViewerFailure: ((ViewerFailure?) -> Unit)? = null
     private var onRenderReady: ((Boolean) -> Unit)? = null
     private var onPreviewRuntimeMetrics: ((GcodePreviewRuntimeMetrics) -> Unit)? = null
     private var onObjectSelected: ((Long?) -> Unit)? = null
+    private var onObjectHitSelected: ((ViewerPickHit?) -> Boolean)? = null
+    private var onObjectDrag: ((Long, Float, Float, Boolean) -> Unit)? = null
+    private var onCutConnectorPointAdded: ((ViewerCutConnectorPoint) -> Unit)? = null
+    private var onPaintStrokeBegin: ((ViewerPaintStrokePoint) -> Unit)? = null
+    private var onPaintStrokeMove: ((ViewerPaintStrokePoint) -> Unit)? = null
+    private var onPaintStrokeEnd: ((Boolean) -> Unit)? = null
     private var currentMesh: StlMesh? = null
     private var currentPlateObjects: List<ViewerPlateObject> = emptyList()
     private var currentPlateObjectsSignature = ViewerUpdateDecisions.plateObjectsSignature(currentPlateObjects)
+    private var currentPaintSession: ViewerPaintSession? = null
+    private var currentLivePaintOverlay = ViewerPaintOverlay.Empty
     private var currentGcodePreviewEngineHandle = 0L
     private var currentGcodePreviewKey = 0L
     private var currentGcodePreviewVertexBudget = GcodePreviewPerformanceMode.HARD_VERTEX_CEILING
@@ -50,6 +60,7 @@ internal class TouchModelViewerView @JvmOverloads constructor(
     private var currentGcodeLayerReloadToken = 0L
     private var currentGcodePathVisibility: Map<Pair<Int, Int>, Boolean> = emptyMap()
     private var currentGcodeDisplayMode = GcodePreviewDisplayMode.Auto
+    private var currentCutPlaneSession: ViewerCutPlaneSession? = null
     private var pendingCameraState: ViewerCameraState? = null
     private var currentBed = PrinterBedSpec(widthMm = 220f, depthMm = 220f, maxHeightMm = 220f)
     private var currentModelTransform: ViewerModelTransform? = null
@@ -76,11 +87,19 @@ internal class TouchModelViewerView @JvmOverloads constructor(
     private var lastPickAtMs = 0L
     private var lastPickCandidates: List<Long> = emptyList()
     private var lastPickIndex = -1
+    private var movableObjectIds: Set<Long> = emptySet()
+    private var objectDragId: Long? = null
+    private var objectDragLastBedPoint: StlModelPlacement? = null
     private var twoFingerTapCandidate = false
     private var twoFingerTapStartedAtMs = 0L
     private var lastTwoFingerTapX = Float.NaN
     private var lastTwoFingerTapY = Float.NaN
     private var lastTwoFingerTapAtMs = 0L
+    private var paintTouchState = PaintTouchState.None
+    private var activeStylusPaintOnly = false
+    private var lastPaintDispatchX = Float.NaN
+    private var lastPaintDispatchY = Float.NaN
+    private var paintGestureDownUptimeMs = 0L
 
     init {
         holder.addCallback(this)
@@ -188,6 +207,9 @@ internal class TouchModelViewerView @JvmOverloads constructor(
     internal fun captureCameraState(): ViewerCameraState? =
         renderThread?.cameraState() ?: pendingCameraState
 
+    internal fun paintRayForObject(screenX: Float, screenY: Float, objectId: Long): ViewerPaintRay? =
+        renderThread?.paintRayForObject(screenX, screenY, objectId)
+
     internal fun restoreCameraState(state: ViewerCameraState) {
         pendingCameraState = state
         renderThread?.restoreCameraState(state)
@@ -222,6 +244,78 @@ internal class TouchModelViewerView @JvmOverloads constructor(
         renderThread?.setPlateObjects(currentPlateObjects)
     }
 
+    internal fun setPaintSession(session: ViewerPaintSession?) {
+        if (session == null) {
+            if (currentPaintSession == null) return
+            currentPaintSession = null
+            currentLivePaintOverlay = ViewerPaintOverlay.Empty
+            paintTouchState = PaintTouchState.None
+            renderThread?.setPaintSession(null)
+            return
+        }
+        val existing = currentPaintSession
+        val preservedOverlay = if (
+            existing != null &&
+            existing.selectedObjectId == session.selectedObjectId &&
+            existing.mode == session.mode &&
+            session.overlay.layers.isEmpty() &&
+            existing.overlay.layers.isNotEmpty()
+        ) {
+            existing.overlay
+        } else {
+            session.overlay
+        }
+        val nextSession = session.copy(overlay = preservedOverlay)
+        if (currentPaintSession == nextSession) {
+            replayPaintOverlayToRenderThread()
+            return
+        }
+        currentPaintSession = nextSession
+        renderThread?.setPaintSession(nextSession)
+    }
+
+    internal fun setCutPlaneSession(session: ViewerCutPlaneSession?) {
+        if (currentCutPlaneSession == session) return
+        currentCutPlaneSession = session
+        renderThread?.setCutPlaneSession(session)
+    }
+
+    internal fun setActiveStylusPaintOnly(enabled: Boolean) {
+        activeStylusPaintOnly = enabled
+    }
+
+    internal fun setPaintOverlay(overlay: ViewerPaintOverlay) {
+        val session = currentPaintSession ?: return
+        currentPaintSession = session.copy(overlay = overlay)
+        renderThread?.setPaintOverlay(overlay)
+    }
+
+    internal fun appendPaintOverlay(overlay: ViewerPaintOverlay) {
+        if (overlay.layers.isEmpty()) return
+        currentPaintSession = currentPaintSession?.let { session ->
+            session.copy(overlay = session.overlay.plusReplacing(overlay))
+        }
+        renderThread?.appendPaintOverlay(overlay)
+    }
+
+    internal fun replaceLivePaintOverlay(overlay: ViewerPaintOverlay) {
+        currentLivePaintOverlay = overlay
+        renderThread?.replaceLivePaintOverlay(overlay)
+    }
+
+    internal fun clearLivePaintOverlay() {
+        currentLivePaintOverlay = ViewerPaintOverlay.Empty
+        renderThread?.clearLivePaintOverlay()
+    }
+
+    internal fun promoteLivePaintOverlay() {
+        currentPaintSession = currentPaintSession?.let { session ->
+            session.copy(overlay = session.overlay.plusReplacing(currentLivePaintOverlay))
+        }
+        currentLivePaintOverlay = ViewerPaintOverlay.Empty
+        renderThread?.promoteLivePaintOverlay()
+    }
+
     internal fun setFailureListener(listener: (ViewerFailure?) -> Unit) {
         onViewerFailure = listener
         renderThread?.currentFailure()?.let(listener)
@@ -237,6 +331,37 @@ internal class TouchModelViewerView @JvmOverloads constructor(
 
     internal fun setObjectSelectionListener(listener: (Long?) -> Unit) {
         onObjectSelected = listener
+    }
+
+    internal fun setCutConnectorPointListener(listener: (ViewerCutConnectorPoint) -> Unit) {
+        onCutConnectorPointAdded = listener
+    }
+
+    internal fun setObjectHitSelectionListener(listener: (ViewerPickHit?) -> Boolean) {
+        onObjectHitSelected = listener
+    }
+
+    internal fun setObjectDragListener(
+        movableIds: Set<Long>,
+        listener: (Long, Float, Float, Boolean) -> Unit
+    ) {
+        movableObjectIds = movableIds
+        onObjectDrag = listener
+    }
+
+    internal fun setPaintStrokeListener(
+        onBegin: (ViewerPaintStrokePoint) -> Unit,
+        onMove: (ViewerPaintStrokePoint) -> Unit,
+        onEnd: (Boolean) -> Unit
+    ) {
+        onPaintStrokeBegin = onBegin
+        onPaintStrokeMove = onMove
+        onPaintStrokeEnd = onEnd
+    }
+
+    internal fun setPaintHitTestListener(listener: (Float, Float) -> Boolean?) {
+        // Kept for callers that still wire the old API during the native paint transition.
+        // Paint acceptance now happens asynchronously in stroke begin instead of input dispatch.
     }
 
     internal fun setViewerAppearance(darkTheme: Boolean, accentColor: Int, worldColor: Int? = null) {
@@ -291,11 +416,13 @@ internal class TouchModelViewerView @JvmOverloads constructor(
     override fun surfaceCreated(holder: SurfaceHolder) {
         ensureRenderThread()
         renderThread?.bindSurface(holder.surface, width.coerceAtLeast(1), height.coerceAtLeast(1))
+        replayPaintOverlayToRenderThread()
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         ensureRenderThread()
         renderThread?.bindSurface(holder.surface, width.coerceAtLeast(1), height.coerceAtLeast(1))
+        replayPaintOverlayToRenderThread()
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -307,24 +434,119 @@ internal class TouchModelViewerView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 downTouchX = event.x
                 downTouchY = event.y
+                paintGestureDownUptimeMs = SystemClock.uptimeMillis()
                 lastTouchX = event.x
                 lastTouchY = event.y
+                resetPaintDispatchPosition()
                 dragging = false
                 suppressTapSelection = false
                 twoFingerGesture = TwoFingerGesture.None
+                paintTouchState = PaintTouchState.None
+                objectDragId = null
+                objectDragLastBedPoint = null
+                if (currentPaintSession != null) {
+                    val paintOnlyStylusDown = activeStylusPaintOnly && event.isActiveStylusPointer(event.actionIndex)
+                    if (activeStylusPaintOnly && !paintOnlyStylusDown) {
+                        paintTouchState = PaintTouchState.CameraGesture
+                        suppressTapSelection = true
+                    } else if (!paintOnlyStylusDown && !canStartPaintGesture(event.x, event.y)) {
+                        paintTouchState = if (paintOnlyStylusDown) {
+                            PaintTouchState.StylusNoPaint
+                        } else {
+                            PaintTouchState.CameraGesture
+                        }
+                        suppressTapSelection = true
+                    } else {
+                        if (currentPaintSession?.brushShape?.paintsOnTap() == true) {
+                            paintTouchState = PaintTouchState.Painting
+                            dispatchPaintBegin(event.x, event.y)
+                        } else {
+                            paintTouchState = PaintTouchState.PotentialPaint
+                        }
+                        suppressTapSelection = true
+                    }
+                } else if (movableObjectIds.isNotEmpty()) {
+                    val pickedMovable = renderThread
+                        ?.pickObjectIdsSync(event.x, event.y)
+                        ?.firstOrNull { it in movableObjectIds }
+                    if (pickedMovable != null) {
+                        objectDragId = pickedMovable
+                        objectDragLastBedPoint = renderThread?.bedPointForScreen(event.x, event.y)
+                        suppressTapSelection = true
+                    }
+                }
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
                 if (event.pointerCount >= 2) {
+                    if (currentPaintSession != null && activeStylusPaintOnly && event.hasActiveStylusPointer()) {
+                        if (paintTouchState == PaintTouchState.Painting) {
+                            onPaintStrokeEnd?.invoke(false)
+                            renderThread?.setPaintCursor(lastTouchX, lastTouchY, false)
+                            resetPaintDispatchPosition()
+                        }
+                        paintTouchState = PaintTouchState.StylusNoPaint
+                        dragging = false
+                        suppressTapSelection = true
+                        return true
+                    }
+                    objectDragId?.let { draggingObjectId ->
+                        onObjectDrag?.invoke(draggingObjectId, 0f, 0f, true)
+                    }
+                    objectDragId = null
+                    objectDragLastBedPoint = null
+                    if (paintTouchState == PaintTouchState.Painting) {
+                        onPaintStrokeEnd?.invoke(false)
+                        renderThread?.setPaintCursor(lastTouchX, lastTouchY, false)
+                        resetPaintDispatchPosition()
+                        suppressTapSelection = true
+                    }
                     beginTwoFingerGesture(event)
                     twoFingerTapCandidate = event.pointerCount == 2
                     twoFingerTapStartedAtMs = SystemClock.uptimeMillis()
                     dragging = true
                     suppressTapSelection = true
+                    if (currentPaintSession != null) {
+                        paintTouchState = PaintTouchState.MultiTouchCamera
+                    }
                 }
             }
 
             MotionEvent.ACTION_MOVE -> {
+                if (paintTouchState == PaintTouchState.StylusNoPaint) {
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    return true
+                }
+                if (paintTouchState == PaintTouchState.Painting) {
+                    if (currentPaintSession?.brushShape?.paintsOnTap() != true) {
+                        dispatchHistoricalPaintMoves(event)
+                        dispatchPaintMoveIfFarEnough(event.x, event.y, force = true)
+                    }
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    return true
+                }
+                objectDragId?.let { draggingObjectId ->
+                    val nextBedPoint = renderThread?.bedPointForScreen(event.x, event.y)
+                    val lastBedPoint = objectDragLastBedPoint
+                    if (nextBedPoint != null && lastBedPoint != null) {
+                        val deltaX = nextBedPoint.xMm - lastBedPoint.xMm
+                        val deltaY = nextBedPoint.yMm - lastBedPoint.yMm
+                        if (
+                            deltaX.isFinite() &&
+                            deltaY.isFinite() &&
+                            deltaX * deltaX + deltaY * deltaY >= objectDragMinBedDistanceMm * objectDragMinBedDistanceMm
+                        ) {
+                            onObjectDrag?.invoke(draggingObjectId, deltaX, deltaY, false)
+                            objectDragLastBedPoint = nextBedPoint
+                        }
+                    }
+                    dragging = true
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    return true
+                }
                 if (event.pointerCount >= 2) {
                     updateTwoFingerGesture(event)
                 } else {
@@ -334,7 +556,24 @@ internal class TouchModelViewerView @JvmOverloads constructor(
                     val totalDragY = event.y - downTouchY
                     if (dragging || abs(totalDragX) > touchSlop || abs(totalDragY) > touchSlop) {
                         dragging = true
-                        renderThread?.orbitBy(deltaX, deltaY)
+                        if (paintTouchState == PaintTouchState.PotentialPaint) {
+                            if (activeStylusPaintOnly && !canStartPaintGesture(event.x, event.y)) {
+                                renderThread?.setPaintCursor(event.x, event.y, true)
+                                lastTouchX = event.x
+                                lastTouchY = event.y
+                                return true
+                            }
+                            paintTouchState = PaintTouchState.Painting
+                            val beginX = if (activeStylusPaintOnly) event.x else downTouchX
+                            val beginY = if (activeStylusPaintOnly) event.y else downTouchY
+                            dispatchPaintBegin(beginX, beginY)
+                            if (!activeStylusPaintOnly) {
+                                dispatchHistoricalPaintMoves(event)
+                            }
+                            dispatchPaintMoveIfFarEnough(event.x, event.y, force = true)
+                        } else {
+                            renderThread?.orbitBy(deltaX, deltaY)
+                        }
                     }
                     lastTouchX = event.x
                     lastTouchY = event.y
@@ -359,22 +598,57 @@ internal class TouchModelViewerView @JvmOverloads constructor(
 
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_CANCEL -> {
-                if (event.actionMasked == MotionEvent.ACTION_UP && !dragging && !suppressTapSelection) {
+                if (paintTouchState == PaintTouchState.Painting) {
+                    dispatchPaintMoveIfFarEnough(event.x, event.y, force = true)
+                    onPaintStrokeEnd?.invoke(event.actionMasked == MotionEvent.ACTION_UP)
+                    renderThread?.setPaintCursor(event.x, event.y, false)
+                } else if (paintTouchState == PaintTouchState.StylusNoPaint) {
+                    renderThread?.setPaintCursor(event.x, event.y, false)
+                } else if (paintTouchState == PaintTouchState.PotentialPaint && event.actionMasked == MotionEvent.ACTION_UP) {
+                    if (currentPaintSession?.brushShape?.paintsOnTap() == true) {
+                        dispatchPaintBegin(event.x, event.y)
+                        onPaintStrokeEnd?.invoke(true)
+                    }
+                    renderThread?.setPaintCursor(event.x, event.y, false)
+                } else if (
+                    event.actionMasked == MotionEvent.ACTION_UP &&
+                    !dragging &&
+                    !suppressTapSelection &&
+                    currentCutPlaneSession?.connectorsEditing == true
+                ) {
+                    performClick()
+                    renderThread?.cutPlanePointForScreen(event.x, event.y)?.let { point ->
+                        post { onCutConnectorPointAdded?.invoke(point) }
+                    }
+                } else if (event.actionMasked == MotionEvent.ACTION_UP && !dragging && !suppressTapSelection) {
                     performClick()
                     val tapX = event.x
                     val tapY = event.y
                     renderThread?.pickObjectHits(tapX, tapY) { hits ->
-                        val candidates = hits.map { it.objectId }.distinct()
+                        val candidates = hits.map { it.objectId }.distinct().ifEmpty {
+                            renderThread?.pickObjectIdsSync(tapX, tapY).orEmpty()
+                        }
                         val objectId = chooseObjectFromCandidates(tapX, tapY, candidates)
+                        val hit = objectId?.let { selectedId -> hits.firstOrNull { it.objectId == selectedId } }
                         post {
-                            onObjectSelected?.invoke(objectId)
+                            val consumed = onObjectHitSelected?.invoke(hit) == true
+                            if (!consumed) {
+                                onObjectSelected?.invoke(objectId)
+                            }
                         }
                     }
                 }
+                objectDragId?.let { draggingObjectId ->
+                    onObjectDrag?.invoke(draggingObjectId, 0f, 0f, true)
+                }
+                objectDragId = null
+                objectDragLastBedPoint = null
                 dragging = false
                 suppressTapSelection = false
                 twoFingerGesture = TwoFingerGesture.None
                 twoFingerTapCandidate = false
+                paintTouchState = PaintTouchState.None
+                resetPaintDispatchPosition()
             }
         }
         return true
@@ -405,6 +679,9 @@ internal class TouchModelViewerView @JvmOverloads constructor(
         )
         thread.setMesh(currentMesh)
         thread.setPlateObjects(currentPlateObjects)
+        thread.setPaintSession(currentPaintSession)
+        thread.setCutPlaneSession(currentCutPlaneSession)
+        replayPaintOverlayToRenderThread()
         thread.setModelTransform(currentModelTransform)
         thread.setGcodePreviewSourceAndLayerRange(
             currentGcodePreviewEngineHandle,
@@ -421,12 +698,54 @@ internal class TouchModelViewerView @JvmOverloads constructor(
         pendingCameraState?.let(thread::restoreCameraState)
         if (holder.surface?.isValid == true) {
             thread.bindSurface(holder.surface, width.coerceAtLeast(1), height.coerceAtLeast(1))
+            replayPaintOverlayToRenderThread()
+        }
+    }
+
+    private fun replayPaintOverlayToRenderThread() {
+        val session = currentPaintSession ?: return
+        val overlay = session.overlay.plusReplacing(currentLivePaintOverlay)
+        val replaySession = session.copy(overlay = overlay)
+        currentPaintSession = replaySession
+        renderThread?.setPaintSession(replaySession)
+        if (overlay.layers.isNotEmpty()) {
+            renderThread?.setPaintOverlay(overlay)
         }
     }
 
     private fun teardownRenderThread() {
         renderThread?.requestExitAndWait()
         renderThread = null
+    }
+
+    private fun ViewerPaintOverlay.plusReplacing(other: ViewerPaintOverlay): ViewerPaintOverlay {
+        if (other.layers.isEmpty()) return this
+        if (layers.isEmpty()) return ViewerPaintOverlay(other.layers.filterNot { it.deleteOnly })
+        val byId = LinkedHashMap<String, ViewerPaintOverlayLayer>(layers.size + other.layers.size)
+        val replacementSourceKeys = other.layers.mapNotNullTo(mutableSetOf()) { it.id.overlaySourceKey() }
+        layers.forEach { layer ->
+            if (!layer.deleteOnly && layer.id.overlaySourceKey() !in replacementSourceKeys) {
+                byId[layer.id] = layer
+            }
+        }
+        other.layers.forEach { layer ->
+            if (layer.deleteOnly) {
+                byId.remove(layer.id)
+                layer.id.overlaySourceKey()?.let { sourceKey ->
+                    byId.keys
+                        .filter { it.overlaySourceKey() == sourceKey }
+                        .forEach { byId.remove(it) }
+                }
+            } else {
+                byId[layer.id] = layer
+            }
+        }
+        return ViewerPaintOverlay(byId.values.toList())
+    }
+
+    private fun String.overlaySourceKey(): String? {
+        val separator = indexOf(':')
+        return if (separator > 0) substring(0, separator) else null
     }
 
     private fun centroidX(event: MotionEvent): Float {
@@ -559,12 +878,72 @@ internal class TouchModelViewerView @JvmOverloads constructor(
     private fun Int.floorMod(modulus: Int): Int =
         ((this % modulus) + modulus) % modulus
 
+    private fun canStartPaintGesture(screenX: Float, screenY: Float): Boolean {
+        val session = currentPaintSession ?: return false
+        val hits = renderThread?.pickObjectHitsSync(screenX, screenY).orEmpty()
+        return hits.any { it.objectId == session.selectedObjectId }
+    }
+
+    private fun dispatchPaintBegin(screenX: Float, screenY: Float) {
+        lastPaintDispatchX = screenX
+        lastPaintDispatchY = screenY
+        onPaintStrokeBegin?.invoke(ViewerPaintStrokePoint(screenX, screenY, null, paintGestureDownUptimeMs))
+        renderThread?.setPaintCursor(screenX, screenY, true)
+    }
+
+    private fun dispatchPaintMove(screenX: Float, screenY: Float) {
+        lastPaintDispatchX = screenX
+        lastPaintDispatchY = screenY
+        onPaintStrokeMove?.invoke(ViewerPaintStrokePoint(screenX, screenY, null, paintGestureDownUptimeMs))
+        renderThread?.setPaintCursor(screenX, screenY, true)
+    }
+
+    private fun dispatchPaintMoveIfFarEnough(screenX: Float, screenY: Float, force: Boolean = false) {
+        if (!force && lastPaintDispatchX.isFinite() && lastPaintDispatchY.isFinite()) {
+            val dx = screenX - lastPaintDispatchX
+            val dy = screenY - lastPaintDispatchY
+            if (dx * dx + dy * dy < paintMoveMinScreenDistancePx * paintMoveMinScreenDistancePx) {
+                renderThread?.setPaintCursor(screenX, screenY, true)
+                return
+            }
+        }
+        dispatchPaintMove(screenX, screenY)
+    }
+
+    private fun dispatchHistoricalPaintMoves(event: MotionEvent) {
+        val historySize = event.historySize
+        if (historySize <= 0) return
+        for (index in 0 until historySize) {
+            dispatchPaintMoveIfFarEnough(event.getHistoricalX(index), event.getHistoricalY(index))
+        }
+    }
+
+    private fun resetPaintDispatchPosition() {
+        lastPaintDispatchX = Float.NaN
+        lastPaintDispatchY = Float.NaN
+    }
+
     private enum class TwoFingerGesture {
         None,
         Undecided,
         Pan,
         Zoom
     }
+
+    private enum class PaintTouchState {
+        None,
+        PotentialPaint,
+        Painting,
+        CameraGesture,
+        MultiTouchCamera,
+        StylusNoPaint
+    }
+
+    private fun ViewerPaintBrushShape.paintsOnTap(): Boolean =
+        this == ViewerPaintBrushShape.Triangle ||
+            this == ViewerPaintBrushShape.HeightRange ||
+            this == ViewerPaintBrushShape.Fill ||
+            this == ViewerPaintBrushShape.GapFill
 
     private companion object {
         private const val CYCLE_TAP_RADIUS_PX = 34f
@@ -576,4 +955,20 @@ internal class TouchModelViewerView @JvmOverloads constructor(
         private const val TWO_FINGER_DEAD_ZONE_PX = 7f
         private const val ZOOM_DOMINANCE_RATIO = 1.18f
     }
+}
+
+private fun MotionEvent.isActiveStylusPointer(pointerIndex: Int): Boolean {
+    if (pointerIndex !in 0 until pointerCount) return false
+    return when (getToolType(pointerIndex)) {
+        MotionEvent.TOOL_TYPE_STYLUS,
+        MotionEvent.TOOL_TYPE_ERASER -> true
+        else -> false
+    }
+}
+
+private fun MotionEvent.hasActiveStylusPointer(): Boolean {
+    for (index in 0 until pointerCount) {
+        if (isActiveStylusPointer(index)) return true
+    }
+    return false
 }

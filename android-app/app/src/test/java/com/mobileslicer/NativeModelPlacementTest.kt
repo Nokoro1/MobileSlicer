@@ -3,6 +3,9 @@ package com.mobileslicer
 import com.mobileslicer.workspace.defaultNativeModelTransform
 import com.mobileslicer.workspace.nativeModelTransformFromArray
 import com.mobileslicer.workspace.nativeModelTransformToViewerTransform
+import com.mobileslicer.workspace.nativePlateTransformInputStride
+import com.mobileslicer.workspace.NativeModelTransformInputStride
+import com.mobileslicer.workspace.NativeModelTransformOutputStride
 import com.mobileslicer.workspace.writeTo
 import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.PrinterBedSpec
@@ -160,5 +163,101 @@ class NativeModelPlacementTest {
         assertEquals(expected.rotationYRadians, parsed.rotationYRadians, 0.0001)
         assertEquals(expected.rotationZRadians, parsed.rotationZRadians, 0.0001)
         assertEquals(expected.uniformScale, parsed.uniformScale, 0.0001)
+    }
+
+    @Test
+    fun compactPlateRequestWritesSevenValuesPerObjectForThreeOrMoreObjects() {
+        val values = DoubleArray(NativeModelTransformInputStride * 3) { -999.0 }
+        val first = defaultNativeModelTransform(
+            bounds = MeshBounds(0f, 0f, 0f, 20f, 20f, 20f),
+            printerBed = PrinterBedSpec(widthMm = 270f, depthMm = 270f, maxHeightMm = 256f),
+            modelTransform = ViewerModelTransform(centerXmm = 40f, centerYmm = 50f, uniformScale = 1f)
+        )
+        val second = defaultNativeModelTransform(
+            bounds = MeshBounds(0f, 0f, 0f, 10f, 10f, 10f),
+            printerBed = PrinterBedSpec(widthMm = 270f, depthMm = 270f, maxHeightMm = 256f),
+            modelTransform = ViewerModelTransform(centerXmm = 90f, centerYmm = 100f, uniformScale = 1.5f)
+        )
+        val third = defaultNativeModelTransform(
+            bounds = MeshBounds(0f, 0f, 0f, 30f, 30f, 30f),
+            printerBed = PrinterBedSpec(widthMm = 270f, depthMm = 270f, maxHeightMm = 256f),
+            modelTransform = ViewerModelTransform(centerXmm = 140f, centerYmm = 150f, rotationZDegrees = 45f)
+        )
+
+        first.writeTo(values, offset = 0, stride = NativeModelTransformInputStride)
+        second.writeTo(values, offset = NativeModelTransformInputStride, stride = NativeModelTransformInputStride)
+        third.writeTo(values, offset = NativeModelTransformInputStride * 2, stride = NativeModelTransformInputStride)
+
+        val parsedFirst = nativeModelTransformFromArray(values, offset = 0, stride = NativeModelTransformInputStride)
+        val parsedSecond = nativeModelTransformFromArray(values, offset = NativeModelTransformInputStride, stride = NativeModelTransformInputStride)
+        val parsedThird = nativeModelTransformFromArray(values, offset = NativeModelTransformInputStride * 2, stride = NativeModelTransformInputStride)
+
+        assertEquals(first.uniformScale, parsedFirst.uniformScale, 0.0001)
+        assertEquals(second.uniformScale, parsedSecond.uniformScale, 0.0001)
+        assertEquals(third.uniformScale, parsedThird.uniformScale, 0.0001)
+        assertEquals(second.xMm, parsedSecond.xMm, 0.0001)
+        assertEquals(third.rotationZRadians, parsedThird.rotationZRadians, 0.0001)
+    }
+
+    @Test
+    fun nativeTransformArrayHelpersPreserveMatrixLayoutForPlateRequests() {
+        val bounds = MeshBounds(0f, 0f, 0f, 20f, 20f, 40f)
+        val bed = PrinterBedSpec(widthMm = 270f, depthMm = 270f, maxHeightMm = 256f)
+        val matrix = listOf(
+            0f, 0f, 1f,
+            0f, 1f, 0f,
+            -1f, 0f, 0f
+        )
+        val expected = defaultNativeModelTransform(
+            bounds = bounds,
+            printerBed = bed,
+            modelTransform = ViewerModelTransform(
+                centerXmm = 135f,
+                centerYmm = 135f,
+                orientationMatrix = matrix
+            )
+        )
+        val values = DoubleArray(NativeModelTransformOutputStride)
+
+        expected.writeTo(values)
+        val parsed = nativeModelTransformFromArray(values)
+        val restored = nativeModelTransformToViewerTransform(bounds, bed, parsed)
+
+        assertEquals(matrix, restored.orientationMatrix)
+        assertEquals(135f, restored.centerXmm, 0.0001f)
+        assertEquals(135f, restored.centerYmm, 0.0001f)
+    }
+
+    @Test
+    fun nativePlateTransformStrideUsesCompactLayoutUntilMatrixIsPresent() {
+        assertEquals(
+            NativeModelTransformInputStride,
+            nativePlateTransformInputStride(
+                listOf(
+                    null,
+                    ViewerModelTransform(
+                        centerXmm = 135f,
+                        centerYmm = 135f,
+                        rotationZDegrees = 45f
+                    )
+                )
+            )
+        )
+        assertEquals(
+            NativeModelTransformOutputStride,
+            nativePlateTransformInputStride(
+                listOf(
+                    ViewerModelTransform(
+                        centerXmm = 135f,
+                        centerYmm = 135f,
+                        orientationMatrix = listOf(
+                            1f, 0f, 0f,
+                            0f, 1f, 0f,
+                            0f, 0f, 1f
+                        )
+                    )
+                )
+            )
+        )
     }
 }

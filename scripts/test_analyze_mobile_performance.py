@@ -85,6 +85,86 @@ class AnalyzeMobilePerformanceTest(unittest.TestCase):
 
         self.assertIn("medium-speed-structure: elapsed_ms regressed", "\n".join(failures))
 
+    def test_repeated_slice_timing_uses_best_run_for_baseline_regression(self) -> None:
+        current = [
+            {
+                "name": "stress-temperature-tower-r1",
+                "type": "slice",
+                "elapsed_ms": 13_700,
+                "native_slice_ms": 13_500,
+                "bytes": 2048,
+            },
+            {
+                "name": "stress-temperature-tower-r2",
+                "type": "slice",
+                "elapsed_ms": 10_600,
+                "native_slice_ms": 10_400,
+                "bytes": 2048,
+            },
+        ]
+        baseline = {
+            "stress-temperature-tower-r1": {
+                "name": "stress-temperature-tower-r1",
+                "type": "slice",
+                "elapsed_ms": 10_000,
+                "native_slice_ms": 9_800,
+                "bytes": 2048,
+            },
+            "stress-temperature-tower-r2": {
+                "name": "stress-temperature-tower-r2",
+                "type": "slice",
+                "elapsed_ms": 10_200,
+                "native_slice_ms": 10_000,
+                "bytes": 2048,
+            },
+        }
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            failures = analyzer.analyze(current, baseline)
+
+        self.assertEqual([], failures)
+
+    def test_repeated_slice_best_timing_regression_fails(self) -> None:
+        current = [
+            {
+                "name": "stress-temperature-tower-r1",
+                "type": "slice",
+                "elapsed_ms": 14_000,
+                "native_slice_ms": 13_800,
+                "bytes": 2048,
+            },
+            {
+                "name": "stress-temperature-tower-r2",
+                "type": "slice",
+                "elapsed_ms": 14_500,
+                "native_slice_ms": 14_200,
+                "bytes": 2048,
+            },
+        ]
+        baseline = {
+            "stress-temperature-tower-r1": {
+                "name": "stress-temperature-tower-r1",
+                "type": "slice",
+                "elapsed_ms": 10_000,
+                "native_slice_ms": 9_800,
+                "bytes": 2048,
+            },
+            "stress-temperature-tower-r2": {
+                "name": "stress-temperature-tower-r2",
+                "type": "slice",
+                "elapsed_ms": 10_200,
+                "native_slice_ms": 10_000,
+                "bytes": 2048,
+            },
+        }
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            failures = analyzer.analyze(current, baseline)
+
+        joined = "\n".join(failures)
+        self.assertIn("stress-temperature-tower: best repeated elapsed_ms regressed", joined)
+        self.assertIn("stress-temperature-tower: best repeated native_slice_ms regressed", joined)
+
     def test_preview_plan_baseline_regression_fails(self) -> None:
         current = {
             "name": "medium-speed-structure",
@@ -229,6 +309,64 @@ class AnalyzeMobilePerformanceTest(unittest.TestCase):
             failures = analyzer.analyze([current], baseline)
 
         self.assertIn("medium-speed-structure: cache_orca_temp_kb regressed", "\n".join(failures))
+
+    def test_repeated_slice_ignores_transient_peak_growth_when_retained_memory_is_stable(self) -> None:
+        current = [
+            {
+                "name": "medium-speed-structure-r1",
+                "type": "slice",
+                "elapsed_ms": 10_000,
+                "peak_pss_kb": 540_000,
+                "peak_native_heap_kb": 210_000,
+                "native_after_release_rss_kb": 570_000,
+                "native_after_stats_rss_kb": 570_000,
+                "native_before_return_rss_kb": 560_000,
+                "cache_total_kb": 52_000,
+                "cache_orca_temp_kb": 4,
+                "bytes": 2048,
+            },
+            {
+                "name": "medium-speed-structure-r2",
+                "type": "slice",
+                "elapsed_ms": 10_000,
+                "peak_pss_kb": 653_000,
+                "peak_native_heap_kb": 284_000,
+                "native_after_release_rss_kb": 566_000,
+                "native_after_stats_rss_kb": 566_000,
+                "native_before_return_rss_kb": 550_000,
+                "cache_total_kb": 52_000,
+                "cache_orca_temp_kb": 4,
+                "bytes": 2048,
+            },
+        ]
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            failures = analyzer.analyze(current, {})
+
+        self.assertEqual([], failures)
+
+    def test_repeated_slice_retained_memory_growth_fails(self) -> None:
+        current = [
+            {
+                "name": "medium-speed-structure-r1",
+                "type": "slice",
+                "elapsed_ms": 10_000,
+                "native_before_return_rss_kb": 400_000,
+                "bytes": 2048,
+            },
+            {
+                "name": "medium-speed-structure-r2",
+                "type": "slice",
+                "elapsed_ms": 10_000,
+                "native_before_return_rss_kb": 510_000,
+                "bytes": 2048,
+            },
+        ]
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            failures = analyzer.analyze(current, {})
+
+        self.assertIn("medium-speed-structure: native_before_return_rss_kb grew", "\n".join(failures))
 
 
 if __name__ == "__main__":

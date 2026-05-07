@@ -7,6 +7,7 @@ import com.mobileslicer.profiles.OrcaFilamentPreset
 import com.mobileslicer.profiles.OrcaProcessPresetBundle
 import com.mobileslicer.profiles.FilamentProfileEditorDraft
 import com.mobileslicer.profiles.NativeSliceConfigCache
+import com.mobileslicer.profiles.PrintHostType
 import com.mobileslicer.profiles.PrinterProfileEditorDraft
 import com.mobileslicer.profiles.ProcessProfileEditorDraft
 import com.mobileslicer.profiles.activeConfiguration
@@ -21,7 +22,12 @@ import com.mobileslicer.profiles.toPrinterProfile
 import com.mobileslicer.profiles.toProcessProfile
 import com.mobileslicer.viewer.ViewerModelTransform
 import com.mobileslicer.workspace.ImportedModelFormat
+import com.mobileslicer.workspace.PaintMode
 import com.mobileslicer.workspace.PlateObject
+import com.mobileslicer.workspace.PlateObjectPaint
+import com.mobileslicer.workspace.SerializedPaintLayer
+import com.mobileslicer.workspace.SerializedPaintTriangle
+import com.mobileslicer.workspace.SerializedPaintVolumeLayer
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -547,7 +553,7 @@ class NativeSliceConfigTest {
 
         val result = JSONObject(
             applyPlateFilamentSlotsToNativeConfig(
-                configJson = "{}",
+                configJson = """{"enable_prime_tower":true,"purge_in_prime_tower":false}""",
                 slots = slots,
                 plateObjects = plateObjects,
                 filaments = filaments,
@@ -572,6 +578,180 @@ class NativeSliceConfigTest {
                 "mobile_slicer_active_filament_slot_count" to 2
             )
         )
+    }
+
+    @Test
+    fun colorPaintReferencedSlotsAreIncludedInNativePlateConfig() {
+        val filaments = (1..2).map { index ->
+            ProfileStoreRepository.fallbackFilamentProfile().copy(
+                id = "filament_$index",
+                name = "Paint Slot $index",
+                defaultFilamentColor = if (index == 1) "#111111" else "#EEEEEE"
+            )
+        }
+        val slots = filaments.mapIndexed { index, filament -> filament.toPlateFilamentSlot(index + 1) }
+        val objectPaint = PlateObjectPaint(
+            color = paintLayer(
+                mode = PaintMode.Color,
+                referencedSlots = setOf(2)
+            )
+        )
+        val result = applyPlateFilamentSlotsToNativeConfigResult(
+            configJson = "{}",
+            slots = slots,
+            plateObjects = listOf(testPlateObject(id = 1L, filamentSlotIndex = 1, paint = objectPaint)),
+            filaments = filaments,
+            flushVolumes = null
+        )
+        val nativeConfig = JSONObject(result.json)
+
+        assertEquals(2, nativeConfig.optInt("mobile_slicer_active_filament_slot_count"))
+        assertJsonArrayEquals(listOf("Paint Slot 1", "Paint Slot 2"), nativeConfig.getJSONArray("filament_settings_id"))
+        assertFalse(nativeConfig.optBoolean("enable_prime_tower", true))
+        assertFalse(nativeConfig.optBoolean("purge_in_prime_tower", true))
+    }
+
+    @Test
+    fun colorPaintKeepsNativeFilamentSlotsContiguousThroughHighestPaintedSlot() {
+        val filaments = (1..4).map { index ->
+            ProfileStoreRepository.fallbackFilamentProfile().copy(
+                id = "filament_$index",
+                name = "Paint Slot $index",
+                defaultFilamentColor = when (index) {
+                    1 -> "#8FC1FF"
+                    2 -> "#FF7043"
+                    3 -> "#FFD166"
+                    else -> "#AB34D6"
+                }
+            )
+        }
+        val slots = filaments.mapIndexed { index, filament -> filament.toPlateFilamentSlot(index + 1) }
+        val objectPaint = PlateObjectPaint(
+            color = paintLayer(
+                mode = PaintMode.Color,
+                referencedSlots = setOf(4)
+            )
+        )
+        val result = applyPlateFilamentSlotsToNativeConfigResult(
+            configJson = "{}",
+            slots = slots,
+            plateObjects = listOf(testPlateObject(id = 1L, filamentSlotIndex = 1, paint = objectPaint)),
+            filaments = filaments,
+            flushVolumes = null
+        )
+        val nativeConfig = JSONObject(result.json)
+
+        assertEquals(4, nativeConfig.optInt("mobile_slicer_active_filament_slot_count"))
+        assertJsonArrayEquals(
+            listOf("Paint Slot 1", "Paint Slot 2", "Paint Slot 3", "Paint Slot 4"),
+            nativeConfig.getJSONArray("filament_settings_id")
+        )
+        assertJsonArrayEquals(listOf(1, 2, 3, 4), nativeConfig.getJSONArray("filament_self_index"))
+        assertFalse(nativeConfig.optBoolean("enable_prime_tower", true))
+        assertFalse(nativeConfig.optBoolean("purge_in_prime_tower", true))
+    }
+
+    @Test
+    fun paintAwareNativeConfigEnablesSupportAndPreservesFuzzyProfileSettings() {
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(id = "filament_paint_config")
+        val slot = filament.toPlateFilamentSlot(index = 1)
+        val paint = PlateObjectPaint(
+            support = paintLayer(PaintMode.Support),
+            fuzzySkin = paintLayer(PaintMode.FuzzySkin)
+        )
+        val result = applyPlateFilamentSlotsToNativeConfigResult(
+            configJson = """
+                {
+                  "enable_support": false,
+                  "support_type": "normal(auto)",
+                  "fuzzy_skin": "disabled_fuzzy",
+                  "fuzzy_skin_thickness": 0,
+                  "fuzzy_skin_point_distance": 0
+                }
+            """.trimIndent(),
+            slots = listOf(slot),
+            plateObjects = listOf(testPlateObject(id = 1L, filamentSlotIndex = 1, paint = paint)),
+            filaments = listOf(filament),
+            flushVolumes = null
+        )
+        val nativeConfig = JSONObject(result.json)
+
+        assertTrue(nativeConfig.optBoolean("enable_support"))
+        assertEquals("normal(manual)", nativeConfig.optString("support_type"))
+        assertEquals("disabled_fuzzy", nativeConfig.optString("fuzzy_skin"))
+        assertEquals(0.0, nativeConfig.optDouble("fuzzy_skin_thickness"), 0.0001)
+        assertEquals(0.0, nativeConfig.optDouble("fuzzy_skin_point_distance"), 0.0001)
+    }
+
+    @Test
+    fun paintAwareNativeConfigPreservesTreeSupportProfileForPaintedSupports() {
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(id = "filament_tree_support_paint")
+        val slot = filament.toPlateFilamentSlot(index = 1)
+        val paint = PlateObjectPaint(support = paintLayer(PaintMode.Support))
+        val result = applyPlateFilamentSlotsToNativeConfigResult(
+            configJson = """
+                {
+                  "enable_support": false,
+                  "support_type": "tree(auto)",
+                  "support_style": "tree_hybrid",
+                  "support_threshold_angle": 37,
+                  "support_on_build_plate_only": true
+                }
+            """.trimIndent(),
+            slots = listOf(slot),
+            plateObjects = listOf(testPlateObject(id = 1L, filamentSlotIndex = 1, paint = paint)),
+            filaments = listOf(filament),
+            flushVolumes = null
+        )
+        val nativeConfig = JSONObject(result.json)
+
+        assertTrue(nativeConfig.optBoolean("enable_support"))
+        assertEquals("tree(manual)", nativeConfig.optString("support_type"))
+        assertEquals("tree_hybrid", nativeConfig.optString("support_style"))
+        assertEquals(37, nativeConfig.optInt("support_threshold_angle"))
+        assertTrue(nativeConfig.optBoolean("support_on_build_plate_only"))
+    }
+
+    @Test
+    fun plateConfigCacheInvalidatesOnlyForActivePaintHash() {
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(id = "filament_cache_paint")
+        val slot = filament.toPlateFilamentSlot(index = 1)
+        val unpainted = listOf(testPlateObject(id = 1L, filamentSlotIndex = 1))
+        val painted = listOf(
+            testPlateObject(
+                id = 1L,
+                filamentSlotIndex = 1,
+                paint = PlateObjectPaint(support = paintLayer(PaintMode.Support))
+            )
+        )
+
+        val first = applyPlateFilamentSlotsToNativeConfigResult(
+            configJson = """{"enable_support":false,"support_type":"normal(auto)"}""",
+            slots = listOf(slot),
+            plateObjects = unpainted,
+            filaments = listOf(filament),
+            flushVolumes = null
+        )
+        val second = applyPlateFilamentSlotsToNativeConfigResult(
+            configJson = """{"enable_support":false,"support_type":"normal(auto)"}""",
+            slots = listOf(slot),
+            plateObjects = painted,
+            filaments = listOf(filament),
+            flushVolumes = null
+        )
+        val third = applyPlateFilamentSlotsToNativeConfigResult(
+            configJson = """{"enable_support":false,"support_type":"normal(auto)"}""",
+            slots = listOf(slot),
+            plateObjects = painted,
+            filaments = listOf(filament),
+            flushVolumes = null
+        )
+
+        assertFalse(first.cacheHit)
+        assertFalse(second.cacheHit)
+        assertTrue(third.cacheHit)
+        assertTrue(JSONObject(second.json).optBoolean("enable_support"))
+        assertEquals("normal(manual)", JSONObject(second.json).optString("support_type"))
     }
 
     @Test
@@ -614,7 +794,8 @@ class NativeSliceConfigTest {
         assertTrue("plate filament slot application exceeded smoke-test budget: $elapsedMs ms", elapsedMs < 5_000.0)
         assertEquals(8, result.optInt("mobile_slicer_active_filament_slot_count"))
         assertEquals(8, result.getJSONArray("filament_settings_id").length())
-        assertTrue(result.optBoolean("enable_prime_tower", false))
+        assertFalse(result.optBoolean("enable_prime_tower", true))
+        assertFalse(result.optBoolean("purge_in_prime_tower", true))
     }
 
     @Test
@@ -639,7 +820,7 @@ class NativeSliceConfigTest {
 
         val result = JSONObject(
             applyPlateFilamentSlotsToNativeConfig(
-                configJson = "{}",
+                configJson = """{"enable_prime_tower":true,"purge_in_prime_tower":false}""",
                 slots = slots,
                 plateObjects = plateObjects,
                 filaments = filaments,
@@ -735,7 +916,7 @@ class NativeSliceConfigTest {
 
         val result = JSONObject(
             applyPlateFilamentSlotsToNativeConfig(
-                configJson = "{}",
+                configJson = """{"enable_prime_tower":true,"purge_in_prime_tower":false}""",
                 slots = slots,
                 plateObjects = plateObjects,
                 filaments = filaments,
@@ -1025,6 +1206,29 @@ class NativeSliceConfigTest {
         assertEquals(0, nativeConfig.optInt("gcode_label_objects"))
         assertEquals("auto", nativeConfig.optString("wall_direction"))
         assertEquals(0, nativeConfig.optInt("wipe_tower_cone_angle"))
+    }
+
+    @Test
+    fun nativeSliceConfigMapsAppOnlyBambuLanHostTypeToValidOrcaHostType() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(
+            id = "printer_bambu_lan_native_host",
+            printHostType = PrintHostType.BambuLan,
+            printHost = "192.168.1.50"
+        )
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_bambu_lan_native_host",
+            printerProfileId = printer.id
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_bambu_lan_native_host",
+            1 to "Bambu LAN Native Host",
+            259 to printer.id
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals("octoprint", nativeConfig.optString("host_type"))
+        assertEquals("192.168.1.50", nativeConfig.optString("print_host"))
     }
 
     @Test
@@ -1799,7 +2003,11 @@ class NativeSliceConfigTest {
         )
     }
 
-    private fun testPlateObject(id: Long, filamentSlotIndex: Int): PlateObject =
+    private fun testPlateObject(
+        id: Long,
+        filamentSlotIndex: Int,
+        paint: PlateObjectPaint = PlateObjectPaint()
+    ): PlateObject =
         PlateObject(
             id = id,
             label = "Object $id",
@@ -1807,7 +2015,27 @@ class NativeSliceConfigTest {
             filamentSlotIndex = filamentSlotIndex,
             format = ImportedModelFormat.Stl,
             importTiming = null,
-            transform = ViewerModelTransform(centerXmm = 100f, centerYmm = 100f)
+            transform = ViewerModelTransform(centerXmm = 100f, centerYmm = 100f),
+            paint = paint
+        )
+
+    private fun paintLayer(
+        mode: PaintMode,
+        referencedSlots: Set<Int> = emptySet()
+    ): SerializedPaintLayer =
+        SerializedPaintLayer(
+            mode = mode,
+            objectSourceKey = "/tmp/object.stl",
+            meshFingerprint = null,
+            referencedSlotIndexes = referencedSlots,
+            volumeLayers = listOf(
+                SerializedPaintVolumeLayer(
+                    volumeIndex = 0,
+                    triangleCount = 12,
+                    serializedTriangles = listOf(SerializedPaintTriangle(1, "2A")),
+                    nativeMeshFingerprint = "fnv1a64:test"
+                )
+            )
         )
 
     private fun nativeConfigFor(

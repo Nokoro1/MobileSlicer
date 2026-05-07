@@ -41,14 +41,16 @@ internal fun buildModelPlacement(
         scale = scale,
         rotationXDegrees = transform.rotationXDegrees,
         rotationYDegrees = transform.rotationYDegrees,
-        rotationZDegrees = transform.rotationZDegrees
+        rotationZDegrees = transform.rotationZDegrees,
+        orientationMatrix = transform.orientationMatrix
     )
     val rotatedBounds = transformedBounds(
         bounds = mesh.bounds,
         scale = scale,
         rotationXDegrees = transform.rotationXDegrees,
         rotationYDegrees = transform.rotationYDegrees,
-        rotationZDegrees = transform.rotationZDegrees
+        rotationZDegrees = transform.rotationZDegrees,
+        orientationMatrix = transform.orientationMatrix
     )
     val placementX = transform.centerXmm - bed.widthMm * 0.5f - rotatedCenter.xMm
     val placementY = transform.centerYmm - bed.depthMm * 0.5f - rotatedCenter.yMm
@@ -56,9 +58,13 @@ internal fun buildModelPlacement(
     val matrix = FloatArray(16)
     Matrix.setIdentityM(matrix, 0)
     Matrix.translateM(matrix, 0, placementX, placementY, placementZ)
-    Matrix.rotateM(matrix, 0, transform.rotationXDegrees, 1f, 0f, 0f)
-    Matrix.rotateM(matrix, 0, transform.rotationYDegrees, 0f, 1f, 0f)
-    Matrix.rotateM(matrix, 0, transform.rotationZDegrees, 0f, 0f, 1f)
+    if (transform.orientationMatrix?.size == 9) {
+        Matrix.multiplyMM(matrix, 0, matrix, 0, transform.orientationMatrix.toAndroidMatrix4(), 0)
+    } else {
+        Matrix.rotateM(matrix, 0, transform.rotationZDegrees, 0f, 0f, 1f)
+        Matrix.rotateM(matrix, 0, transform.rotationYDegrees, 0f, 1f, 0f)
+        Matrix.rotateM(matrix, 0, transform.rotationXDegrees, 1f, 0f, 0f)
+    }
     Matrix.scaleM(matrix, 0, scale, scale, scale)
     return ModelPlacement(
         matrix = matrix,
@@ -69,6 +75,22 @@ internal fun buildModelPlacement(
         sizeY = rotatedBounds.sizeY,
         sizeZ = rotatedBounds.sizeZ
     )
+}
+
+internal fun List<Float>.toAndroidMatrix4(): FloatArray {
+    require(size == 9) { "Orientation matrix must contain 9 values." }
+    val matrix = FloatArray(16)
+    Matrix.setIdentityM(matrix, 0)
+    matrix[0] = this[0]
+    matrix[4] = this[1]
+    matrix[8] = this[2]
+    matrix[1] = this[3]
+    matrix[5] = this[4]
+    matrix[9] = this[5]
+    matrix[2] = this[6]
+    matrix[6] = this[7]
+    matrix[10] = this[8]
+    return matrix
 }
 
 internal fun defaultBedCenteredPrinterTransform(bed: PrinterBedSpec): ViewerModelTransform =
@@ -86,7 +108,8 @@ internal fun transformedBounds(
     scale: Float,
     rotationXDegrees: Float,
     rotationYDegrees: Float,
-    rotationZDegrees: Float
+    rotationZDegrees: Float,
+    orientationMatrix: List<Float>? = null
 ): TransformedBounds {
     var minX = Float.POSITIVE_INFINITY
     var minY = Float.POSITIVE_INFINITY
@@ -100,7 +123,7 @@ internal fun transformedBounds(
     for (x in xs) {
         for (y in ys) {
             for (z in zs) {
-                val point = transformPoint(x, y, z, scale, rotationXDegrees, rotationYDegrees, rotationZDegrees)
+                val point = transformPoint(x, y, z, scale, rotationXDegrees, rotationYDegrees, rotationZDegrees, orientationMatrix)
                 minX = min(minX, point.xMm)
                 minY = min(minY, point.yMm)
                 minZ = min(minZ, point.zMm)
@@ -130,11 +153,19 @@ internal fun transformPoint(
     scale: Float,
     rotationXDegrees: Float,
     rotationYDegrees: Float,
-    rotationZDegrees: Float
+    rotationZDegrees: Float,
+    orientationMatrix: List<Float>? = null
 ): StlModelPlacement {
     var tx = x * scale
     var ty = y * scale
     var tz = z * scale
+    if (orientationMatrix != null && orientationMatrix.size == 9) {
+        return StlModelPlacement(
+            xMm = orientationMatrix[0] * tx + orientationMatrix[1] * ty + orientationMatrix[2] * tz,
+            yMm = orientationMatrix[3] * tx + orientationMatrix[4] * ty + orientationMatrix[5] * tz,
+            zMm = orientationMatrix[6] * tx + orientationMatrix[7] * ty + orientationMatrix[8] * tz
+        )
+    }
 
     val rx = Math.toRadians(rotationXDegrees.toDouble())
     val cosX = cos(rx).toFloat()

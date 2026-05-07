@@ -1,6 +1,9 @@
 #include <jni.h>
 
+#include <array>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #if defined(__ANDROID__)
@@ -10,6 +13,11 @@
 #include "orca_wrapper.h"
 
 namespace {
+OrcaEngine* engine_from_handle(jlong handle);
+
+std::mutex g_paint_overlay_buffer_mutex;
+std::unordered_map<long long, std::vector<float>> g_paint_overlay_direct_buffers;
+
 void trim_native_heap()
 {
 #if defined(__ANDROID__)
@@ -20,6 +28,36 @@ void trim_native_heap()
         malloc_trim_fn(0);
     }
 #endif
+}
+
+jobject paint_overlay_interleaved_direct_buffer(JNIEnv* env, jlong handle, bool delta)
+{
+    constexpr int kMaxPaintOverlayDeltaInterleavedFloats = 4200000;
+    if (handle == 0) {
+        return nullptr;
+    }
+    OrcaEngine* engine = engine_from_handle(handle);
+    const int count = delta ?
+        orca_paint_get_overlay_delta_interleaved(engine, nullptr, 0) :
+        orca_paint_get_overlay_interleaved(engine, nullptr, 0);
+    if (count <= 1) {
+        return nullptr;
+    }
+    if (delta && count > kMaxPaintOverlayDeltaInterleavedFloats) {
+        return nullptr;
+    }
+    std::lock_guard<std::mutex> lock(g_paint_overlay_buffer_mutex);
+    const long long key = (static_cast<long long>(handle) << 1) | (delta ? 1LL : 0LL);
+    std::vector<float>& values = g_paint_overlay_direct_buffers[key];
+    values.assign(static_cast<size_t>(count), 0.f);
+    const int copied = delta ?
+        orca_paint_get_overlay_delta_interleaved(engine, values.data(), count) :
+        orca_paint_get_overlay_interleaved(engine, values.data(), count);
+    if (copied != count) {
+        values.clear();
+        return nullptr;
+    }
+    return env->NewDirectByteBuffer(values.data(), static_cast<jlong>(values.size() * sizeof(float)));
 }
 
 class JniStringArrayUtf {
@@ -180,6 +218,40 @@ private:
     jint* raw_;
 };
 
+class JniLongArrayElements {
+public:
+    JniLongArrayElements(JNIEnv* env, jlongArray values)
+        : env_(env), values_(values), raw_(env->GetLongArrayElements(values, nullptr))
+    {
+    }
+
+    ~JniLongArrayElements()
+    {
+        if (raw_ != nullptr) {
+            env_->ReleaseLongArrayElements(values_, raw_, JNI_ABORT);
+        }
+    }
+
+    JniLongArrayElements(const JniLongArrayElements&) = delete;
+    JniLongArrayElements& operator=(const JniLongArrayElements&) = delete;
+
+    bool ok() const { return raw_ != nullptr; }
+
+    std::vector<long long> copy(jsize count) const
+    {
+        std::vector<long long> output(static_cast<size_t>(count));
+        for (jsize index = 0; index < count; ++index) {
+            output[static_cast<size_t>(index)] = static_cast<long long>(raw_[index]);
+        }
+        return output;
+    }
+
+private:
+    JNIEnv* env_;
+    jlongArray values_;
+    jlong* raw_;
+};
+
 OrcaEngine* engine_from_handle(jlong handle)
 {
     return handle == 0 ? nullptr : reinterpret_cast<OrcaEngine*>(handle);
@@ -200,7 +272,16 @@ jstring new_nonempty_string(JNIEnv* env, const char* value)
     if (value == nullptr || value[0] == '\0') {
         return nullptr;
     }
-    return env->NewStringUTF(value);
+    std::string sanitized;
+    for (const unsigned char* cursor = reinterpret_cast<const unsigned char*>(value); *cursor != '\0'; ++cursor) {
+        const unsigned char byte = *cursor;
+        if (byte == '\n' || byte == '\r' || byte == '\t' || (byte >= 0x20 && byte <= 0x7e)) {
+            sanitized.push_back(static_cast<char>(byte));
+        } else {
+            sanitized.push_back('?');
+        }
+    }
+    return sanitized.empty() ? nullptr : env->NewStringUTF(sanitized.c_str());
 }
 } // namespace
 
@@ -238,6 +319,11 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeDestroyEngine(JNIEnv
 {
     if (handle == 0) {
         return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_paint_overlay_buffer_mutex);
+        g_paint_overlay_direct_buffers.erase(static_cast<long long>(handle) << 1);
+        g_paint_overlay_direct_buffers.erase((static_cast<long long>(handle) << 1) | 1LL);
     }
     orca_destroy(engine_from_handle(handle));
     trim_native_heap();
@@ -314,6 +400,538 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadPlateModels(JNIE
     return jni_bool_from_result(result);
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadPlateModelsV2(JNIEnv* env, jclass, jlong handle, jobjectArray paths, jdoubleArray transforms, jintArray extruder_ids, jlongArray mobile_object_ids, jstring paint_payload_json)
+{
+    if (handle == 0 || paths == nullptr || transforms == nullptr || extruder_ids == nullptr || mobile_object_ids == nullptr || paint_payload_json == nullptr) {
+        return JNI_FALSE;
+    }
+
+    const jsize count = env->GetArrayLength(paths);
+    const jsize transform_count = env->GetArrayLength(transforms);
+    const jsize extruder_count = env->GetArrayLength(extruder_ids);
+    const jsize object_id_count = env->GetArrayLength(mobile_object_ids);
+    const jsize transform_stride = transform_count == count * 16 ? 16 : 7;
+    if (count <= 0 || (transform_count != count * 7 && transform_count != count * 16) || extruder_count != count || object_id_count != count) {
+        return JNI_FALSE;
+    }
+
+    JniStringArrayUtf raw_paths(env, paths, count);
+    if (!raw_paths.ok()) {
+        return JNI_FALSE;
+    }
+    JniDoubleArrayElements raw_transforms(env, transforms);
+    if (!raw_transforms.ok()) {
+        return JNI_FALSE;
+    }
+    JniIntArrayElements raw_extruder_ids(env, extruder_ids);
+    if (!raw_extruder_ids.ok()) {
+        return JNI_FALSE;
+    }
+    JniLongArrayElements raw_mobile_object_ids(env, mobile_object_ids);
+    if (!raw_mobile_object_ids.ok()) {
+        return JNI_FALSE;
+    }
+    JniUtfString raw_paint_payload(env, paint_payload_json);
+    if (!raw_paint_payload.ok()) {
+        return JNI_FALSE;
+    }
+
+    std::vector<int> extruder_ids_copy = raw_extruder_ids.copy(count);
+    std::vector<long long> mobile_object_ids_copy = raw_mobile_object_ids.copy(count);
+
+    const int result = orca_load_plate_models_v2(
+        engine_from_handle(handle),
+        raw_paths.data(),
+        raw_transforms.data(),
+        static_cast<int>(transform_stride),
+        extruder_ids_copy.data(),
+        mobile_object_ids_copy.data(),
+        raw_paint_payload.get(),
+        static_cast<int>(count)
+    );
+
+    return jni_bool_from_result(result);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadProject3mf(JNIEnv* env, jclass, jlong handle, jstring path, jlongArray mobile_object_ids)
+{
+    if (handle == 0 || path == nullptr || mobile_object_ids == nullptr) {
+        return JNI_FALSE;
+    }
+
+    const jsize object_id_count = env->GetArrayLength(mobile_object_ids);
+    if (object_id_count <= 0) {
+        return JNI_FALSE;
+    }
+
+    JniUtfString raw_path(env, path);
+    if (!raw_path.ok()) {
+        return JNI_FALSE;
+    }
+    JniLongArrayElements raw_mobile_object_ids(env, mobile_object_ids);
+    if (!raw_mobile_object_ids.ok()) {
+        return JNI_FALSE;
+    }
+
+    std::vector<long long> mobile_object_ids_copy = raw_mobile_object_ids.copy(object_id_count);
+    const int result = orca_load_project_3mf(
+        engine_from_handle(handle),
+        raw_path.get(),
+        mobile_object_ids_copy.data(),
+        static_cast<int>(object_id_count)
+    );
+    trim_native_heap();
+    return jni_bool_from_result(result);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeExtractModelMeshToStl(JNIEnv* env, jclass, jlong handle, jstring input_path, jstring output_stl_path)
+{
+    if (handle == 0 || input_path == nullptr || output_stl_path == nullptr) {
+        return JNI_FALSE;
+    }
+
+    JniUtfString raw_input_path(env, input_path);
+    JniUtfString raw_output_path(env, output_stl_path);
+    if (!raw_input_path.ok() || !raw_output_path.ok()) {
+        return JNI_FALSE;
+    }
+
+    const int result = orca_extract_model_mesh_to_stl(
+        engine_from_handle(handle),
+        raw_input_path.get(),
+        raw_output_path.get()
+    );
+    trim_native_heap();
+    return jni_bool_from_result(result);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeSplitModelMeshToStls(JNIEnv* env, jclass, jlong handle, jstring input_path, jstring output_directory, jint split_mode)
+{
+    if (handle == 0 || input_path == nullptr || output_directory == nullptr) {
+        return JNI_FALSE;
+    }
+
+    JniUtfString raw_input_path(env, input_path);
+    JniUtfString raw_output_directory(env, output_directory);
+    if (!raw_input_path.ok() || !raw_output_directory.ok()) {
+        return JNI_FALSE;
+    }
+
+    const int result = orca_split_model_mesh_to_stls(
+        engine_from_handle(handle),
+        raw_input_path.get(),
+        raw_output_directory.get(),
+        static_cast<int>(split_mode)
+    );
+    trim_native_heap();
+    return jni_bool_from_result(result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeGetLastSplitResultJson(JNIEnv* env, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return nullptr;
+    }
+    return new_nonempty_string(env, orca_get_last_split_result_json(engine_from_handle(handle)));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintBeginSession(JNIEnv*, jclass, jlong handle, jlong mobile_object_id, jint mode)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(orca_paint_begin_session(
+        engine_from_handle(handle),
+        static_cast<long long>(mobile_object_id),
+        static_cast<int>(mode)
+    ));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeCutObject(JNIEnv* env, jclass, jlong handle, jstring request_json)
+{
+    if (handle == 0 || request_json == nullptr) {
+        return JNI_FALSE;
+    }
+    JniUtfString raw_request(env, request_json);
+    if (!raw_request.ok()) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(orca_cut_object(engine_from_handle(handle), raw_request.get()));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeGetLastCutResultJson(JNIEnv* env, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return nullptr;
+    }
+    return new_nonempty_string(env, orca_get_last_cut_result_json(engine_from_handle(handle)));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintBindingDebugJson(JNIEnv* env, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return nullptr;
+    }
+    const char* debug_json = orca_paint_binding_debug_json(engine_from_handle(handle));
+    return debug_json == nullptr ? nullptr : env->NewStringUTF(debug_json);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintObjectBoundsJson(JNIEnv* env, jclass, jlong handle, jlong mobile_object_id)
+{
+    if (handle == 0 || mobile_object_id <= 0) {
+        return nullptr;
+    }
+    const char* bounds_json = orca_paint_object_bounds_json(
+        engine_from_handle(handle),
+        static_cast<long long>(mobile_object_id));
+    return bounds_json == nullptr ? nullptr : env->NewStringUTF(bounds_json);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintEndSession(JNIEnv*, jclass, jlong handle, jboolean commit)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(orca_paint_end_session(
+        engine_from_handle(handle),
+        commit == JNI_TRUE ? 1 : 0
+    ));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintHitTest(JNIEnv* env, jclass, jlong, jfloat, jfloat)
+{
+    if (jclass exception_class = env->FindClass("java/lang/UnsupportedOperationException")) {
+        env->ThrowNew(exception_class, "screen-coordinate paint hit testing is disabled; use nativePaintHitTestRay");
+    }
+    return JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintHitTestRay(JNIEnv* env, jclass, jlong handle, jfloatArray ray)
+{
+    if (handle == 0 || ray == nullptr || env->GetArrayLength(ray) < 6) {
+        return nullptr;
+    }
+    JniFloatArrayElements raw_ray(env, ray);
+    if (!raw_ray.ok()) {
+        return nullptr;
+    }
+
+    std::array<float, 9> hit{};
+    const int result = orca_paint_hit_test_ray(engine_from_handle(handle), raw_ray.data(), hit.data());
+    if (result != 0) {
+        return nullptr;
+    }
+
+    jfloatArray output = env->NewFloatArray(static_cast<jsize>(hit.size()));
+    if (output == nullptr) {
+        return nullptr;
+    }
+    env->SetFloatArrayRegion(output, 0, static_cast<jsize>(hit.size()), hit.data());
+    return output;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintSetTool(
+    JNIEnv*,
+    jclass,
+    jlong handle,
+    jint brush_shape,
+    jint action,
+    jfloat brush_radius_mm,
+    jfloat brush_height_mm,
+    jint color_slot)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(orca_paint_set_tool(
+        engine_from_handle(handle),
+        static_cast<int>(brush_shape),
+        static_cast<int>(action),
+        static_cast<float>(brush_radius_mm),
+        static_cast<float>(brush_height_mm),
+        static_cast<int>(color_slot)
+    ));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintSetToolOptions(
+    JNIEnv* env,
+    jclass,
+    jlong handle,
+    jfloat smart_fill_angle_deg,
+    jfloat overhang_angle_deg,
+    jfloatArray clipping_plane)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+
+    std::array<float, 4> clipping{};
+    const float* clipping_ptr = nullptr;
+    if (clipping_plane != nullptr) {
+        if (env->GetArrayLength(clipping_plane) < 4) {
+            return JNI_FALSE;
+        }
+        JniFloatArrayElements raw_clipping(env, clipping_plane);
+        if (!raw_clipping.ok()) {
+            return JNI_FALSE;
+        }
+        for (size_t i = 0; i < clipping.size(); ++i) {
+            clipping[i] = raw_clipping.data()[i];
+        }
+        clipping_ptr = clipping.data();
+    }
+
+    return jni_bool_from_result(orca_paint_set_tool_options(
+        engine_from_handle(handle),
+        static_cast<float>(smart_fill_angle_deg),
+        static_cast<float>(overhang_angle_deg),
+        clipping_ptr
+    ));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintStrokeBegin(JNIEnv* env, jclass, jlong, jfloat, jfloat)
+{
+    if (jclass exception_class = env->FindClass("java/lang/UnsupportedOperationException")) {
+        env->ThrowNew(exception_class, "screen-coordinate paint strokes are disabled; use nativePaintStrokeBeginRay");
+    }
+    return JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintStrokeBeginRay(JNIEnv* env, jclass, jlong handle, jfloatArray ray, jint brush_shape, jint action, jfloat brush_radius_mm)
+{
+    if (handle == 0 || ray == nullptr || env->GetArrayLength(ray) < 6) {
+        return JNI_FALSE;
+    }
+    JniFloatArrayElements raw_ray(env, ray);
+    if (!raw_ray.ok()) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(orca_paint_stroke_begin_ray(
+        engine_from_handle(handle),
+        raw_ray.data(),
+        static_cast<int>(brush_shape),
+        static_cast<int>(action),
+        static_cast<float>(brush_radius_mm)
+    ));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintStrokeMove(JNIEnv* env, jclass, jlong, jfloat, jfloat)
+{
+    if (jclass exception_class = env->FindClass("java/lang/UnsupportedOperationException")) {
+        env->ThrowNew(exception_class, "screen-coordinate paint strokes are disabled; use nativePaintStrokeMoveRay");
+    }
+    return JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintStrokeMoveRay(JNIEnv* env, jclass, jlong handle, jfloatArray ray, jint brush_shape, jint action, jfloat brush_radius_mm)
+{
+    if (handle == 0 || ray == nullptr || env->GetArrayLength(ray) < 6) {
+        return JNI_FALSE;
+    }
+    JniFloatArrayElements raw_ray(env, ray);
+    if (!raw_ray.ok()) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(orca_paint_stroke_move_ray(
+        engine_from_handle(handle),
+        raw_ray.data(),
+        static_cast<int>(brush_shape),
+        static_cast<int>(action),
+        static_cast<float>(brush_radius_mm)
+    ));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintStrokeEnd(JNIEnv*, jclass, jlong handle, jboolean commit)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(commit == JNI_TRUE ?
+        orca_paint_stroke_end(engine_from_handle(handle)) :
+        orca_paint_end_session(engine_from_handle(handle), 0));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintUndo(JNIEnv*, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(orca_paint_undo(engine_from_handle(handle)));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintRedo(JNIEnv*, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(orca_paint_redo(engine_from_handle(handle)));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintClear(JNIEnv*, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return jni_bool_from_result(orca_paint_clear(engine_from_handle(handle)));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintCanUndo(JNIEnv*, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return orca_paint_can_undo(engine_from_handle(handle)) != 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintCanRedo(JNIEnv*, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return orca_paint_can_redo(engine_from_handle(handle)) != 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintSerialize(JNIEnv* env, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return nullptr;
+    }
+    return new_nonempty_string(env, orca_paint_serialize(engine_from_handle(handle)));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintGetOverlay(JNIEnv* env, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return nullptr;
+    }
+    return new_nonempty_string(env, orca_paint_get_overlay(engine_from_handle(handle)));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintGetOverlayDelta(JNIEnv* env, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return nullptr;
+    }
+    return new_nonempty_string(env, orca_paint_get_overlay_delta(engine_from_handle(handle)));
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintGetOverlayInterleaved(JNIEnv* env, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return nullptr;
+    }
+    OrcaEngine* engine = engine_from_handle(handle);
+    const int count = orca_paint_get_overlay_interleaved(engine, nullptr, 0);
+    if (count <= 1) {
+        return nullptr;
+    }
+    jfloatArray result = env->NewFloatArray(count);
+    if (result == nullptr) {
+        return nullptr;
+    }
+    std::vector<float> values(static_cast<size_t>(count), 0.f);
+    const int copied = orca_paint_get_overlay_interleaved(engine, values.data(), count);
+    if (copied != count) {
+        return nullptr;
+    }
+    env->SetFloatArrayRegion(result, 0, count, values.data());
+    return result;
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintGetOverlayInterleavedBuffer(JNIEnv* env, jclass, jlong handle)
+{
+    return paint_overlay_interleaved_direct_buffer(env, handle, false);
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintGetOverlayDeltaInterleaved(JNIEnv* env, jclass, jlong handle)
+{
+    constexpr int kMaxPaintOverlayDeltaInterleavedFloats = 4200000;
+    if (handle == 0) {
+        return nullptr;
+    }
+    OrcaEngine* engine = engine_from_handle(handle);
+    const int count = orca_paint_get_overlay_delta_interleaved(engine, nullptr, 0);
+    if (count <= 1) {
+        return nullptr;
+    }
+    if (count > kMaxPaintOverlayDeltaInterleavedFloats) {
+        return nullptr;
+    }
+    jfloatArray result = env->NewFloatArray(count);
+    if (result == nullptr) {
+        return nullptr;
+    }
+    std::vector<float> values(static_cast<size_t>(count), 0.f);
+    const int copied = orca_paint_get_overlay_delta_interleaved(engine, values.data(), count);
+    if (copied != count) {
+        return nullptr;
+    }
+    env->SetFloatArrayRegion(result, 0, count, values.data());
+    return result;
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintGetOverlayDeltaInterleavedBuffer(JNIEnv* env, jclass, jlong handle)
+{
+    return paint_overlay_interleaved_direct_buffer(env, handle, true);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePaintRemapColorSlots(JNIEnv* env, jclass, jlong handle, jstring payload_json, jintArray old_slot_to_new_slot)
+{
+    if (handle == 0 || payload_json == nullptr || old_slot_to_new_slot == nullptr) {
+        return nullptr;
+    }
+    const jsize slot_count = env->GetArrayLength(old_slot_to_new_slot);
+    if (slot_count <= 0) {
+        return nullptr;
+    }
+    JniUtfString payload(env, payload_json);
+    JniIntArrayElements remap(env, old_slot_to_new_slot);
+    if (!payload.ok() || !remap.ok()) {
+        return nullptr;
+    }
+    const std::vector<int> copied_remap = remap.copy(slot_count);
+    return new_nonempty_string(
+        env,
+        orca_paint_remap_color_slots(
+            engine_from_handle(handle),
+            payload.get(),
+            copied_remap.data(),
+            static_cast<int>(copied_remap.size())));
+}
+
 extern "C" JNIEXPORT jdoubleArray JNICALL
 Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanPlateArrangement(JNIEnv* env, jclass, jlong handle, jobjectArray paths, jdoubleArray transforms, jintArray extruder_ids, jstring config_json, jboolean allow_rotation)
 {
@@ -324,7 +942,8 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanPlateArrangement
     const jsize count = env->GetArrayLength(paths);
     const jsize transform_count = env->GetArrayLength(transforms);
     const jsize extruder_count = env->GetArrayLength(extruder_ids);
-    if (count <= 0 || transform_count != count * 7 || extruder_count != count) {
+    const jsize transform_stride = transform_count == count * 16 ? 16 : 7;
+    if (count <= 0 || (transform_count != count * 7 && transform_count != count * 16) || extruder_count != count) {
         return nullptr;
     }
 
@@ -345,12 +964,15 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanPlateArrangement
         return nullptr;
     }
 
+    constexpr jsize output_transform_stride = 16;
+    const jsize output_transform_count = count * output_transform_stride;
     std::vector<int> extruder_ids_copy = raw_extruder_ids.copy(count);
-    std::vector<double> planned(static_cast<size_t>(transform_count), 0.0);
+    std::vector<double> planned(static_cast<size_t>(output_transform_count), 0.0);
     const int result = orca_plan_plate_arrangement(
         engine_from_handle(handle),
         raw_paths.data(),
         raw_transforms.data(),
+        static_cast<int>(transform_stride),
         extruder_ids_copy.data(),
         static_cast<int>(count),
         raw_config_json.get(),
@@ -362,11 +984,11 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanPlateArrangement
         return nullptr;
     }
 
-    jdoubleArray output = env->NewDoubleArray(transform_count);
+    jdoubleArray output = env->NewDoubleArray(output_transform_count);
     if (output == nullptr) {
         return nullptr;
     }
-    env->SetDoubleArrayRegion(output, 0, transform_count, planned.data());
+    env->SetDoubleArrayRegion(output, 0, output_transform_count, planned.data());
     return output;
 }
 
@@ -380,7 +1002,8 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanAutoOrientation(
     const jsize count = env->GetArrayLength(paths);
     const jsize transform_count = env->GetArrayLength(transforms);
     const jsize extruder_count = env->GetArrayLength(extruder_ids);
-    if (count <= 0 || transform_count != count * 7 || extruder_count != count) {
+    const jsize transform_stride = transform_count == count * 16 ? 16 : 7;
+    if (count <= 0 || (transform_count != count * 7 && transform_count != count * 16) || extruder_count != count) {
         return nullptr;
     }
 
@@ -401,12 +1024,15 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanAutoOrientation(
         return nullptr;
     }
 
+    constexpr jsize output_transform_stride = 16;
+    const jsize output_transform_count = count * output_transform_stride;
     std::vector<int> extruder_ids_copy = raw_extruder_ids.copy(count);
-    std::vector<double> planned(static_cast<size_t>(transform_count), 0.0);
+    std::vector<double> planned(static_cast<size_t>(output_transform_count), 0.0);
     const int result = orca_plan_auto_orientation(
         engine_from_handle(handle),
         raw_paths.data(),
         raw_transforms.data(),
+        static_cast<int>(transform_stride),
         extruder_ids_copy.data(),
         static_cast<int>(count),
         raw_config_json.get(),
@@ -417,12 +1043,21 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanAutoOrientation(
         return nullptr;
     }
 
-    jdoubleArray output = env->NewDoubleArray(transform_count);
+    jdoubleArray output = env->NewDoubleArray(output_transform_count);
     if (output == nullptr) {
         return nullptr;
     }
-    env->SetDoubleArrayRegion(output, 0, transform_count, planned.data());
+    env->SetDoubleArrayRegion(output, 0, output_transform_count, planned.data());
     return output;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeCancelPlanning(JNIEnv*, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return JNI_FALSE;
+    }
+    return orca_cancel_planning(engine_from_handle(handle)) == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -565,6 +1200,23 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeWriteBambuGcode3mfTo
     }
 
     const int result = orca_write_bambu_gcode_3mf_to_file(engine_from_handle(handle), raw_path.get());
+    trim_native_heap();
+    return jni_bool_from_result(result);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeWriteProject3mfToFile(JNIEnv* env, jclass, jlong handle, jstring path)
+{
+    if (handle == 0 || path == nullptr) {
+        return JNI_FALSE;
+    }
+
+    JniUtfString raw_path(env, path);
+    if (!raw_path.ok()) {
+        return JNI_FALSE;
+    }
+
+    const int result = orca_write_project_3mf_to_file(engine_from_handle(handle), raw_path.get());
     trim_native_heap();
     return jni_bool_from_result(result);
 }

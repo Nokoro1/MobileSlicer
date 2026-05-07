@@ -197,7 +197,7 @@ internal fun MainActivity.testPrinterConnection(printerProfile: PrinterProfile):
         printerConnectionRepository.testConnection(printerProfile).userMessage()
     }
 
-internal fun MainActivity.printerStatus(printerProfile: PrinterProfile): String = runBlocking(Dispatchers.IO) {
+internal suspend fun MainActivity.printerStatus(printerProfile: PrinterProfile): String = withContext(Dispatchers.IO) {
         printerConnectionRepository.fetchStatus(printerProfile).userMessage()
     }
 
@@ -257,7 +257,7 @@ internal suspend fun MainActivity.sendGcodeToPrinter(
                 ?: return@withContext PrinterConnectionResult(
                     false,
                     "Send failed",
-                    "Native engine is unavailable for Bambu package export."
+                    "The slicer is not ready to package this file for Bambu LAN sending."
                 )
             val packageFile = File(cacheDir, "latest-send-${remoteFileName.toBambuPackageFileName()}")
             cleanupGeneratedGcodeCache(retain = packageFile)
@@ -270,7 +270,7 @@ internal suspend fun MainActivity.sendGcodeToPrinter(
                 return@withContext PrinterConnectionResult(
                     false,
                     "Bambu package export failed",
-                    nativeError.ifBlank { "Could not export the Orca/Bambu .gcode.3mf package." }
+                    nativeError.ifBlank { "Could not export the Bambu .gcode.3mf package." }
                 )
             }
             packageFile

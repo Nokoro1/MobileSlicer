@@ -1,6 +1,8 @@
 package com.mobileslicer.profiles
 
 internal data class ProcessPrimeTowerDetails(
+    val wipeTowerXmm: Float = 15f,
+    val wipeTowerYmm: Float = 220f,
     val primeTowerSkipPoints: Boolean = true,
     val primeVolumeMm3: Float = 45f,
     val primeTowerBrimWidthMm: Float = 3f,

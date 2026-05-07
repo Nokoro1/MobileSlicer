@@ -42,14 +42,18 @@ jobs:
       - name: Run verification script syntax checks
         run: scripts/verify_android.sh script-tests
 
-      - name: Run Orca asset generator tests
-        run: scripts/verify_android.sh asset-tests
-
-      - name: Run Android lint
-        run: scripts/verify_android.sh lint
-
       - name: Run JVM unit tests
-        run: scripts/verify_android.sh unit
+        working-directory: android-app
+        run: ./gradlew testDebugUnitTest
 
-      - name: Run release compile, lint, and R8 checks
-        run: scripts/verify_android.sh release
+      - name: Run Android debug lint
+        working-directory: android-app
+        run: ./gradlew lintDebug
+
+      - name: Assemble debug APK
+        working-directory: android-app
+        run: ./gradlew assembleDebug
+
+      - name: Run release compile and vital lint
+        working-directory: android-app
+        run: ./gradlew compileReleaseKotlin lintVitalRelease

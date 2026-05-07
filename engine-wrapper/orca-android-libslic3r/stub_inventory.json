@@ -26,15 +26,13 @@
     {
       "path": "engine-wrapper/orca-android-libslic3r/android_libslic3r_model_stubs.cpp",
       "classification": "unsupported_feature_gates",
-      "allowedProductScope": "Current Android STL-only model-load path and runtime temporary directory shim.",
+      "allowedProductScope": "Current Android STL and accepted BBS 3MF mesh-extraction/project path plus runtime temporary directory shim.",
       "blockedProductAreas": [
-        "3MF import",
         "OBJ import",
         "AMF import",
         "SVG import",
         "STEP import",
         "DRC import",
-        "mesh boolean/cut workflows",
         "facet painting or face-selection state",
         "model backup/save helpers outside the accepted Android project path"
       ],
@@ -46,8 +44,6 @@
         "Slic3r::load_bbs_3mf",
         "Slic3r::load_3mf",
         "Slic3r::Step",
-        "Slic3r::MeshBoolean::mcut::make_boolean",
-        "Slic3r::TriangleSelector",
         "Slic3r::temporary_dir"
       ]
     },

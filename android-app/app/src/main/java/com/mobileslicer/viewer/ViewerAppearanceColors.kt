@@ -25,6 +25,9 @@ internal data class ViewerColors(
     fun dimmedModelColor(): FloatArray =
         floatArrayOf(modelColor[0] * 0.82f, modelColor[1] * 0.82f, modelColor[2] * 0.82f, 1f)
 
+    fun paintBaseModelColor(): FloatArray =
+        floatArrayOf(0.84f, 0.86f, 0.88f, 1f)
+
     fun plateFrontFaceColor(): FloatArray =
         floatArrayOf(plateColor[0], plateColor[1], plateColor[2], if (plateColor.size > 3) plateColor[3] else 1f)
 

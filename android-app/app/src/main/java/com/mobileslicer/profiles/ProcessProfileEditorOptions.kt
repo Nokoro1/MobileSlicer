@@ -153,57 +153,57 @@ import org.json.JSONObject
 
 
 internal class ProcessProfileEditorOptions {
-    val seamPositionOptions = ProcessSeamPosition.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca seam_position = ${option.configValue}.") }
-    val seamScarfTypeOptions = SeamScarfType.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca seam_slope_type = ${option.configValue}.") }
-    val wallSequenceOptions = WallSequence.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca wall_sequence = ${option.configValue}.") }
-    val wallDirectionOptions = WallDirection.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca wall_direction = ${option.configValue}.") }
-    val extraBridgeLayerOptions = ExtraBridgeLayerMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca enable_extra_bridge_layer = ${option.configValue}.") }
-    val skirtTypeOptions = SkirtType.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca skirt_type = ${option.configValue}.") }
-    val draftShieldOptions = DraftShield.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca draft_shield = ${option.configValue}.") }
-    val brimTypeOptions = BrimType.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca brim_type = ${option.configValue}.") }
-    val slicingModeOptions = SlicingMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca slicing_mode = ${option.configValue}.") }
-    val printSequenceOptions = PrintSequence.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca print_sequence = ${option.configValue}.") }
-    val printOrderOptions = PrintOrder.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca print_order = ${option.configValue}.") }
-    val wipeTowerWallTypeOptions = WipeTowerWallType.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca wipe_tower_wall_type = ${option.configValue}.") }
-    val timelapseTypeOptions = TimelapseType.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca timelapse_type = ${option.configValue}.") }
-    val filamentMapModeOptions = FilamentMapMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca filament_map_mode = ${option.configValue}.") }
-    val counterboreHoleBridgingOptions = CounterboreHoleBridging.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca counterbore_hole_bridging = ${option.configValue}.") }
-    val topSurfacePatternOptions = TopSurfacePattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca top_surface_pattern = ${option.configValue}.") }
-    val bottomSurfacePatternOptions = BottomSurfacePattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca bottom_surface_pattern = ${option.configValue}.") }
-    val internalSolidPatternOptions = InternalSolidInfillPattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca internal_solid_infill_pattern = ${option.configValue}.") }
+    val seamPositionOptions = ProcessSeamPosition.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val seamScarfTypeOptions = SeamScarfType.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val wallSequenceOptions = WallSequence.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val wallDirectionOptions = WallDirection.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val extraBridgeLayerOptions = ExtraBridgeLayerMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val skirtTypeOptions = SkirtType.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val draftShieldOptions = DraftShield.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val brimTypeOptions = BrimType.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val slicingModeOptions = SlicingMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val printSequenceOptions = PrintSequence.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val printOrderOptions = PrintOrder.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val wipeTowerWallTypeOptions = WipeTowerWallType.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val timelapseTypeOptions = TimelapseType.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val filamentMapModeOptions = FilamentMapMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val counterboreHoleBridgingOptions = CounterboreHoleBridging.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val topSurfacePatternOptions = TopSurfacePattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val bottomSurfacePatternOptions = BottomSurfacePattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val internalSolidPatternOptions = InternalSolidInfillPattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
     val boolEnabledDisabledOptions =
         listOf(
             AppSettingOption(true, "Enabled", ""),
             AppSettingOption(false, "Disabled", "")
         )
     val infillCombinationOptions = boolEnabledDisabledOptions
-    val internalBridgeFilterOptions = InternalBridgeFilterMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca dont_filter_internal_bridges = ${option.configValue}.") }
+    val internalBridgeFilterOptions = InternalBridgeFilterMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
     val ensureVerticalShellThicknessOptions =
         EnsureVerticalShellThicknessMode.entries.map { option ->
-            AppSettingOption(option, option.displayLabel, "Maps directly to Orca ensure_vertical_shell_thickness = ${option.configValue}.")
+            AppSettingOption(option, option.displayLabel, "")
         }
-    val wallGeneratorOptions = WallGenerator.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca wall_generator = ${option.configValue}.") }
-    val wallInfillOrderOptions = WallInfillOrder.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca wall_infill_order = ${option.configValue}.") }
-    val sparseInfillPatternOptions = SparseInfillPattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca sparse_infill_pattern = ${option.configValue}.") }
+    val wallGeneratorOptions = WallGenerator.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val wallInfillOrderOptions = WallInfillOrder.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val sparseInfillPatternOptions = SparseInfillPattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
     val gapFillTargetOptions =
         listOf(
-            AppSettingOption("everywhere", "Everywhere", "Maps directly to Orca gap_fill_target = everywhere."),
-            AppSettingOption("topbottom", "Top and bottom surfaces", "Maps directly to Orca gap_fill_target = topbottom."),
-            AppSettingOption("nowhere", "Nowhere", "Maps directly to Orca gap_fill_target = nowhere.")
+            AppSettingOption("everywhere", "Everywhere", "Fill gaps anywhere they appear."),
+            AppSettingOption("topbottom", "Top and bottom surfaces", "Limit gap fill to top and bottom surfaces."),
+            AppSettingOption("nowhere", "Nowhere", "Do not add gap fill.")
         )
-    val supportTypeOptions = SupportType.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca support_type = ${option.configValue}.") }
-    val supportStyleOptions = SupportStyle.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca support_style = ${option.configValue}.") }
+    val supportTypeOptions = SupportType.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val supportStyleOptions = SupportStyle.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
     val supportInterfacePatternOptions =
         SupportInterfacePattern.entries.map { option ->
-            AppSettingOption(option, option.displayLabel, "Maps directly to Orca support_interface_pattern = ${option.configValue}.")
+            AppSettingOption(option, option.displayLabel, "")
         }
     val supportBasePatternOptions =
         SupportBasePattern.entries.map { option ->
-            AppSettingOption(option, option.displayLabel, "Maps directly to Orca support_base_pattern = ${option.configValue}.")
+            AppSettingOption(option, option.displayLabel, "")
         }
-    val fuzzySkinOptions = FuzzySkinType.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca fuzzy_skin = ${option.configValue}.") }
-    val fuzzySkinModeOptions = FuzzySkinMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca fuzzy_skin_mode = ${option.configValue}.") }
-    val fuzzySkinNoiseOptions = FuzzySkinNoiseType.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca fuzzy_skin_noise_type = ${option.configValue}.") }
-    val ironingTypeOptions = ProcessIroningType.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca ironing_type = ${option.configValue}.") }
-    val ironingPatternOptions = IroningPattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "Maps directly to Orca ironing_pattern = ${option.configValue}.") }
+    val fuzzySkinOptions = FuzzySkinType.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val fuzzySkinModeOptions = FuzzySkinMode.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val fuzzySkinNoiseOptions = FuzzySkinNoiseType.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val ironingTypeOptions = ProcessIroningType.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
+    val ironingPatternOptions = IroningPattern.entries.map { option -> AppSettingOption(option, option.displayLabel, "") }
 }

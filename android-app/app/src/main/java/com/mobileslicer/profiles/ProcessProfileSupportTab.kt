@@ -116,7 +116,7 @@ internal fun ProcessSupportTabContent(
     treeSupportBrimWidth: String,
     onTreeSupportBrimWidthChange: (String) -> Unit,
 ) {
-    ProfileEditorSection("Support", "Support generation and contact-gap controls for Orca auto support behavior.") {
+    ProfileEditorSection("Support", "Support generation, contact gaps, and tree support settings.") {
         ProfileGroupHeader("Support")
         ProfileDropdownField(
             label = "Enable support",

@@ -57,6 +57,51 @@ internal object NativeEngineCalls {
             NativeEngineBridge.nativeLoadPlateModels(handle.raw, paths, transforms, extruderIds)
         }
 
+    fun loadPlateModelsV2(
+        handle: NativeEngineHandle,
+        paths: Array<String>,
+        transforms: DoubleArray,
+        extruderIds: IntArray,
+        mobileObjectIds: LongArray,
+        paintPayloadJson: String
+    ): NativeEngineCallResult {
+        return try {
+            booleanCall(handle, "nativeLoadPlateModelsV2") {
+                NativeEngineBridge.nativeLoadPlateModelsV2(
+                    handle.raw,
+                    paths,
+                    transforms,
+                    extruderIds,
+                    mobileObjectIds,
+                    paintPayloadJson
+                )
+            }
+        } catch (error: UnsatisfiedLinkError) {
+            NativeEngineCallResult.Failure(
+                operation = "nativeLoadPlateModelsV2",
+                error = null
+            )
+        }
+    }
+
+    fun loadProject3mf(
+        handle: NativeEngineHandle,
+        path: String,
+        mobileObjectIds: LongArray
+    ): NativeEngineCallResult =
+        booleanCall(handle, "nativeLoadProject3mf") {
+            NativeEngineBridge.nativeLoadProject3mf(handle.raw, path, mobileObjectIds)
+        }
+
+    fun extractModelMeshToStl(
+        handle: NativeEngineHandle,
+        inputPath: String,
+        outputStlPath: String
+    ): NativeEngineCallResult =
+        booleanCall(handle, "nativeExtractModelMeshToStl") {
+            NativeEngineBridge.nativeExtractModelMeshToStl(handle.raw, inputPath, outputStlPath)
+        }
+
     fun planPlateArrangement(
         handle: NativeEngineHandle,
         paths: Array<String>,
@@ -88,6 +133,9 @@ internal object NativeEngineCalls {
             extruderIds,
             configJson
         )
+
+    fun cancelPlanning(handle: NativeEngineHandle): Boolean =
+        NativeEngineBridge.nativeCancelPlanning(handle.raw)
 
     fun setModelTransform(
         handle: NativeEngineHandle,
@@ -125,6 +173,11 @@ internal object NativeEngineCalls {
     fun writeGcodeToFile(handle: NativeEngineHandle, path: String): NativeEngineCallResult =
         booleanCall(handle, "nativeWriteGcodeToFile") {
             NativeEngineBridge.nativeWriteGcodeToFile(handle.raw, path)
+        }
+
+    fun writeProject3mfToFile(handle: NativeEngineHandle, path: String): NativeEngineCallResult =
+        booleanCall(handle, "nativeWriteProject3mfToFile") {
+            NativeEngineBridge.nativeWriteProject3mfToFile(handle.raw, path)
         }
 
     fun writeBambuGcode3mfToFile(handle: NativeEngineHandle, path: String): NativeEngineCallResult =

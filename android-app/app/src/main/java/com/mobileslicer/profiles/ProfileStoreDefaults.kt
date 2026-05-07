@@ -6,7 +6,7 @@ internal fun profileStoreFallbackPrinterProfile(): PrinterProfile =
     PrinterProfile(
         id = "fallback_printer",
         name = "Add Printer",
-        subtitle = "Import an Orca printer or create a custom printer.",
+        subtitle = "Import a printer preset or create a custom printer.",
         builtIn = false,
         bedWidthMm = 220f,
         bedDepthMm = 220f,
@@ -19,7 +19,7 @@ internal fun profileStoreFallbackFilamentProfile(): FilamentProfile =
     FilamentProfile(
         id = "fallback_filament",
         name = "Add Filament",
-        subtitle = "Import an Orca filament or create a custom filament.",
+        subtitle = "Import a filament preset or create a custom filament.",
         builtIn = false,
         materialType = "PLA",
         densityGPerCm3 = 1.24f,
@@ -44,7 +44,7 @@ internal fun profileStoreDefaultFilamentProfiles(): List<FilamentProfile> = list
     FilamentProfile(
         id = "generic_pla",
         name = "Generic PLA",
-        subtitle = "General-purpose material for low-friction slicing checks.",
+        subtitle = "General-purpose PLA for everyday prints and quick slicing checks.",
         builtIn = true,
         materialType = "PLA",
         densityGPerCm3 = genericFilamentDensityForMaterial("PLA"),

@@ -31,6 +31,11 @@ target_compile_definitions(orca_core_android PRIVATE
     SLIC3R_DESKTOP_INTEGRATION=0
 )
 
+target_compile_options(orca_core_android PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-w>
+    $<$<COMPILE_LANGUAGE:C>:-w>
+)
+
 set_target_properties(orca_core_android PROPERTIES
     OUTPUT_NAME "orca_core_android"
 )

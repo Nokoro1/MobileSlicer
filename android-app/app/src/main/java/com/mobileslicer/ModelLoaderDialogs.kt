@@ -18,7 +18,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
+import com.mobileslicer.calibration.CalibrationJob
+import com.mobileslicer.calibration.resultApplySpec
 import com.mobileslicer.profiles.ActiveSlicerConfiguration
 import com.mobileslicer.workspace.SliceResult
 
@@ -120,6 +124,54 @@ internal fun ModelLoaderSliceCompletionDialog(
                     }
                 }
             )
+        }
+    )
+}
+
+@Composable
+internal fun ModelLoaderCalibrationResultDialog(
+    job: CalibrationJob,
+    onDismiss: () -> Unit,
+    onApply: (String) -> Unit
+) {
+    val spec = job.resultApplySpec()
+    var value by remember(job.type.name) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                enabled = spec != null,
+                onClick = { onApply(value) }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Skip")
+            }
+        },
+        title = {
+            Text(spec?.title ?: "Calibration complete")
+        },
+        text = {
+            if (spec == null) {
+                Text("${job.type.title} was sliced. This calibration does not map to a saved Mobile Slicer profile field yet.")
+            } else {
+                androidx.compose.foundation.layout.Column {
+                    Text(spec.helperText)
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = { value = it },
+                        singleLine = true,
+                        label = { Text(spec.valueLabel) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                    )
+                }
+            }
         }
     )
 }

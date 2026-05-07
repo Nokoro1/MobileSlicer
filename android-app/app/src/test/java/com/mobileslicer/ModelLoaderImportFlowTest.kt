@@ -274,7 +274,7 @@ class ModelLoaderImportFlowTest {
         )
         assertTrue(currentApplication.targetStillCurrent)
         assertEquals(9f, currentApplication.legacyState?.modelBounds?.maxX)
-        assertTrue(currentApplication.statusMessage?.contains("Workspace mesh prepared") == true)
+        assertTrue(currentApplication.statusMessage?.contains("Workspace preview ready") == true)
 
         val staleApplication = planWorkspacePreparationApplication(
             request = request,

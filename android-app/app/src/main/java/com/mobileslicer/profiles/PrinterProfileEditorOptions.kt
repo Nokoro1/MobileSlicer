@@ -10,61 +10,61 @@ internal class PrinterProfileEditorOptions {
             )
         val gcodeFlavorOptions =
             GcodeFlavor.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca gcode_flavor = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val printerStructureOptions =
             PrinterStructure.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca printer_structure = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val printerTechnologyOptions =
             PrinterTechnology.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca printer_technology = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val powerLossRecoveryOptions =
             PowerLossRecoveryMode.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca enable_power_loss_recovery = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val printHostTypeOptions =
             PrintHostType.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca host_type = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val printHostAuthorizationOptions =
             PrintHostAuthorizationType.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca printhost_authorization_type = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val nozzleTypeOptions =
             NozzleType.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca nozzle_type = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val bedTemperatureFormulaOptions =
             BedTemperatureFormula.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca bed_temperature_formula = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val defaultBedTypeOptions =
             bedTypeOptions(supportMultiBedTypes = true)
         val wipeTowerTypeOptions =
             WipeTowerType.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca wipe_tower_type = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val zHopTypeOptions =
             ZHopType.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca z_hop_types = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val retractLiftEnforceOptions =
             RetractLiftEnforce.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca retract_lift_enforce = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val longRetractionWhenCutOptions =
             LongRetractionWhenCutMode.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca enable_long_retraction_when_cut = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val extruderTypeOptions =
             ExtruderType.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca extruder_type = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
         val nozzleVolumeTypeOptions =
             NozzleVolumeType.entries.map { option ->
-                AppSettingOption(option, option.displayLabel, "Maps directly to Orca nozzle_volume_type = ${option.configValue}.")
+                AppSettingOption(option, option.displayLabel, "")
             }
 
     fun bedTypeOptions(supportMultiBedTypes: Boolean): List<AppSettingOption<DefaultBedType>> {
@@ -77,7 +77,7 @@ internal class PrinterProfileEditorOptions {
             AppSettingOption(
                 option,
                 option.displayLabel,
-                "Maps directly to Orca default_bed_type = ${option.configValue.ifBlank { "<empty>" }}."
+                ""
             )
         }
     }

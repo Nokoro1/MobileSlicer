@@ -8,6 +8,7 @@
 #include <iterator>
 #include <future>
 #include <atomic>
+#include <type_traits>
 
 #ifndef NDEBUG
 #include <iostream>
@@ -575,6 +576,22 @@ private:
 
     using Shapes = TMultiShape<RawShape>;
 
+    template<class Shape, class = void>
+    struct HasCommutativeOverlapTest: std::false_type {};
+
+    template<class Shape>
+    struct HasCommutativeOverlapTest<Shape, std::void_t<decltype(std::declval<const Shape&>().overlaps(std::declval<const Shape&>()))>>:
+        std::true_type {};
+
+    static bool shapesStrictlyOverlap(const RawShape& left, const RawShape& right)
+    {
+        if constexpr (HasCommutativeOverlapTest<RawShape>::value) {
+            return left.overlaps(right) || right.overlaps(left);
+        } else {
+            return sl::intersects(left, right) && !sl::touches(left, right);
+        }
+    }
+
     Shapes calcnfp(const Item &trsh, const Box& bed ,Lvl<nfp::NfpLevel::CONVEX_ONLY>)
     {
         using namespace nfp;
@@ -729,6 +746,17 @@ private:
         }
 
         bool first_object = std::all_of(items_.begin(), items_.end(), [&](const Item &rawShape) { return rawShape.is_virt_object && !rawShape.is_wipe_tower; });
+        auto overlapsPackedItems = [this](const Item& candidate) {
+            for (const Item& packed : items_) {
+                if (packed.is_virt_object && !packed.is_wipe_tower) {
+                    continue;
+                }
+                if (shapesStrictlyOverlap(candidate.transformedShape(), packed.transformedShape())) {
+                    return true;
+                }
+            }
+            return false;
+        };
 
         // item won't overlap with virtual objects if it's inside or touches NFP
         auto overlapWithVirtObject = [&]() -> double {
@@ -795,11 +823,14 @@ private:
                 }
 
                 // Our object function for placement
-                auto rawobjfunc = [_objfunc, iv, startpos]
+                auto rawobjfunc = [_objfunc, &overlapsPackedItems, iv, startpos]
                         (Vertex v, Item& itm)
                 {
                     auto d = (v - iv) + startpos;
                     itm.translation(d);
+                    if (overlapsPackedItems(itm)) {
+                        return LARGE_COST_TO_REJECT;
+                    }
                     return _objfunc(itm);
                 };
 
@@ -812,11 +843,15 @@ private:
                 auto alignment = config_.alignment;
 
                 auto boundaryCheck = [alignment, &merged_pile, &getNfpPoint,
+                        &overlapsPackedItems,
                         &item, &bin, &iv, &startpos] (const Optimum& o)
                 {
                     auto v = getNfpPoint(o);
                     auto d = (v - iv) + startpos;
                     item.translation(d);
+                    if (overlapsPackedItems(item)) {
+                        return LARGE_COST_TO_REJECT;
+                    }
 
                     merged_pile.emplace_back(item.transformedShape());
                     auto chull = sl::convexHull(merged_pile);
@@ -948,12 +983,93 @@ private:
                     }
                 }
 
-                if( best_score < global_score) {
-                    auto d = (getNfpPoint(optimum) - iv) + startpos;
-                    final_tr = d;
-                    final_rot = initial_rot + rot;
+            if( best_score < global_score) {
+                auto d = (getNfpPoint(optimum) - iv) + startpos;
+                final_tr = d;
+                final_rot = initial_rot + rot;
+                can_pack = true;
+                global_score = best_score;
+            }
+            }
+
+            if (!can_pack && !items_.empty()) {
+                double recovered_score = std::numeric_limits<double>::max();
+                Vertex recovered_tr = final_tr;
+                Radians recovered_rot = final_rot;
+                const auto bed_center = binbb.center();
+                const auto bed_width = binbb.width();
+                const auto bed_height = binbb.height();
+                const auto min_step = static_cast<decltype(bed_width)>(CoordType<RawShape>::MM_IN_COORDS * 10);
+                const auto arrange_gap = static_cast<decltype(bed_width)>(CoordType<RawShape>::MM_IN_COORDS * 2);
+
+                auto try_position = [&](const Vertex& desired_center) {
+                    auto ibb = item.boundingBox();
+                    Vertex translation = item.translation() + desired_center - ibb.center();
+                    item.translation(translation);
+                    if (overfit(item.transformedShape(), bin_) > 0 || overlapsPackedItems(item)) {
+                        return;
+                    }
+                    double score = _objfunc(item);
+                    if (score >= 0 && score < LARGE_COST_TO_REJECT && score < recovered_score) {
+                        recovered_score = score;
+                        recovered_tr = item.translation();
+                        recovered_rot = item.rotation();
+                    }
+                };
+
+                for (auto rot : config_.rotations) {
+                    item.translation(initial_tr);
+                    item.rotation(initial_rot + rot);
+                    auto ibb = item.boundingBox();
+                    const auto item_width = std::max(ibb.width(), min_step);
+                    const auto item_height = std::max(ibb.height(), min_step);
+                    const auto step_x = std::max(item_width + arrange_gap, min_step);
+                    const auto step_y = std::max(item_height + arrange_gap, min_step);
+
+                    try_position(bed_center);
+
+                    for (const Item& packed : items_) {
+                        if (packed.is_virt_object && !packed.is_wipe_tower) {
+                            continue;
+                        }
+                        const auto pbb = packed.boundingBox();
+                        const auto pc = pbb.center();
+                        const auto candidate_half_w = item_width / 2 + arrange_gap;
+                        const auto candidate_half_h = item_height / 2 + arrange_gap;
+                        try_position({pbb.maxCorner().x() + candidate_half_w, pc.y()});
+                        try_position({pbb.minCorner().x() - candidate_half_w, pc.y()});
+                        try_position({pc.x(), pbb.maxCorner().y() + candidate_half_h});
+                        try_position({pc.x(), pbb.minCorner().y() - candidate_half_h});
+                        try_position({pbb.maxCorner().x() + candidate_half_w, pbb.maxCorner().y() + candidate_half_h});
+                        try_position({pbb.minCorner().x() - candidate_half_w, pbb.maxCorner().y() + candidate_half_h});
+                        try_position({pbb.maxCorner().x() + candidate_half_w, pbb.minCorner().y() - candidate_half_h});
+                        try_position({pbb.minCorner().x() - candidate_half_w, pbb.minCorner().y() - candidate_half_h});
+                    }
+
+                    if (recovered_score < std::numeric_limits<double>::max()) {
+                        continue;
+                    }
+
+                    const int max_ring_x = step_x > 0 ? int(std::abs(bed_width / step_x)) + 2 : 2;
+                    const int max_ring_y = step_y > 0 ? int(std::abs(bed_height / step_y)) + 2 : 2;
+                    const int max_ring = std::min(std::max(max_ring_x, max_ring_y), 8);
+                    for (int ring = 1; ring <= max_ring; ++ring) {
+                        for (int ix = -ring; ix <= ring; ++ix) {
+                            try_position({bed_center.x() + ix * step_x, bed_center.y() - ring * step_y});
+                            try_position({bed_center.x() + ix * step_x, bed_center.y() + ring * step_y});
+                        }
+                        for (int iy = -ring + 1; iy < ring; ++iy) {
+                            try_position({bed_center.x() - ring * step_x, bed_center.y() + iy * step_y});
+                            try_position({bed_center.x() + ring * step_x, bed_center.y() + iy * step_y});
+                        }
+                    }
+                }
+
+                if (recovered_score < global_score) {
+                    final_tr = recovered_tr;
+                    final_rot = recovered_rot;
                     can_pack = true;
-                    global_score = best_score;
+                    global_score = recovered_score;
                 }
             }
 

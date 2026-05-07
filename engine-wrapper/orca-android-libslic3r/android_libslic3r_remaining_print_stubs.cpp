@@ -110,20 +110,6 @@ bool check_layer_id_pattern(const std::string & /* pattern */, int /* layer_id *
 
 void name_tbb_thread_pool_threads_set_locale() {}
 
-void smooth_outward(MutablePolygon & /* polygon */, coord_t /* clip_dist_scaled */)
-{
-}
-
-std::vector<Vec3d> triangulate_expolygon_3d(const ExPolygon & /* poly */, coordf_t /* z */, bool /* flip */)
-{
-    return {};
-}
-
-std::vector<Vec3d> triangulate_expolygons_3d(const ExPolygons & /* polys */, coordf_t /* z */, bool /* flip */)
-{
-    return {};
-}
-
 Polylines Paths64_to_polylines(const Clipper2Lib::Paths64 &in)
 {
     Polylines out;
@@ -1098,20 +1084,6 @@ const std::string &FanMover::process_gcode(const std::string & /* gcode */, bool
 {
     m_process_output.clear();
     return m_process_output;
-}
-
-std::vector<std::vector<ExPolygons>> multi_material_segmentation_by_painting(
-    const PrintObject & /* print_object */,
-    const std::function<void()> & /* throw_on_cancel_callback */)
-{
-    return {};
-}
-
-std::vector<std::vector<ExPolygons>> fuzzy_skin_segmentation_by_painting(
-    const PrintObject & /* print_object */,
-    const std::function<void()> & /* throw_on_cancel_callback */)
-{
-    return {};
 }
 
 std::string debug_out_path(const char *name, ...)

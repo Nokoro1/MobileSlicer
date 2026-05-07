@@ -101,10 +101,25 @@ if (ORCA_SHIPPING_USE_REAL_LIBSLIC3R)
                 ../../../../../engine-wrapper/orca_wrapper_calibration.cpp
                 ../../../../../engine-wrapper/orca_wrapper_gcode.cpp
                 ../../../../../engine-wrapper/orca_wrapper_model_overrides.cpp
+                ../../../../../engine-wrapper/orca_native_paint.cpp
+                ../../../../../engine-wrapper/orca_wrapper_internal.cpp
+                ../../../../../engine-wrapper/orca_wrapper_paint_cut_api.cpp
+                ../../../../../engine-wrapper/orca_wrapper_planning_api.cpp
+                ../../../../../engine-wrapper/orca_wrapper_preview_api.cpp
                 ../../../../../engine-wrapper/orca_wrapper_printable_validation.cpp
+                ../../../../../engine-wrapper/orca_wrapper_runtime.cpp
+                ../../../../../engine-wrapper/orca_wrapper_slice_export_api.cpp
                 ../../../../../engine-wrapper/orca_wrapper_utils.cpp
             )
             set(ORCA_SHIPPING_REAL_WRAPPER "ON")
+            option(MOBILE_SLICER_SUPPRESS_VENDOR_WARNING_NOISE "Suppress known third-party Eigen/admesh/libslic3r warning noise from the Orca wrapper build" ON)
+            if (MOBILE_SLICER_SUPPRESS_VENDOR_WARNING_NOISE)
+                target_compile_options(orca_android_libslic3r_print_gcode_lib PRIVATE
+                    $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-declarations>
+                    $<$<COMPILE_LANGUAGE:CXX>:-Wno-defaulted-function-deleted>
+                    $<$<COMPILE_LANGUAGE:CXX>:-Wno-inconsistent-missing-override>
+                )
+            endif()
         else()
             if (ORCA_SHIPPING_REQUIRE_REAL_LIBSLIC3R_FOR_ABI)
                 message(FATAL_ERROR "Real libslic3r wrapper target unavailable for ${ANDROID_ABI}.")
@@ -137,7 +152,6 @@ add_library(orca_engine SHARED
 )
 
 if (ORCA_SHIPPING_REAL_WRAPPER)
-    option(MOBILE_SLICER_SUPPRESS_VENDOR_WARNING_NOISE "Suppress known third-party Eigen/admesh/libslic3r warning noise from the Orca wrapper build" ON)
     target_sources(orca_engine PRIVATE
         getrandom_compat.cpp
     )
@@ -151,6 +165,8 @@ if (ORCA_SHIPPING_REAL_WRAPPER)
     if (MOBILE_SLICER_SUPPRESS_VENDOR_WARNING_NOISE)
         target_compile_options(orca_engine PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-declarations>
+            $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated>
+            $<$<COMPILE_LANGUAGE:CXX>:-Wno-defaulted-function-deleted>
             $<$<COMPILE_LANGUAGE:CXX>:-Wno-inconsistent-missing-override>
         )
     endif()
@@ -180,3 +196,74 @@ target_link_libraries(orca_engine
     ${egl-lib}
     ${log-lib}
 )
+
+option(MOBILE_SLICER_BUILD_NATIVE_PAINT_PROBES "Build native paint replay proof executables" OFF)
+if (ORCA_SHIPPING_REAL_WRAPPER AND MOBILE_SLICER_BUILD_NATIVE_PAINT_PROBES)
+    add_executable(orca_engine_v2_paint_replay_probe
+        ../../../../../engine-wrapper/orca_android_v2_paint_replay_probe.cpp
+        ${ORCA_ENGINE_WRAPPER_SOURCE}
+        ${ORCA_ENGINE_WRAPPER_EXTRA_SOURCES}
+        getrandom_compat.cpp
+    )
+    target_include_directories(orca_engine_v2_paint_replay_probe PRIVATE
+        ../../../../../engine-wrapper
+        ../../../../../engine-wrapper/orca-android-libslic3r
+        ../../../../../engine-wrapper/orca-android-libslic3r/shims
+        ../../../../../vendor/orcaslicer/src
+        ../../../../../vendor/orcaslicer/deps_src
+        ../../../../../vendor/orcaslicer/deps_src/qhull/src
+        ../../../../../vendor/orcaslicer/deps_src/libnest2d/include
+    )
+    target_compile_definitions(orca_engine_v2_paint_replay_probe PRIVATE MOBILE_SLICER_ENABLE_VGCODE)
+    target_compile_options(orca_engine_v2_paint_replay_probe PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-O3>
+        $<$<COMPILE_LANGUAGE:CXX>:-fomit-frame-pointer>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-declarations>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-defaulted-function-deleted>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-inconsistent-missing-override>
+        $<$<COMPILE_LANGUAGE:CXX>:-include${CMAKE_CURRENT_LIST_DIR}/../../../../../engine-wrapper/orca-android-libslic3r/shims/orca_android_libslic3r_model_preinclude.hpp>
+    )
+    target_link_libraries(orca_engine_v2_paint_replay_probe PRIVATE
+        orca_core_android
+        orca_android_libslic3r_print_gcode_lib
+        libvgcode
+        ${gles-lib}
+        ${egl-lib}
+        ${log-lib}
+    )
+
+    add_executable(orca_engine_paint_object_bounds_probe
+        ../../../../../engine-wrapper/orca_android_paint_object_bounds_probe.cpp
+        ${ORCA_ENGINE_WRAPPER_SOURCE}
+        ${ORCA_ENGINE_WRAPPER_EXTRA_SOURCES}
+        getrandom_compat.cpp
+    )
+    target_include_directories(orca_engine_paint_object_bounds_probe PRIVATE
+        ../../../../../engine-wrapper
+        ../../../../../engine-wrapper/orca-android-libslic3r
+        ../../../../../engine-wrapper/orca-android-libslic3r/shims
+        ../../../../../vendor/orcaslicer/src
+        ../../../../../vendor/orcaslicer/deps_src
+        ../../../../../vendor/orcaslicer/deps_src/qhull/src
+        ../../../../../vendor/orcaslicer/deps_src/libnest2d/include
+    )
+    target_compile_definitions(orca_engine_paint_object_bounds_probe PRIVATE MOBILE_SLICER_ENABLE_VGCODE)
+    target_compile_options(orca_engine_paint_object_bounds_probe PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-O3>
+        $<$<COMPILE_LANGUAGE:CXX>:-fomit-frame-pointer>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-declarations>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-defaulted-function-deleted>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-inconsistent-missing-override>
+        $<$<COMPILE_LANGUAGE:CXX>:-include${CMAKE_CURRENT_LIST_DIR}/../../../../../engine-wrapper/orca-android-libslic3r/shims/orca_android_libslic3r_model_preinclude.hpp>
+    )
+    target_link_libraries(orca_engine_paint_object_bounds_probe PRIVATE
+        orca_core_android
+        orca_android_libslic3r_print_gcode_lib
+        libvgcode
+        ${gles-lib}
+        ${egl-lib}
+        ${log-lib}
+    )
+endif()

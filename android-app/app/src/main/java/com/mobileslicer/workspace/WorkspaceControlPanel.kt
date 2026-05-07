@@ -180,6 +180,7 @@ internal fun WorkspaceControlPanel(
     compactControlsEnabled: Boolean,
     modelTransform: ViewerModelTransform,
     objectCount: Int,
+    activePlateLabel: String,
     selectedObjectLabel: String?,
     onPreviewLayerSelectionChanged: (PreviewLayerSelection) -> Unit,
     onPreviewLayerSelectionCommitted: (PreviewLayerSelection) -> Unit,
@@ -188,6 +189,7 @@ internal fun WorkspaceControlPanel(
     onControlsExpandedChange: (Boolean) -> Unit,
     onModelTransformChanged: (ViewerModelTransform?) -> Unit,
     onOpenObjectList: () -> Unit,
+    onOpenPlateSettings: () -> Unit,
     onOpenProfiles: () -> Unit,
     onSavePlate: () -> Unit,
     onSlice: () -> Unit,
@@ -205,6 +207,7 @@ internal fun WorkspaceControlPanel(
         viewerState is WorkspaceViewerState.Error -> viewerState.message
         sliceInProgress -> "Slicing model..."
         hasGeneratedGcode -> "G-code ready"
+        workspaceStatus.startsWith("Paint updated") -> "Ready"
         else -> workspaceStatus.lineSequence().firstOrNull().orEmpty()
     }
     val performanceSummary = workspacePerformanceSnapshot(
@@ -214,6 +217,13 @@ internal fun WorkspaceControlPanel(
         sliceTiming = sliceTiming
     ).compactSummary()
     val bottomDock = compactControlsEnabled && !controlsExpanded
+    val modelMetadataLabel = when (viewerState) {
+        is WorkspaceViewerState.Loaded -> modelLabel.shortWorkspaceMetadataLabel()
+        WorkspaceViewerState.Preparing -> "Preparing"
+        WorkspaceViewerState.Unsupported -> "Unsupported"
+        WorkspaceViewerState.Empty -> "No model"
+        is WorkspaceViewerState.Error -> "Viewer issue"
+    }
     Surface(
         modifier = modifier
             .fillMaxWidth(if (bottomDock) 0.70f else 1f)
@@ -270,36 +280,54 @@ internal fun WorkspaceControlPanel(
                     onExpand = { onControlsExpandedChange(true) }
                 )
             } else {
-                Row(
+                Box(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .fillMaxWidth(0.30f),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (loadedState) {
-                            CompactWorkspaceBadge(label = printerTitle)
+                            CompactWorkspaceBadge(
+                                label = printerTitle.shortWorkspaceMetadataLabel(),
+                                emphasized = true
+                            )
                         }
+                    }
+                    TextButton(
+                        onClick = onOpenPlateSettings,
+                        modifier = Modifier.align(Alignment.Center),
+                        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+                    ) {
                         CompactWorkspaceBadge(
-                            label = when (viewerState) {
-                                is WorkspaceViewerState.Loaded -> modelLabel
-                                WorkspaceViewerState.Preparing -> "Preparing"
-                                WorkspaceViewerState.Unsupported -> "Unsupported"
-                                WorkspaceViewerState.Empty -> "No model"
-                                is WorkspaceViewerState.Error -> "Viewer issue"
-                            },
+                            label = activePlateLabel,
                             emphasized = true
                         )
-                        if (workspaceMode == WorkspaceMode.Preview && !printerStatusLabel.isNullOrBlank()) {
-                            CompactWorkspaceBadge(label = printerStatusLabel)
+                    }
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxWidth(0.34f),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = onOpenObjectList,
+                            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+                        ) {
+                            CompactWorkspaceBadge(
+                                label = modelMetadataLabel,
+                                emphasized = true
+                            )
                         }
                     }
                     if (compactControlsEnabled) {
                         TextButton(
                             onClick = { onControlsExpandedChange(!controlsExpanded) },
+                            modifier = Modifier.align(Alignment.CenterEnd),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
                         ) {
                             Text(if (controlsExpanded) "Hide" else "Menu")
@@ -314,30 +342,6 @@ internal fun WorkspaceControlPanel(
                     color = bodyColor,
                     maxLines = if (loadedState) 1 else 2
                 )
-            }
-            if (!compactPreview && !compactPrepare && workspaceMode == WorkspaceMode.Prepare && objectCount > 1) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CompactWorkspaceBadge(
-                        label = selectedObjectLabel ?: "No object",
-                        emphasized = true
-                    )
-                    Text(
-                        text = "$objectCount on plate",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = bodyColor
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    TextButton(
-                        onClick = onOpenObjectList,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
-                    ) {
-                        Text("Objects")
-                    }
-                }
             }
             if (!compactPreview && performanceSummary.isNotBlank()) {
                 Text(
@@ -414,7 +418,7 @@ internal fun WorkspaceControlPanel(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("Open Profiles")
+                        Text("Open profiles")
                     }
                     Button(
                         onClick = onSavePlate,
@@ -467,6 +471,11 @@ internal fun WorkspaceControlPanel(
     }
 }
 
+private fun String.shortWorkspaceMetadataLabel(): String =
+    if (length <= 12) this else take(12) + "..."
+
+private fun String.shortWorkspaceObjectLabel(): String = shortWorkspaceMetadataLabel()
+
 @Composable
 private fun PreviewRangeChunkNavigator(
     chunks: List<PreviewRangeSuggestion>,
@@ -497,7 +506,7 @@ private fun PreviewRangeChunkNavigator(
             Text("<")
         }
         Text(
-            text = "Exact range ${currentIndex + 1}/${chunks.size} • ${previewChunkRangeLabel(current)}",
+            text = "Range ${currentIndex + 1}/${chunks.size} • ${previewChunkRangeLabel(current)}",
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.labelSmall,
             color = appBodyColor(),

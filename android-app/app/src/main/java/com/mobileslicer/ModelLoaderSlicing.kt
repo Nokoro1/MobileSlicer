@@ -17,7 +17,10 @@ import com.mobileslicer.viewer.ViewerModelTransform
 import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateFlushVolumes
 import com.mobileslicer.workspace.PlateObject
+import com.mobileslicer.workspace.PrimeTowerPlacementOverride
 import com.mobileslicer.workspace.SliceResult
+import com.mobileslicer.workspace.applyToNativeConfig
+import com.mobileslicer.workspace.primeTowerPlacementForWorkspace
 
 private const val VerboseSliceConfigTimingLogs = false
 
@@ -32,6 +35,51 @@ internal typealias ModelLoaderSliceRequestHandler = (
     String?
 ) -> SliceResult
 
+internal suspend fun prepareNativeConfigForPlatePlanning(
+    context: Context,
+    configuration: ActiveSlicerConfiguration,
+    plateObjects: List<PlateObject>,
+    profileFilaments: List<FilamentProfile>,
+    activePlateSlots: List<PlateFilamentSlot>,
+    flushVolumes: PlateFlushVolumes?,
+    primeTowerPlacementOverride: PrimeTowerPlacementOverride?,
+    printer: PrinterProfile
+): String {
+    val repairFilamentOverridesJson = activePlateSlots
+        .firstOrNull()
+        ?.filamentProfileId
+        ?.let { slotFilamentId ->
+            profileFilaments.firstOrNull { it.id == slotFilamentId }
+        }
+        ?.orcaFilamentOverridesJson
+        ?: configuration.filament.orcaFilamentOverridesJson
+    val nativeBuildResult = configuration.toNativeSliceConfigBuildResult(context.applicationContext)
+    val plateSliceConfigResult = applyPlateFilamentSlotsToNativeConfigResult(
+        configJson = nativeBuildResult.json,
+        slots = activePlateSlots,
+        plateObjects = plateObjects,
+        filaments = profileFilaments,
+        flushVolumes = ensureFlushVolumesForSlots(
+            slots = activePlateSlots,
+            existing = flushVolumes,
+            regenerateFromColors = false
+        )
+    )
+    val placement = primeTowerPlacementForWorkspace(
+        configuration = configuration,
+        plateObjects = plateObjects,
+        filamentSlots = activePlateSlots,
+        printerBed = printer.toBedSpec(),
+        override = primeTowerPlacementOverride
+    )
+    return repairNativeSliceConfigWithOrcaFilamentAssetsResult(
+        context = context.applicationContext,
+        printer = printer,
+        filamentOverridesJson = repairFilamentOverridesJson,
+        configJson = placement?.applyToNativeConfig(plateSliceConfigResult.json) ?: plateSliceConfigResult.json
+    ).json
+}
+
 internal suspend fun runModelLoaderSlice(
     context: Context,
     configuration: ActiveSlicerConfiguration,
@@ -40,6 +88,7 @@ internal suspend fun runModelLoaderSlice(
     profileFilaments: List<FilamentProfile>,
     activePlateSlots: List<PlateFilamentSlot>,
     flushVolumes: PlateFlushVolumes?,
+    primeTowerPlacementOverride: PrimeTowerPlacementOverride?,
     printer: PrinterProfile,
     modelFilePath: String?,
     preparedMesh: StlMesh?,
@@ -63,26 +112,33 @@ internal suspend fun runModelLoaderSlice(
     )
     val configStartedAtMs = SystemClock.elapsedRealtime()
     val nativeBuildResult = configuration.toNativeSliceConfigBuildResult(context.applicationContext)
-    val calibrationStartedAtMs = SystemClock.elapsedRealtime()
-    val nativeSliceConfigJson = calibrationJob
-        ?.applyTemporaryOverrides(nativeBuildResult.json)
-        ?: nativeBuildResult.json
-    val calibrationMs = SystemClock.elapsedRealtime() - calibrationStartedAtMs
     val plateStartedAtMs = SystemClock.elapsedRealtime()
     val plateSliceConfigResult = applyPlateFilamentSlotsToNativeConfigResult(
-        configJson = nativeSliceConfigJson,
+        configJson = nativeBuildResult.json,
         slots = activePlateSlots,
         plateObjects = plateObjects,
         filaments = profileFilaments,
         flushVolumes = normalizedFlushVolumes
+    )
+    val primeTowerPlacement = primeTowerPlacementForWorkspace(
+        configuration = configuration,
+        plateObjects = plateObjects,
+        filamentSlots = activePlateSlots,
+        printerBed = printer.toBedSpec(),
+        override = primeTowerPlacementOverride
     )
     val plateMs = SystemClock.elapsedRealtime() - plateStartedAtMs
     val repairResult = repairNativeSliceConfigWithOrcaFilamentAssetsResult(
         context = context.applicationContext,
         printer = printer,
         filamentOverridesJson = repairFilamentOverridesJson,
-        configJson = plateSliceConfigResult.json
+        configJson = primeTowerPlacement?.applyToNativeConfig(plateSliceConfigResult.json) ?: plateSliceConfigResult.json
     )
+    val calibrationStartedAtMs = SystemClock.elapsedRealtime()
+    val finalConfigJson = calibrationJob
+        ?.applyTemporaryOverrides(repairResult.json)
+        ?: repairResult.json
+    val calibrationMs = SystemClock.elapsedRealtime() - calibrationStartedAtMs
     if (VerboseSliceConfigTimingLogs) {
         Log.i(
             "MobileSlicer",
@@ -109,7 +165,7 @@ internal suspend fun runModelLoaderSlice(
         )
     }
     val result = onSliceRequested(
-        repairResult.json,
+        finalConfigJson,
         plateObjects,
         modelFilePath,
         preparedMesh,
@@ -122,18 +178,16 @@ internal suspend fun runModelLoaderSlice(
         message = buildString {
             append(result.message)
             append('\n')
-            append("Native slice inputs: ")
+            append("Profiles: ")
             append(configuration.nativeSliceTitle())
             calibrationJob?.let { job ->
                 append('\n')
-                append("Calibration overrides: ")
+                append("Calibration settings: ")
                 append(job.options.summary(job.type))
             }
             if (result.sliced) {
                 append('\n')
                 append(configuration.nativeSliceBody())
-                append("\nWorkspace/app-only state: ")
-                append(configuration.appLayerOnlyBody())
             }
         }
     )

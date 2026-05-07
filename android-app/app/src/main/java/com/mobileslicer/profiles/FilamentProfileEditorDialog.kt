@@ -193,7 +193,7 @@ internal fun FilamentProfileEditorDialog(
         }
     ) {
         when (draft.selectedTab) {
-            FilamentEditorTab.Filament -> ProfileEditorSection("Filament", "Orca filament page fields in source order: Basic information, Flow ratio and Pressure Advance, Temperature, and Volumetric speed limitation.") {
+            FilamentEditorTab.Filament -> ProfileEditorSection("Filament", "Material type, flow, pressure advance, temperature, and volumetric speed.") {
                 ProfileGroupHeader("Basic information")
                 ProfileDropdownField(
                     label = "Material type",
@@ -232,7 +232,7 @@ internal fun FilamentProfileEditorDialog(
                     ProfileTextField(draft.nozzleTemperatureRangeHigh, { draft.nozzleTemperatureRangeHigh = it }, "Recommended nozzle temperature max (C)", KeyboardType.Number)
                 }
                 if (ProfileEditorSetting.FilamentFlowRatio.isVisible(showAdvancedProfileSettings)) {
-                    ProfileGroupHeader("Flow ratio and Pressure Advance")
+                    ProfileGroupHeader("Flow ratio and pressure advance")
                     ProfileTextField(draft.flowRatio, { draft.flowRatio = it }, "Flow ratio", KeyboardType.Decimal)
                 }
                 if (ProfileEditorSetting.FilamentPressureAdvance.isVisible(showAdvancedProfileSettings)) {
@@ -304,7 +304,7 @@ internal fun FilamentProfileEditorDialog(
                     ProfileTextField(draft.volumetricSpeedCoefficients, { draft.volumetricSpeedCoefficients = it }, "Volumetric speed coefficients")
                 }
             }
-            FilamentEditorTab.Cooling -> ProfileEditorSection("Cooling", "Orca filament Cooling page groups in source order.") {
+            FilamentEditorTab.Cooling -> ProfileEditorSection("Cooling", "Fan behavior, layer cooling, overhang cooling, and ironing overrides.") {
                 ProfileGroupHeader("Cooling for specific layer")
                 ProfileTextField(draft.noCoolingFirstLayers, { draft.noCoolingFirstLayers = it }, "No cooling for first X layers", KeyboardType.Number)
                 if (ProfileEditorSetting.FilamentCoolingSpecificLayerAdvanced.isVisible(showAdvancedProfileSettings)) {
@@ -372,7 +372,7 @@ internal fun FilamentProfileEditorDialog(
                     ProfileTextField(draft.completePrintExhaustFanSpeed, { draft.completePrintExhaustFanSpeed = it }, "Complete print fan speed (%)", KeyboardType.Number)
                 }
             }
-            FilamentEditorTab.SettingOverrides -> ProfileEditorSection("Setting Overrides", "Filament-side retraction overrides. Blank values inherit Orca preset behavior.") {
+            FilamentEditorTab.SettingOverrides -> ProfileEditorSection("Setting overrides", "Filament-side retraction overrides. Blank values inherit printer preset behavior.") {
                 if (ProfileEditorSetting.FilamentRetractionOverrides.isVisible(showAdvancedProfileSettings)) {
                     ProfileGroupHeader("Retraction")
                     ProfileTextField(draft.retractionLength, { draft.retractionLength = it }, "Retraction length (mm)", KeyboardType.Decimal)
@@ -437,7 +437,7 @@ internal fun FilamentProfileEditorDialog(
                     ProfileTextField(draft.filamentIroningSpeed, { draft.filamentIroningSpeed = it }, "Ironing speed (mm/s)", KeyboardType.Decimal)
                 }
             }
-            FilamentEditorTab.Advanced -> ProfileEditorSection("Advanced", "Orca filament Advanced page fields in source order.") {
+            FilamentEditorTab.Advanced -> ProfileEditorSection("Advanced", "Filament G-code and advanced material behavior.") {
                 if (ProfileEditorSetting.FilamentGcodeAdvanced.isVisible(showAdvancedProfileSettings)) {
                     ProfileGroupHeader("Filament start G-code")
                     ProfileMultilineTextField(
@@ -453,7 +453,7 @@ internal fun FilamentProfileEditorDialog(
                     )
                 }
             }
-            FilamentEditorTab.Multimaterial -> ProfileEditorSection("Multimaterial", "Orca filament multimaterial groups in source order.") {
+            FilamentEditorTab.Multimaterial -> ProfileEditorSection("Multimaterial", "Purge, ramming, and filament-change settings for multi-material prints.") {
                 if (ProfileEditorSetting.FilamentMultimaterialAdvanced.isVisible(showAdvancedProfileSettings)) {
                     ProfileGroupHeader("Wipe tower parameters")
                     ProfileTextField(draft.minimalPurgeOnWipeTower, { draft.minimalPurgeOnWipeTower = it }, "Minimal purge on wipe tower (mm3)", KeyboardType.Decimal)
@@ -463,7 +463,7 @@ internal fun FilamentProfileEditorDialog(
                     ProfileTextField(draft.towerInterfacePurgeVolume, { draft.towerInterfacePurgeVolume = it }, "Interface layer purge length (mm)", KeyboardType.Decimal)
                     ProfileTextField(draft.towerInterfacePrintTemperature, { draft.towerInterfacePrintTemperature = it }, "Interface layer print temperature (C)", KeyboardType.Number)
 
-                    ProfileGroupHeader("Multi Filament")
+                    ProfileGroupHeader("Multi-filament")
                     ProfileDropdownField(
                         label = "Long retraction when extruder change",
                         selectedLabel = when (draft.longRetractionsWhenExtruderChange) {
@@ -476,7 +476,7 @@ internal fun FilamentProfileEditorDialog(
                     )
                     ProfileTextField(draft.retractionDistanceWhenExtruderChange, { draft.retractionDistanceWhenExtruderChange = it }, "Retraction distance when extruder change (mm)", KeyboardType.Decimal)
 
-                    ProfileGroupHeader("Tool change parameters with single extruder MM printers")
+                    ProfileGroupHeader("Tool change parameters for single-extruder multimaterial printers")
                     ProfileTextField(draft.loadingSpeedStart, { draft.loadingSpeedStart = it }, "Loading speed at the start (mm/s)", KeyboardType.Decimal)
                     ProfileTextField(draft.loadingSpeed, { draft.loadingSpeed = it }, "Loading speed (mm/s)", KeyboardType.Decimal)
                     ProfileTextField(draft.unloadingSpeedStart, { draft.unloadingSpeedStart = it }, "Unloading speed at the start (mm/s)", KeyboardType.Decimal)
@@ -489,7 +489,7 @@ internal fun FilamentProfileEditorDialog(
                     ProfileTextField(draft.stampingDistance, { draft.stampingDistance = it }, "Stamping distance (mm)", KeyboardType.Decimal)
                     ProfileMultilineTextField(draft.rammingParameters, { draft.rammingParameters = it }, "Ramming parameters")
 
-                    ProfileGroupHeader("Tool change parameters with multi extruder MM printers")
+                    ProfileGroupHeader("Tool change parameters for multi-extruder printers")
                     ProfileDropdownField(
                         label = "Enable ramming for multi-tool setups",
                         selectedLabel = if (draft.multitoolRamming) "Enabled" else "Disabled",
@@ -500,13 +500,13 @@ internal fun FilamentProfileEditorDialog(
                     ProfileTextField(draft.multitoolRammingFlow, { draft.multitoolRammingFlow = it }, "Multi-tool ramming flow (mm3/s)", KeyboardType.Decimal)
                 } else {
                     Text(
-                        text = "Enable Advanced slicer controls to edit Orca filament multimaterial settings.",
+                        text = "Enable advanced profile controls to edit filament multimaterial settings.",
                         style = MaterialTheme.typography.bodySmall,
                         color = appBodyColor()
                     )
                 }
             }
-            FilamentEditorTab.Dependencies -> ProfileEditorSection("Dependencies", "Orca filament compatibility filters in source order.") {
+            FilamentEditorTab.Dependencies -> ProfileEditorSection("Dependencies", "Limit this filament to compatible printers and process profiles.") {
                 if (ProfileEditorSetting.FilamentDependenciesAdvanced.isVisible(showAdvancedProfileSettings)) {
                     ProfileGroupHeader("Compatible printers")
                     ProfileDropdownField(
@@ -552,13 +552,13 @@ internal fun FilamentProfileEditorDialog(
                     ProfileMultilineTextField(draft.compatiblePrintsCondition, { draft.compatiblePrintsCondition = it }, "Condition")
                 } else {
                     Text(
-                        text = "Enable Advanced slicer controls to edit Orca filament dependency settings.",
+                        text = "Enable advanced profile controls to edit filament compatibility settings.",
                         style = MaterialTheme.typography.bodySmall,
                         color = appBodyColor()
                     )
                 }
             }
-            FilamentEditorTab.Notes -> ProfileEditorSection("Notes", "Orca filament notes page.") {
+            FilamentEditorTab.Notes -> ProfileEditorSection("Notes", "Optional notes stored with this filament profile.") {
                 if (ProfileEditorSetting.FilamentNotesAdvanced.isVisible(showAdvancedProfileSettings)) {
                     ProfileGroupHeader("Notes")
                     ProfileMultilineTextField(
@@ -568,7 +568,7 @@ internal fun FilamentProfileEditorDialog(
                     )
                 } else {
                     Text(
-                        text = "Enable Advanced slicer controls to edit Orca filament notes.",
+                        text = "Enable advanced profile controls to edit filament notes.",
                         style = MaterialTheme.typography.bodySmall,
                         color = appBodyColor()
                     )

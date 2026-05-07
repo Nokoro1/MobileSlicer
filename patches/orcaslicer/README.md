@@ -28,3 +28,8 @@ Do not edit vendored source casually. Prefer wrapper/shim code under `engine-wra
     perimeter-generation adjustment
   - should be reviewed and refreshed against the next upstream Orca sync before
     being reapplied
+- `20260507-android-release-vendor-delta.patch`
+  - captures the current release-candidate Android vendor delta in
+    `TriangleSelector`, `Print`, `bbs_3mf`, and `libnest2d`
+  - documented in `VENDOR_PATCHES.md`
+  - must be refreshed or removed before the next upstream Orca sync

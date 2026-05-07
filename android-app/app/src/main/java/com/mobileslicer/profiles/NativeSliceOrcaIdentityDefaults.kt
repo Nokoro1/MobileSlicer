@@ -106,7 +106,10 @@ private fun JSONObject.hasOrcaFilamentIdentity(): Boolean =
 
 internal fun String.orcaProfileNameFromPath(): String =
     substringAfterLast('/')
+        .substringBefore('#')
+        .substringBefore('?')
         .removeSuffix(".json")
+        .removeSuffix(".JSON")
         .trim()
 
 private fun FilamentProfile.orcaDefaultColorFallback(): String =

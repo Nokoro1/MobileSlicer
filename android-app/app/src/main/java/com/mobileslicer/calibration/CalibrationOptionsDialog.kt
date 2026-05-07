@@ -68,17 +68,28 @@ internal fun CalibrationOptionsDialog(
     onDismiss: () -> Unit,
     onConfirm: (CalibrationOptions) -> Unit
 ) {
-    var extruderType by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.extruderType) }
-    var method by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.method) }
-    var filamentType by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.filamentType) }
-    var flowPass by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.flowPass) }
-    var start by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.startValue) }
-    var end by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.endValue) }
-    var step by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.stepValue) }
-    var printNumbers by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.printNumbers) }
-    var flowRatioBaseline by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.flowRatioBaseline) }
-    var patternAccelerations by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.patternAccelerations) }
-    var patternSpeeds by rememberSaveable(calibration.name) { mutableStateOf(defaultOptions.patternSpeeds) }
+    val stateKey = listOf(
+        calibration.name,
+        defaultOptions.filamentType,
+        defaultOptions.startValue,
+        defaultOptions.endValue,
+        defaultOptions.stepValue,
+        defaultOptions.method,
+        defaultOptions.extruderType
+    ).joinToString("|")
+    var extruderType by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.extruderType) }
+    var method by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.method) }
+    var filamentType by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.filamentType) }
+    var flowPass by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.flowPass) }
+    var start by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.startValue) }
+    var end by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.endValue) }
+    var step by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.stepValue) }
+    var printNumbers by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.printNumbers) }
+    var flowRatioBaseline by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.flowRatioBaseline) }
+    var patternAccelerations by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.patternAccelerations) }
+    var patternSpeeds by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.patternSpeeds) }
+    var testModel by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.testModel) }
+    var shaperType by rememberSaveable(stateKey) { mutableStateOf(defaultOptions.shaperType) }
     val bodyColor = appBodyColor()
 
     fun applyPressureAdvanceDefaults(nextMethod: String = method, nextExtruderType: String = extruderType) {
@@ -91,6 +102,21 @@ internal fun CalibrationOptionsDialog(
         printNumbers = defaults.printNumbers
         patternAccelerations = defaults.patternAccelerations
         patternSpeeds = defaults.patternSpeeds
+    }
+
+    fun applyTemperatureFilamentType(nextFilamentType: String) {
+        filamentType = nextFilamentType
+        val (nextStart, nextEnd) = when (nextFilamentType) {
+            "ABS/ASA" -> "270" to "230"
+            "PETG" -> "250" to "230"
+            "PCTG" -> "280" to "240"
+            "TPU" -> "240" to "210"
+            "PA-CF", "PET-CF" -> "320" to "280"
+            else -> "230" to "190"
+        }
+        start = nextStart
+        end = nextEnd
+        step = "5"
     }
 
     AlertDialog(
@@ -136,7 +162,7 @@ internal fun CalibrationOptionsDialog(
                     CalibrationType.TemperatureTower -> {
                         OptionSection("Filament type") {
                             listOf("PLA", "ABS/ASA", "PETG", "PCTG", "TPU", "PA-CF", "PET-CF", "Custom").forEach { value ->
-                                RadioRow(value, filamentType == value) { filamentType = value }
+                                RadioRow(value, filamentType == value) { applyTemperatureFilamentType(value) }
                             }
                         }
                         NumericField(start, { start = it }, "Start temp", "°C")
@@ -160,7 +186,7 @@ internal fun CalibrationOptionsDialog(
                         if (flowPass == FLOW_RATE_FINE) {
                             NumericField(flowRatioBaseline, { flowRatioBaseline = it }, "Flow ratio")
                             Text(
-                                text = "Orca accepts values where 0.0 < flow ratio < 2.0.",
+                                text = "Use a value greater than 0.0 and less than 2.0.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = appMutedColor()
                             )
@@ -177,19 +203,43 @@ internal fun CalibrationOptionsDialog(
                         NumericField(step, { step = it }, "Speed step", "mm/s")
                     }
                     CalibrationType.InputShapingFrequency -> {
+                        OptionSection("Test model") {
+                            listOf(CALIBRATION_TEST_MODEL_RINGING, CALIBRATION_TEST_MODEL_FAST).forEach { value ->
+                                RadioRow(value, testModel == value) { testModel = value }
+                            }
+                        }
                         NumericField(start, { start = it }, "Start frequency", "Hz")
                         NumericField(end, { end = it }, "End frequency", "Hz")
                         NumericField(step, { step = it }, "Frequency step", "Hz")
+                        NumericField(shaperType, { shaperType = it }, "Shaper type", keyboardType = KeyboardType.Text)
                     }
                     CalibrationType.InputShapingDamping -> {
+                        OptionSection("Test model") {
+                            listOf(CALIBRATION_TEST_MODEL_RINGING, CALIBRATION_TEST_MODEL_FAST).forEach { value ->
+                                RadioRow(value, testModel == value) { testModel = value }
+                            }
+                        }
                         NumericField(start, { start = it }, "Start damping")
                         NumericField(end, { end = it }, "End damping")
                         NumericField(step, { step = it }, "Damping step")
+                        NumericField(shaperType, { shaperType = it }, "Shaper type", keyboardType = KeyboardType.Text)
                     }
                     CalibrationType.Cornering -> {
+                        OptionSection("Test model") {
+                            listOf(
+                                CALIBRATION_TEST_MODEL_RINGING,
+                                CALIBRATION_TEST_MODEL_FAST,
+                                CALIBRATION_TEST_MODEL_CORNERING
+                            ).forEach { value ->
+                                RadioRow(value, testModel == value) { testModel = value }
+                            }
+                        }
                         NumericField(start, { start = it }, "Start cornering speed", "mm/s")
                         NumericField(end, { end = it }, "End cornering speed", "mm/s")
                         NumericField(step, { step = it }, "Step", "mm/s")
+                    }
+                    CalibrationType.Tolerance -> {
+                        Text("Uses the bundled tolerance test model.", color = bodyColor)
                     }
                 }
             }
@@ -209,7 +259,9 @@ internal fun CalibrationOptionsDialog(
                             flowPass = flowPass,
                             flowRatioBaseline = flowRatioBaseline,
                             patternAccelerations = patternAccelerations,
-                            patternSpeeds = patternSpeeds
+                            patternSpeeds = patternSpeeds,
+                            testModel = testModel,
+                            shaperType = shaperType
                         )
                     )
                 }

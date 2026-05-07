@@ -169,6 +169,19 @@ internal fun findMobileSlicerFilamentBaseline(
     currentStore: ProfileStore,
     json: JSONObject,
     displayName: String
+): JSONObject? =
+    findMobileSlicerFilamentBaselineForPrinter(
+        currentStore = currentStore,
+        json = json,
+        displayName = displayName,
+        printerId = currentStore.selectedPrinterId
+    )
+
+internal fun findMobileSlicerFilamentBaselineForPrinter(
+    currentStore: ProfileStore,
+    json: JSONObject,
+    displayName: String,
+    printerId: String
 ): JSONObject? {
     val materialHints = listOf(
         json.profileConfigString(NativeConfigKeys.Filament.Type),
@@ -177,8 +190,8 @@ internal fun findMobileSlicerFilamentBaseline(
         json.optString(NativeConfigKeys.Printer.Inherits),
         displayName
     ).mapNotNull { it.detectFilamentMaterial() }
-    val printerFilaments = currentStore.visibleFilamentsForSelectedPrinter()
-    val selected = printerFilaments.firstOrNull { it.id == currentStore.selectedFilamentId }
+    val printerFilaments = currentStore.filaments.filter { it.printerProfileId == printerId }
+    val selected = printerFilaments.firstOrNull { it.id == currentStore.selectedFilamentId && it.printerProfileId == printerId }
     val baselineProfile = selected
         ?.takeIf { selectedProfile ->
             materialHints.isEmpty() ||
@@ -188,6 +201,93 @@ internal fun findMobileSlicerFilamentBaseline(
             materialHints.any { hint -> profile.materialType.equals(hint, ignoreCase = true) || profile.name.equals(hint, ignoreCase = true) }
         }
     return baselineProfile?.toOrcaBaselineJson()
+}
+
+internal fun resolveDeviceOrcaFilamentJson(
+    currentStore: ProfileStore,
+    json: JSONObject,
+    displayName: String,
+    printerId: String,
+    parentJson: JSONObject?,
+    printerDefaultJson: JSONObject? = null
+): JSONObject {
+    if (printerDefaultJson != null) {
+        return printerDefaultJson.copyWithOverlay(json)
+    }
+    val baseline = findMobileSlicerFilamentBaselineForPrinter(
+        currentStore = currentStore,
+        json = json,
+        displayName = displayName,
+        printerId = printerId
+    ) ?: defaultFilamentBaselineJson(json, displayName)
+    return baseline.copyWithOverlay(parentJson ?: JSONObject()).copyWithOverlay(json)
+}
+
+private fun defaultFilamentBaselineJson(json: JSONObject, displayName: String): JSONObject {
+    val material = listOf(
+        json.profileConfigString(NativeConfigKeys.Filament.Type),
+        json.optString(NativeConfigKeys.Filament.SettingsId),
+        json.optString(NativeConfigKeys.Printer.Name),
+        json.optString(NativeConfigKeys.Printer.Inherits),
+        displayName
+    ).mapNotNull { it.detectFilamentMaterial() }
+        .firstOrNull()
+        ?: "PLA"
+    val profile = profileStoreDefaultFilamentProfiles()
+        .firstOrNull { it.materialType.equals(material, ignoreCase = true) || it.name.equals(material, ignoreCase = true) }
+        ?: ProfileStoreRepository.fallbackFilamentProfile().copy(
+            name = material,
+            materialType = material,
+            densityGPerCm3 = genericFilamentDensityForMaterial(material),
+            maxVolumetricSpeedMm3PerSec = genericFilamentMaxVolumetricSpeedForMaterial(material)
+        )
+    return profile.toOrcaBaselineJson()
+}
+
+internal fun findPrinterDefaultOrcaFilamentBaseline(
+    context: Context,
+    json: JSONObject,
+    displayName: String,
+    printer: PrinterProfile
+): JSONObject? {
+    val material = listOf(
+        json.profileConfigString(NativeConfigKeys.Filament.Type),
+        json.profileConfigString(NativeConfigKeys.Filament.SettingsId),
+        json.profileConfigString(NativeConfigKeys.Printer.Name),
+        json.profileConfigString(NativeConfigKeys.Printer.Inherits),
+        displayName
+    ).mapNotNull { it.detectFilamentMaterial() }
+        .firstOrNull()
+        ?: return null
+    val presets = loadOrcaFilamentPresets(context)
+    val inheritedKey = json.profileConfigString(NativeConfigKeys.Printer.Inherits).cleanProfileMatchKey()
+    val exactInherited = if (inheritedKey.isBlank()) {
+        null
+    } else {
+        presets.firstOrNull { preset ->
+            preset.isCompatibleWithPrinter(printer) &&
+                listOf(preset.rawName, preset.name, preset.profilePath.orcaProfileNameFromPath())
+                    .map { it.cleanProfileMatchKey() }
+                    .any { it == inheritedKey }
+        }
+    }
+    val preset = exactInherited ?: findGenericOrcaFilamentPresetForPrinter(
+        presets = presets,
+        printer = printer,
+        materialType = material
+    ) ?: compatibleOrcaFilamentPresets(presets, printer)
+        .filter { it.materialType.equals(material, ignoreCase = true) }
+        .maxByOrNull { candidate ->
+            var score = 0
+            if (candidate.vendor.equals("Generic", ignoreCase = true)) score += 100
+            if (candidate.rawName.contains(printer.name, ignoreCase = true)) score += 50
+            if (candidate.rawName.contains(formatNozzle(printer.nozzleDiameterMm), ignoreCase = true)) score += 25
+            score
+        }
+    return preset
+        ?.let { runCatching { loadOrcaFilamentImportBundle(context, it) }.getOrNull() }
+        ?.resolvedFilamentJson
+        ?.let { jsonObjectOrNull(it) }
 }
 
 internal fun FilamentProfile.toOrcaBaselineJson(): JSONObject = JSONObject()

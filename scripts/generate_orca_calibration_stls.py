@@ -23,6 +23,7 @@ from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 ORCA_CALIB = ROOT / "vendor" / "orcaslicer" / "resources" / "calib"
+ORCA_HANDY_MODELS = ROOT / "vendor" / "orcaslicer" / "resources" / "handy_models"
 OUT_DIR = ROOT / "android-app" / "app" / "src" / "main" / "assets" / "calib_stl"
 
 
@@ -50,6 +51,7 @@ ASSETS = [
     Asset(ORCA_CALIB / "input_shaping" / "ringing_tower.drc", OUT_DIR / "input_shaping" / "ringing_tower.stl"),
     Asset(ORCA_CALIB / "input_shaping" / "fast_tower_test.drc", OUT_DIR / "input_shaping" / "fast_tower_test.stl"),
     Asset(ORCA_CALIB / "cornering" / "SCV-V2.drc", OUT_DIR / "cornering" / "SCV-V2.stl"),
+    Asset(ORCA_HANDY_MODELS / "OrcaToleranceTest.drc", OUT_DIR / "tolerance" / "OrcaToleranceTest.stl"),
 ]
 
 FLOW_RATE_SPLIT_ASSETS = [

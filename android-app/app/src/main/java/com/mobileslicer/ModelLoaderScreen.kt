@@ -17,20 +17,33 @@ import com.mobileslicer.printerconnection.PrinterUploadAction
 import com.mobileslicer.printerconnection.SimplyPrintOAuthResult
 import com.mobileslicer.calibration.CalibrationJob
 import com.mobileslicer.calibration.PrinterCalibrationsScreen
+import com.mobileslicer.calibration.unsupportedFirmwareMessage
 import com.mobileslicer.storage.GCODE_MIME_TYPE
 import com.mobileslicer.storage.SavedProject
 import com.mobileslicer.workspace.AppScreen
 import com.mobileslicer.workspace.ImportedModelFormat
 import com.mobileslicer.workspace.ModelLoadResult
+import com.mobileslicer.workspace.PaintMode
 import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateFlushVolumes
 import com.mobileslicer.workspace.PlateObject
+import com.mobileslicer.workspace.PlateObjectGeometrySource
+import com.mobileslicer.workspace.PrimeTowerPlacementOverride
 import com.mobileslicer.workspace.SliceResult
 import com.mobileslicer.workspace.WorkspaceMode
 import com.mobileslicer.workspace.WorkspacePreparationResult
+import com.mobileslicer.workspace.WorkspaceCutAxis
+import com.mobileslicer.workspace.WorkspaceCutConnectorKind
+import com.mobileslicer.workspace.WorkspaceCutConnectorShape
+import com.mobileslicer.workspace.WorkspaceCutConnectorStyle
+import com.mobileslicer.workspace.WorkspaceCutMode
+import com.mobileslicer.workspace.WorkspaceCutRequest
+import com.mobileslicer.workspace.WorkspacePlate
 import com.mobileslicer.workspace.WorkspaceScreen
 import com.mobileslicer.workspace.WorkspaceSessionViewModel
 import com.mobileslicer.workspace.defaultViewerModelTransform
+import com.mobileslicer.workspace.defaultWorkspacePlateLabel
+import com.mobileslicer.workspace.toNativeCutMode
 import com.mobileslicer.workspace.workspaceResponsivenessLogLine
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -58,19 +71,151 @@ import com.mobileslicer.viewer.StlMesh
 import com.mobileslicer.viewer.GcodePreviewPerformanceMode
 import com.mobileslicer.ui.theme.AccentPaletteOption
 import com.mobileslicer.viewer.PrinterBedSpec
+import com.mobileslicer.viewer.ViewerPaintMode
 import com.mobileslicer.viewer.ViewerModelTransform
 import com.mobileslicer.ui.theme.ThemeModeOption
 import com.mobileslicer.ui.theme.WorldViewColorOption
+import com.mobileslicer.nativebridge.NativeEngineHandle
+import com.mobileslicer.nativebridge.NativeCutAttributes
+import com.mobileslicer.nativebridge.NativeCutCalls
+import com.mobileslicer.nativebridge.NativeCutRequest
+import com.mobileslicer.nativebridge.NativeEngineCalls
+import com.mobileslicer.nativebridge.NativePaintCalls
+import com.mobileslicer.nativebridge.NativeSplitCallResult
+import com.mobileslicer.nativebridge.NativeSplitCalls
+import com.mobileslicer.nativebridge.NativeSplitMode
+import com.mobileslicer.viewer.StlMeshParser
 import java.io.File
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 
 private const val VerboseWorkspacePlanningLogs = false
+
+private data class NativeCutPlane(
+    val matrixRowMajor: DoubleArray,
+    val rotationRowMajor: DoubleArray,
+    val center: DoubleArray
+)
+
+private fun ViewerPaintMode.toWorkspacePaintMode(): PaintMode = when (this) {
+    ViewerPaintMode.Support -> PaintMode.Support
+    ViewerPaintMode.Seam -> PaintMode.Seam
+    ViewerPaintMode.Color -> PaintMode.Color
+    ViewerPaintMode.FuzzySkin -> PaintMode.FuzzySkin
+}
+
+private fun PlateObject.splitSourcePath(): String =
+    when (val source = geometrySource) {
+        is PlateObjectGeometrySource.ThreeMfMeshExtract -> source.originalPath
+        else -> filePath
+    }
+
+private fun nativeCutPlane(
+    offsetMm: Float,
+    rotationXDegrees: Float,
+    rotationYDegrees: Float,
+    bounds: MeshBounds?
+): NativeCutPlane {
+    val rx = Math.toRadians(rotationXDegrees.toDouble())
+    val ry = Math.toRadians(rotationYDegrees.toDouble())
+    val cx = cos(rx)
+    val sx = sin(rx)
+    val cy = cos(ry)
+    val sy = sin(ry)
+    val normalX = sy * cx
+    val normalY = -sx
+    val normalZ = cy * cx
+    val centerX = bounds?.let { (it.minX + it.maxX).toDouble() * 0.5 } ?: 0.0
+    val centerY = bounds?.let { (it.minY + it.maxY).toDouble() * 0.5 } ?: 0.0
+    val centerZ = bounds?.let { (it.minZ + it.maxZ).toDouble() * 0.5 } ?: 0.0
+    val normalTravel = offsetMm.toDouble() - centerZ
+    val planeX = centerX + normalX * normalTravel
+    val planeY = centerY + normalY * normalTravel
+    val planeZ = centerZ + normalZ * normalTravel
+    val matrix = doubleArrayOf(
+        cy, sy * sx, sy * cx, planeX,
+        0.0, cx, -sx, planeY,
+        -sy, cy * sx, cy * cx, planeZ,
+        0.0, 0.0, 0.0, 1.0
+    )
+    val rotation = doubleArrayOf(
+        cy, sy * sx, sy * cx, 0.0,
+        0.0, cx, -sx, 0.0,
+        -sy, cy * sx, cy * cx, 0.0,
+        0.0, 0.0, 0.0, 1.0
+    )
+    return NativeCutPlane(
+        matrixRowMajor = matrix,
+        rotationRowMajor = rotation,
+        center = doubleArrayOf(planeX, planeY, planeZ)
+    )
+}
+
+private fun nativeCutConnectorsJson(request: WorkspaceCutRequest, plane: NativeCutPlane?): JSONArray {
+    if (request.connectorKind == WorkspaceCutConnectorKind.None || plane == null) return JSONArray()
+    val type = when (request.connectorKind) {
+        WorkspaceCutConnectorKind.None -> "plug"
+        WorkspaceCutConnectorKind.Plug -> "plug"
+        WorkspaceCutConnectorKind.Dowel -> "dowel"
+        WorkspaceCutConnectorKind.Snap -> "snap"
+    }
+    val style = when (request.connectorStyle) {
+        WorkspaceCutConnectorStyle.Prism -> "prism"
+        WorkspaceCutConnectorStyle.Frustum -> "frustum"
+    }
+    val shape = when (request.connectorShape) {
+        WorkspaceCutConnectorShape.Triangle -> "triangle"
+        WorkspaceCutConnectorShape.Square -> "square"
+        WorkspaceCutConnectorShape.Hexagon -> "hexagon"
+        WorkspaceCutConnectorShape.Circle -> "circle"
+    }
+    val connectorPositions = request.connectorPositions
+    return JSONArray().apply {
+        connectorPositions.forEachIndexed { index, position ->
+            put(
+                JSONObject()
+                    .put("id", "connector-$index-$type")
+                    .put("type", type)
+                    .put("style", style)
+                    .put("shape", shape)
+                    .put(
+                        "position",
+                        JSONArray()
+                            .put(position.xMm.toDouble())
+                            .put(position.yMm.toDouble())
+                            .put(position.zMm.toDouble())
+                    )
+                    .put("rotationMatrix", JSONArray().apply { plane.rotationRowMajor.forEach { put(it) } })
+                    .put("radius", (request.connectorSizeMm * 0.5f).toDouble())
+                    .put("height", request.connectorDepthMm.toDouble())
+                    .put("radiusTolerance", (request.connectorSizeToleranceMm * 0.5f).toDouble())
+                    .put("heightTolerance", request.connectorDepthToleranceMm.toDouble())
+                    .put("zAngle", Math.toRadians(request.connectorRotationDegrees.toDouble()))
+                    .put("snapBulgeProportion", (request.connectorSnapBulgePercent / 100f).toDouble())
+                    .put("snapSpaceProportion", (request.connectorSnapSpacePercent / 100f).toDouble())
+            )
+        }
+    }
+}
+
+private fun nativeCutGrooveJson(request: WorkspaceCutRequest): JSONObject? =
+    if (request.mode != WorkspaceCutMode.Groove) null else JSONObject()
+        .put("depth", request.grooveDepthMm.toDouble())
+        .put("width", request.grooveWidthMm.toDouble())
+        .put("flapsAngleRadians", Math.toRadians(request.grooveFlapAngleDegrees.toDouble()))
+        .put("angleRadians", Math.toRadians(request.grooveAngleDegrees.toDouble()))
+        .put("depthTolerance", request.grooveDepthToleranceMm.toDouble())
+        .put("widthTolerance", request.grooveWidthToleranceMm.toDouble())
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -86,11 +231,13 @@ internal fun ModelLoaderScreen(
     accentPalette: AccentPaletteOption,
     worldViewColor: WorldViewColorOption,
     showAdvancedProfileSettings: Boolean,
+    activeStylusPaintOnly: Boolean,
     gcodePreviewPerformanceMode: GcodePreviewPerformanceMode,
     onThemeModeSelected: (ThemeModeOption) -> Unit,
     onAccentPaletteSelected: (AccentPaletteOption) -> Unit,
     onWorldViewColorSelected: (WorldViewColorOption) -> Unit,
     onShowAdvancedProfileSettingsChanged: (Boolean) -> Unit,
+    onActiveStylusPaintOnlyChanged: (Boolean) -> Unit,
     onGcodePreviewPerformanceModeSelected: (GcodePreviewPerformanceMode) -> Unit,
     onProfileStoreChanged: (ProfileStore) -> Unit,
     onSavedProjectsChanged: (List<SavedProject>) -> Unit,
@@ -98,8 +245,12 @@ internal fun ModelLoaderScreen(
     onModelSelected: (Uri) -> ModelLoadResult,
     onWorkspaceMeshPreparationRequested: (String) -> WorkspacePreparationResult,
     onSliceRequested: (String, List<PlateObject>, String?, StlMesh?, MeshBounds?, PrinterBedSpec, ViewerModelTransform?, String?) -> SliceResult,
+    onNativeAutoArrangeRequested: suspend (String, List<PlateObject>, PrinterBedSpec, Boolean) -> PlatePlanningOutcome<PlateAutoArrangeResult>,
+    onNativeAutoOrientRequested: suspend (String, List<PlateObject>, Long?, PrinterBedSpec) -> PlatePlanningOutcome<PlateAutoOrientResult>,
+    onNativePlatePlanningCancelRequested: () -> Unit,
     onExportRequested: (Uri, String) -> String,
-    onSavedProjectNativeLoadRequested: (List<PlateObject>, PrinterBedSpec) -> Boolean,
+    onSavedProjectNativeLoadRequested: (SavedProject?, List<PlateObject>, PrinterBedSpec) -> Boolean,
+    onNativePlateCacheCurrent: (List<PlateObject>, PrinterBedSpec) -> Unit,
     onSendToPrinterRequested: suspend (String, String, PrinterProfile, PrinterUploadAction, BambuLanPrintOptions?, (Int) -> Unit) -> PrinterConnectionResult,
     onTestPrinterConnectionRequested: suspend (PrinterProfile) -> String,
     onPrinterStatusRequested: suspend (PrinterProfile) -> String,
@@ -129,16 +280,21 @@ internal fun ModelLoaderScreen(
     var currentGcodeFileName by workspaceSession.currentGcodeFileName
     var currentSlicePreviewKey by workspaceSession.currentSlicePreviewKey
     var currentModelTransform by workspaceSession.currentModelTransform
+    val workspacePlates = workspaceSession.workspacePlates
+    var activePlateId by workspaceSession.activePlateId
+    var nextPlateId by workspaceSession.nextPlateId
     val plateObjects = workspaceSession.plateObjects
     val plateFilamentSlots = workspaceSession.plateFilamentSlots
     var plateFlushVolumes by workspaceSession.plateFlushVolumes
     var selectedPlateObjectId by workspaceSession.selectedPlateObjectId
     var nextPlateObjectId by workspaceSession.nextPlateObjectId
+    var primeTowerPlacementOverride by remember { mutableStateOf<PrimeTowerPlacementOverride?>(null) }
     var currentCalibrationJob by remember { mutableStateOf<CalibrationJob?>(null) }
     var sliceInProgress by rememberSaveable { mutableStateOf(false) }
     var sendToPrinterInProgress by rememberSaveable { mutableStateOf(false) }
+    var platePlanningInProgress by rememberSaveable { mutableStateOf(false) }
     var sliceCompletionResult by remember { mutableStateOf<SliceResult?>(null) }
-    var sliceSuccessBanner by remember { mutableStateOf<String?>(null) }
+    var workspaceEventBanner by remember { mutableStateOf<String?>(null) }
     var savePlateNamePrompt by remember { mutableStateOf<String?>(null) }
     var savePlateThumbnail by remember { mutableStateOf<Bitmap?>(null) }
     var workspaceMode by workspaceSession.workspaceMode
@@ -268,11 +424,13 @@ internal fun ModelLoaderScreen(
             accentPalette = accentPalette,
             worldViewColor = worldViewColor,
             showAdvancedProfileSettings = showAdvancedProfileSettings,
+            activeStylusPaintOnly = activeStylusPaintOnly,
             gcodePreviewPerformanceMode = gcodePreviewPerformanceMode,
             onThemeModeSelected = onThemeModeSelected,
             onAccentPaletteSelected = onAccentPaletteSelected,
             onWorldViewColorSelected = onWorldViewColorSelected,
             onShowAdvancedProfileSettingsChanged = onShowAdvancedProfileSettingsChanged,
+            onActiveStylusPaintOnlyChanged = onActiveStylusPaintOnlyChanged,
             onGcodePreviewPerformanceModeSelected = onGcodePreviewPerformanceModeSelected,
             onProfileStoreChanged = { updated -> updateProfileStore { updated } },
             onSavedProjectsChanged = { next ->
@@ -373,6 +531,63 @@ internal fun ModelLoaderScreen(
         pruneInactiveSavedProjectDirectories(savedProjectRootDir, savedProjects)
     }
 
+    fun activePlateIndex(): Int = workspacePlates.indexOfFirst { it.id == activePlateId }
+
+    fun currentWorkspacePlatesSnapshot(): List<WorkspacePlate> {
+        if (workspacePlates.isEmpty()) {
+            return listOf(
+                WorkspacePlate(
+                    id = activePlateId,
+                    label = defaultWorkspacePlateLabel(1),
+                    objects = plateObjects.toList(),
+                    selectedObjectId = selectedPlateObjectId
+                )
+            )
+        }
+        val activeIndex = activePlateIndex()
+        return workspacePlates.mapIndexed { index, plate ->
+            if (index == activeIndex) {
+                plate.copy(
+                    objects = plateObjects.toList(),
+                    selectedObjectId = selectedPlateObjectId,
+                    gcodeFilePath = null,
+                    sliceSummary = null,
+                    sliceTiming = null,
+                    gcodeFileName = "mobile_slicer_output.gcode",
+                    slicePreviewKey = 0L
+                )
+            } else {
+                plate
+            }
+        }
+    }
+
+    fun saveActivePlateSnapshot() {
+        if (workspacePlates.isEmpty()) {
+            workspacePlates.add(
+                WorkspacePlate(
+                    id = activePlateId,
+                    label = defaultWorkspacePlateLabel(1),
+                    objects = plateObjects.toList(),
+                    selectedObjectId = selectedPlateObjectId
+                )
+            )
+            nextPlateId = (activePlateId + 1L).coerceAtLeast(nextPlateId)
+            return
+        }
+        val index = activePlateIndex().takeIf { it >= 0 } ?: 0
+        activePlateId = workspacePlates[index].id
+        workspacePlates[index] = workspacePlates[index].copy(
+            objects = plateObjects.toList(),
+            selectedObjectId = selectedPlateObjectId,
+            gcodeFilePath = null,
+            sliceSummary = null,
+            sliceTiming = null,
+            gcodeFileName = "mobile_slicer_output.gcode",
+            slicePreviewKey = 0L
+        )
+    }
+
     fun syncSelectedObjectToLegacyState(objectOnPlate: PlateObject?) {
         val syncPlan = planSelectedObjectSync(objectOnPlate)
         val legacyState = syncPlan.legacyState
@@ -389,29 +604,155 @@ internal fun ModelLoaderScreen(
         currentModelTransform = syncPlan.modelTransform
     }
 
+    fun applyWorkspacePlateMutation(mutation: WorkspacePlateMutation) {
+        if (mutation.clearGeneratedPreviewState) {
+            workspaceSession.clearGeneratedPreviewState()
+        }
+        workspacePlates.clear()
+        workspacePlates.addAll(mutation.plates)
+        activePlateId = mutation.activePlateId
+        plateObjects.clear()
+        plateObjects.addAll(mutation.activeObjects)
+        nextPlateId = mutation.nextPlateId
+        syncSelectedObjectToLegacyState(
+            mutation.selectedObjectId?.let { id -> mutation.activeObjects.firstOrNull { it.id == id } }
+                ?: mutation.activeObjects.firstOrNull()
+        )
+        workspaceStatus = mutation.statusMessage
+    }
+
+    fun loadWorkspacePlate(plate: WorkspacePlate) {
+        workspaceSession.clearGeneratedPreviewState()
+        plateObjects.clear()
+        plateObjects.addAll(plate.objects)
+        syncSelectedObjectToLegacyState(
+            plate.selectedObjectId?.let { selectedId -> plate.objects.firstOrNull { it.id == selectedId } }
+                ?: plate.objects.firstOrNull()
+        )
+        workspaceMode = WorkspaceMode.Prepare
+        workspaceStatus = "${plate.label} active"
+    }
+
+    fun switchWorkspacePlate(plateId: Long) {
+        if (plateId == activePlateId) return
+        saveActivePlateSnapshot()
+        val target = workspacePlates.firstOrNull { it.id == plateId } ?: return
+        activePlateId = target.id
+        loadWorkspacePlate(target)
+    }
+
+    fun addWorkspacePlate() {
+        saveActivePlateSnapshot()
+        applyWorkspacePlateMutation(
+            addWorkspacePlateMutation(
+                plates = workspacePlates.toList(),
+                activePlateId = activePlateId,
+                activeObjects = plateObjects.toList(),
+                selectedObjectId = selectedPlateObjectId,
+                nextPlateId = nextPlateId
+            )
+        )
+    }
+
+    fun duplicateActiveWorkspacePlate() {
+        saveActivePlateSnapshot()
+        val firstObjectId = nextPlateObjectId
+        val mutation = duplicateActiveWorkspacePlateMutation(
+            plates = workspacePlates.toList(),
+            activePlateId = activePlateId,
+            activeObjects = plateObjects.toList(),
+            selectedObjectId = selectedPlateObjectId,
+            nextPlateId = nextPlateId,
+            firstObjectId = firstObjectId
+        ) ?: return
+        nextPlateObjectId = firstObjectId + (mutation.plates.lastOrNull()?.objects?.size ?: 0)
+        applyWorkspacePlateMutation(mutation)
+    }
+
+    fun moveWorkspaceObjectToPlate(objectId: Long, targetPlateId: Long) {
+        moveWorkspaceObjectToPlateMutation(
+            plates = workspacePlates.toList(),
+            activePlateId = activePlateId,
+            activeObjects = plateObjects.toList(),
+            selectedObjectId = selectedPlateObjectId,
+            objectId = objectId,
+            targetPlateId = targetPlateId,
+            nextPlateId = nextPlateId
+        )?.let(::applyWorkspacePlateMutation)
+    }
+
+    fun moveWorkspaceObjectToNewPlate(objectId: Long) {
+        val mutation = moveWorkspaceObjectToNewPlateMutation(
+            plates = workspacePlates.toList(),
+            activePlateId = activePlateId,
+            activeObjects = plateObjects.toList(),
+            selectedObjectId = selectedPlateObjectId,
+            objectId = objectId,
+            nextPlateId = nextPlateId
+        ) ?: return
+        applyWorkspacePlateMutation(mutation)
+    }
+
+    fun deleteActiveWorkspacePlate() {
+        if (workspacePlates.size <= 1) {
+            workspaceStatus = "Cannot delete the only plate"
+            return
+        }
+        val index = activePlateIndex()
+        if (index < 0) return
+        workspacePlates.removeAt(index)
+        val nextIndex = index.coerceAtMost(workspacePlates.lastIndex)
+        val nextPlate = workspacePlates[nextIndex]
+        activePlateId = nextPlate.id
+        loadWorkspacePlate(nextPlate)
+    }
+
+    fun renameActiveWorkspacePlate(name: String) {
+        val index = activePlateIndex()
+        if (index < 0) return
+        val fallback = defaultWorkspacePlateLabel(index + 1)
+        val nextName = name.trim().ifBlank { fallback }
+        if (workspacePlates[index].label == nextName) return
+        workspacePlates[index] = workspacePlates[index].copy(label = nextName)
+    }
+
     fun saveCurrentPlate(projectName: String, thumbnailBitmap: Bitmap?) {
-        if (plateObjects.isEmpty()) {
+        val platesForSave = currentWorkspacePlatesSnapshot()
+        if (platesForSave.all { it.objects.isEmpty() }) {
             workspaceStatus = noPlateToSaveStatus()
             return
         }
+        saveActivePlateSnapshot()
+        val projectIdForSave = currentSavedProjectId ?: "project_${java.util.UUID.randomUUID()}"
+        val nativeProjectFile = File(File(savedProjectRootDir, projectIdForSave), "native-project.3mf")
+        val nativeProjectFilePath = NativeEngineHandle.fromRaw(nativeEngineHandle)?.let { handle ->
+            nativeProjectFile.parentFile?.mkdirs()
+            when (NativeEngineCalls.writeProject3mfToFile(handle, nativeProjectFile.absolutePath)) {
+                is com.mobileslicer.nativebridge.NativeEngineCallResult.Success ->
+                    nativeProjectFile.absolutePath.takeIf { nativeProjectFile.exists() }
+                is com.mobileslicer.nativebridge.NativeEngineCallResult.Failure -> null
+            }
+        }
         val project = buildSavedProject(
             currentSavedProjectId = currentSavedProjectId,
+            projectIdOverride = projectIdForSave,
             projectName = projectName,
             projectNameFallback = suggestedSavedProjectName(plateObjects = plateObjects, currentModelLabel = currentModelLabel),
             savedProjectRootDir = savedProjectRootDir,
             profileStore = profileStore,
             plateObjects = plateObjects.toList(),
+            workspacePlates = platesForSave,
             plateFilamentSlots = plateFilamentSlots.toList(),
             plateFlushVolumes = plateFlushVolumes,
+            nativeProjectFilePath = nativeProjectFilePath,
             thumbnailBitmap = thumbnailBitmap
         )
         val update = savedProjectsAfterSave(project, savedProjects)
         updateSavedProjects(update.projects)
         currentSavedProjectId = update.currentSavedProjectId
         workspaceStatus = plateSavedStatus(project)
-        sliceSuccessBanner = "Save Successful"
+        workspaceEventBanner = "Save Successful"
     }
-
     fun openSavedProject(project: SavedProject) {
         coroutineScope.launch {
             val startPlan = planSavedProjectOpenStart(project)
@@ -432,6 +773,10 @@ internal fun ModelLoaderScreen(
             profileStore = project.profileStore
             onProfileStoreChanged(project.profileStore)
             currentCalibrationJob = null
+            workspacePlates.clear()
+            workspacePlates.addAll(openedProject.plates)
+            activePlateId = openedProject.plates.firstOrNull()?.id ?: 1L
+            nextPlateId = ((openedProject.plates.maxOfOrNull { it.id } ?: 0L) + 1L).coerceAtLeast(2L)
             plateObjects.clear()
             plateObjects.addAll(openedProject.plateObjects)
             plateFilamentSlots.clear()
@@ -442,7 +787,7 @@ internal fun ModelLoaderScreen(
             workspaceSession.clearGeneratedPreviewState()
             syncSelectedObjectToLegacyState(openedProject.plateObjects.first())
             val nativeWarmLoadSucceeded = withContext(Dispatchers.IO) {
-                onSavedProjectNativeLoadRequested(openedProject.plateObjects, openedProject.printerBed)
+                onSavedProjectNativeLoadRequested(project, openedProject.plateObjects, openedProject.printerBed)
             }
             workspaceStatus = savedProjectLoadedStatus(project, nativeWarmLoadSucceeded)
             importInProgress = false
@@ -507,6 +852,7 @@ internal fun ModelLoaderScreen(
                 )
             }
             syncSelectedObjectToLegacyState(plateObjects.firstOrNull { it.id == selectedPlateObjectId } ?: plateObjects.firstOrNull())
+            saveActivePlateSnapshot()
         } else {
             val transform = currentModelTransform ?: defaultViewerModelTransform(bed)
             currentModelTransform = transform.copy(
@@ -536,53 +882,191 @@ internal fun ModelLoaderScreen(
         defaultTransform = defaultViewerModelTransform(selectedPrinter.toBedSpec())
     )
 
-    fun autoOrientPlateObjects() {
-        val result = planAutoOrientPlateObjects(
-            plateObjects = plateObjects,
-            selectedPlateObjectId = selectedPlateObjectId
-        )
-        if (result == null) {
-            workspaceStatus = autoOrientPlateObjectsUnavailableStatus()
-            return
-        }
+    fun applyAutoOrientResult(result: PlateAutoOrientResult, source: String) {
         plateObjects.clear()
         plateObjects.addAll(result.objects)
         workspaceSession.clearGeneratedPreviewState()
         transformInvalidationKey += 1
         syncSelectedObjectToLegacyState(plateObjects.firstOrNull { it.id == selectedPlateObjectId } ?: plateObjects.firstOrNull())
+        saveActivePlateSnapshot()
         if (VerboseWorkspacePlanningLogs) {
-            Log.i("MobileSlicer", "autoOrient local applied: targets=${result.targetCount} changed=${result.changedCount}")
+            Log.i("MobileSlicer", "autoOrient $source applied: targets=${result.targetCount} changed=${result.changedCount}")
         }
         workspaceStatus = autoOrientPlateObjectsStatus(result)
     }
 
-    fun arrangePlateObjects() {
-        val bed = selectedPrinter.toBedSpec()
-        val result = planAutoArrangePlateObjects(
-            plateObjects = plateObjects,
-            bed = bed,
-            clearance = slicerFootprintClearanceMm(),
-            materialSlotCount = plateFilamentSlots.size,
-            singleExtruderMultiMaterial = selectedPrinter.singleExtruderMultiMaterial,
-            primeTowerWidthMm = activeConfiguration.process.primeTowerWidthMm,
-            primeTowerBrimWidthMm = activeConfiguration.process.primeTowerBrimWidthMm
-        )
-        if (result == null) {
-            workspaceStatus = autoArrangePlateObjectsFailureStatus(plateObjects.size, bed)
+    fun currentPlatePlanningSignature(selectedObjectIdForPlanning: Long?): String {
+        val currentConfiguration = profileStore.activeConfiguration()
+        val currentPrinter = currentConfiguration.printer
+        val currentFilament = currentConfiguration.filament
+        val currentProcess = currentConfiguration.process
+        val currentBed = currentPrinter.toBedSpec()
+        val currentSlots = plateFilamentSlots.toList().ifEmpty {
+            listOf(currentFilament.toPlateFilamentSlot(index = 1))
+        }
+        return buildString {
+            append("selected=").append(selectedObjectIdForPlanning).append('|')
+            append("printer=").append(currentPrinter.id).append(':').append(currentPrinter.hashCode()).append('|')
+            append("filament=").append(currentFilament.id).append(':').append(currentFilament.hashCode()).append('|')
+            append("process=").append(currentProcess.id).append(':').append(currentProcess.contentHash()).append('|')
+            append("bed=").append(currentBed.originXmm).append(',')
+                .append(currentBed.originYmm).append(',')
+                .append(currentBed.widthMm).append(',')
+                .append(currentBed.depthMm).append(',')
+                .append(currentBed.maxHeightMm).append('|')
+            append("slots=").append(currentSlots.joinToString(";")).append('|')
+            append("flush=").append(plateFlushVolumes).append('|')
+            append("objects=").append(
+                plateObjects.joinToString(";") { objectOnPlate ->
+                    listOf(
+                        objectOnPlate.id,
+                        objectOnPlate.filePath,
+                        objectOnPlate.format,
+                        objectOnPlate.filamentSlotIndex,
+                        objectOnPlate.transform,
+                        objectOnPlate.bounds
+                    ).joinToString(":")
+                }
+            )
+        }
+    }
+
+    fun abandonStalePlanningResult(capturedSignature: String, selectedObjectIdForPlanning: Long?, previousStatus: String, progressStatus: String): Boolean {
+        if (currentPlatePlanningSignature(selectedObjectIdForPlanning) == capturedSignature) {
+            return false
+        }
+        if (workspaceStatus == progressStatus) {
+            workspaceStatus = previousStatus
+        }
+        if (VerboseWorkspacePlanningLogs) {
+            Log.i("MobileSlicer", "plate planning result ignored because request inputs changed")
+        }
+        return true
+    }
+
+    fun autoOrientPlateObjects() {
+        if (platePlanningInProgress) {
+            workspaceStatus = "Planning already in progress\nWaiting for native planner"
             return
         }
+        if (plateObjects.isEmpty()) {
+            workspaceStatus = autoOrientPlateObjectsUnavailableStatus()
+            return
+        }
+        val capturedObjects = plateObjects.toList()
+        val capturedSelectedId = selectedPlateObjectId
+        val bed = selectedPrinter.toBedSpec()
+        val progressStatus = "Auto-orienting\nChecking model surfaces"
+        val previousStatus = workspaceStatus
+        val capturedSignature = currentPlatePlanningSignature(capturedSelectedId)
+        val capturedSlots = plateFilamentSlots.toList().ifEmpty {
+            listOf(selectedFilament.toPlateFilamentSlot(index = 1))
+        }
+        val capturedFilaments = sliceReadyProfileStore.filaments.toList()
+        val capturedFlushVolumes = plateFlushVolumes
+        coroutineScope.launch {
+            platePlanningInProgress = true
+            workspaceStatus = progressStatus
+            try {
+                val nativeOutcome = try {
+                    val configJson = withContext(Dispatchers.Default) {
+                        prepareNativeConfigForPlatePlanning(
+                            context = context,
+                            configuration = activeConfiguration,
+                            plateObjects = capturedObjects,
+                            profileFilaments = capturedFilaments,
+                            activePlateSlots = capturedSlots,
+                            flushVolumes = capturedFlushVolumes,
+                            primeTowerPlacementOverride = primeTowerPlacementOverride,
+                            printer = selectedPrinter
+                        )
+                    }
+                    onNativeAutoOrientRequested(configJson, capturedObjects, capturedSelectedId, bed)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    Log.w("MobileSlicer", "autoOrient native planning failed", error)
+                    PlatePlanningOutcome.Failure(nativeAutoOrientPlateObjectsFailureStatus(error.message))
+                }
+                if (abandonStalePlanningResult(capturedSignature, capturedSelectedId, previousStatus, progressStatus)) return@launch
+                when (nativeOutcome) {
+                    is PlatePlanningOutcome.Success -> applyAutoOrientResult(nativeOutcome.result, source = "native")
+                    is PlatePlanningOutcome.Failure -> workspaceStatus = nativeOutcome.statusMessage
+                }
+            } finally {
+                platePlanningInProgress = false
+            }
+        }
+    }
+
+    fun applyAutoArrangeResult(result: PlateAutoArrangeResult, source: String) {
         plateObjects.clear()
         plateObjects.addAll(result.objects)
         workspaceSession.clearGeneratedPreviewState()
         transformInvalidationKey += 1
         syncSelectedObjectToLegacyState(plateObjects.firstOrNull { it.id == selectedPlateObjectId } ?: plateObjects.firstOrNull())
+        saveActivePlateSnapshot()
         if (VerboseWorkspacePlanningLogs) {
             Log.i(
                 "MobileSlicer",
-                "autoArrange local applied: objects=${plateObjects.size} changed=${result.changedCount} centers=${result.centersSummary}"
+                "autoArrange $source applied: objects=${plateObjects.size} changed=${result.changedCount} centers=${result.centersSummary}"
             )
         }
         workspaceStatus = autoArrangePlateObjectsStatus(plateObjects.size, result)
+    }
+
+    fun arrangePlateObjects(allowRotation: Boolean) {
+        val bed = selectedPrinter.toBedSpec()
+        if (platePlanningInProgress) {
+            workspaceStatus = "Planning already in progress\nWaiting for native planner"
+            return
+        }
+        if (plateObjects.isEmpty()) {
+            workspaceStatus = autoArrangePlateObjectsFailureStatus(plateObjects.size, bed)
+            return
+        }
+        val capturedObjects = plateObjects.toList()
+        val progressStatus = "Arranging objects\nChecking plate fit"
+        val previousStatus = workspaceStatus
+        val capturedSignature = currentPlatePlanningSignature(selectedObjectIdForPlanning = null)
+        val capturedSlots = plateFilamentSlots.toList().ifEmpty {
+            listOf(selectedFilament.toPlateFilamentSlot(index = 1))
+        }
+        val capturedFilaments = sliceReadyProfileStore.filaments.toList()
+        val capturedFlushVolumes = plateFlushVolumes
+        coroutineScope.launch {
+            platePlanningInProgress = true
+            workspaceStatus = progressStatus
+            try {
+                val nativeOutcome = try {
+                    val configJson = withContext(Dispatchers.Default) {
+                        prepareNativeConfigForPlatePlanning(
+                            context = context,
+                            configuration = activeConfiguration,
+                            plateObjects = capturedObjects,
+                            profileFilaments = capturedFilaments,
+                            activePlateSlots = capturedSlots,
+                            flushVolumes = capturedFlushVolumes,
+                            primeTowerPlacementOverride = primeTowerPlacementOverride,
+                            printer = selectedPrinter
+                        )
+                    }
+                    onNativeAutoArrangeRequested(configJson, capturedObjects, bed, allowRotation)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    Log.w("MobileSlicer", "autoArrange native planning failed", error)
+                    PlatePlanningOutcome.Failure(nativeAutoArrangePlateObjectsFailureStatus(error.message))
+                }
+                if (abandonStalePlanningResult(capturedSignature, selectedObjectIdForPlanning = null, previousStatus, progressStatus)) return@launch
+                when (nativeOutcome) {
+                    is PlatePlanningOutcome.Success -> applyAutoArrangeResult(nativeOutcome.result, source = "native")
+                    is PlatePlanningOutcome.Failure -> workspaceStatus = nativeOutcome.statusMessage
+                }
+            } finally {
+                platePlanningInProgress = false
+            }
+        }
     }
 
     fun cloneSelectedPlateObject() {
@@ -597,7 +1081,99 @@ internal fun ModelLoaderScreen(
         plateObjects.add(clone)
         workspaceSession.clearGeneratedPreviewState()
         syncSelectedObjectToLegacyState(clone)
+        saveActivePlateSnapshot()
         workspaceStatus = clonedPlateObjectStatus(plateObjects.size)
+    }
+
+    fun splitSelectedPlateObject(objectOnPlate: PlateObject, mode: NativeSplitMode) {
+        val handle = NativeEngineHandle.fromRaw(nativeEngineHandle)
+        if (handle == null) {
+            workspaceEventBanner = "Split unavailable: the slicer is not ready."
+            return
+        }
+        val sourcePath = objectOnPlate.splitSourcePath()
+        if (!File(sourcePath).exists()) {
+            workspaceEventBanner = "Split failed: source mesh is no longer available."
+            return
+        }
+        val outputDir = File(
+            context.filesDir,
+            "split-results/${SystemClock.elapsedRealtime()}-${objectOnPlate.id}-${mode.label}"
+        )
+        workspaceEventBanner = if (mode == NativeSplitMode.Objects) "Splitting to objects..." else "Splitting to parts..."
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                NativeSplitCalls.splitModelMesh(
+                    handle = handle,
+                    inputPath = sourcePath,
+                    outputDirectory = outputDir.absolutePath,
+                    mode = mode
+                )
+            }
+            when (result) {
+                is NativeSplitCallResult.Success -> {
+                    val preparedObjects = withContext(Dispatchers.Default) {
+                        result.result.objects.mapIndexedNotNull { index, splitObject ->
+                            val file = File(splitObject.filePath).takeIf { it.exists() } ?: return@mapIndexedNotNull null
+                            val prepared = runCatching { StlMeshParser.parseForDisplay(file) }.getOrNull()
+                            val mesh = prepared?.mesh
+                            val nextObjectId = nextPlateObjectId + index
+                            PlateObject(
+                                id = nextObjectId,
+                                label = splitObject.label.ifBlank {
+                                    if (mode == NativeSplitMode.Objects) "Split object ${index + 1}" else "Split part ${index + 1}"
+                                },
+                                filePath = file.absolutePath,
+                                nativeSourceKey = "${sourcePath}:${mode.label}:${index}:${file.name}",
+                                filamentSlotIndex = objectOnPlate.filamentSlotIndex,
+                                format = ImportedModelFormat.Stl,
+                                importTiming = null,
+                                bounds = mesh?.bounds,
+                                mesh = mesh,
+                                viewerPreparationError = if (mesh == null) "Could not prepare split STL mesh." else null,
+                                workspacePreparationTiming = prepared?.let {
+                                    com.mobileslicer.workspace.WorkspacePreparationTiming(
+                                        viewerMeshPrepMs = 0L,
+                                        sourceTriangleCount = it.sourceTriangleCount,
+                                        displayTriangleCount = it.displayTriangleCount,
+                                        reducedForDisplay = it.reducedForDisplay
+                                    )
+                                },
+                                transform = objectOnPlate.transform,
+                                geometrySource = PlateObjectGeometrySource.StagedFile
+                            )
+                        }
+                    }
+                    if (preparedObjects.size <= 1) {
+                        workspaceEventBanner = "Split failed: native split returned no multiple reloadable items."
+                    } else {
+                        val nextObjects = plateObjects.filterNot { it.id == objectOnPlate.id } + preparedObjects
+                        plateObjects.clear()
+                        plateObjects.addAll(nextObjects)
+                        selectedPlateObjectId = preparedObjects.first().id
+                        nextPlateObjectId = (plateObjects.maxOfOrNull { it.id } ?: 0L) + 1L
+                        workspaceSession.clearGeneratedPreviewState()
+                        workspaceMode = WorkspaceMode.Prepare
+                        currentGcodeFilePath = null
+                        currentSliceSummary = null
+                        currentSliceTiming = null
+                        syncSelectedObjectToLegacyState(preparedObjects.first())
+                        saveActivePlateSnapshot()
+                        workspaceEventBanner = if (mode == NativeSplitMode.Objects) {
+                            "Split successful: ${preparedObjects.size} objects"
+                        } else {
+                            "Split successful: ${preparedObjects.size} parts"
+                        }
+                    }
+                }
+                is NativeSplitCallResult.Failure -> {
+                    workspaceEventBanner = "Split failed: ${result.message}"
+                }
+                NativeSplitCallResult.Unavailable -> {
+                    workspaceEventBanner = "Split unavailable in this build."
+                }
+            }
+        }
     }
 
     fun startCalibrationJob(job: CalibrationJob) {
@@ -635,6 +1211,7 @@ internal fun ModelLoaderScreen(
             regenerateFromColors = plateFlushVolumes == null
         )
         syncSelectedObjectToLegacyState(calibrationPlateResult.objects.first())
+        saveActivePlateSnapshot()
         currentGcodeFileName = job.gcodeFileName()
         workspaceMode = WorkspaceMode.Prepare
         workspaceStatus = job.workspaceStatus()
@@ -649,7 +1226,26 @@ internal fun ModelLoaderScreen(
             if (selectedPlateObjectId == objectId) {
                 syncSelectedObjectToLegacyState(plateObjects[index])
             }
+            saveActivePlateSnapshot()
         }
+    }
+
+    fun applyNativePaintPayloadCommitResult(
+        objectId: Long,
+        result: ModelLoaderNativePaintCommitMutation
+    ): Boolean {
+        if (!result.changed) return false
+        plateObjects.clear()
+        plateObjects.addAll(result.objects)
+        result.committedObject?.let { committed ->
+            if (selectedPlateObjectId == objectId) {
+                syncSelectedObjectToLegacyState(committed)
+            }
+        }
+        currentSavedProjectId = result.currentSavedProjectId
+        workspaceSession.clearGeneratedPreviewState(resetWorkspaceMode = false)
+        saveActivePlateSnapshot()
+        return true
     }
 
     fun applyPlateMutation(mutation: ModelLoaderPlateMutation, persistSlots: Boolean = true) {
@@ -664,6 +1260,7 @@ internal fun ModelLoaderScreen(
         }
         workspaceSession.clearGeneratedPreviewState()
         plateObjects.firstOrNull { it.id == selectedPlateObjectId }?.let { syncSelectedObjectToLegacyState(it) }
+        saveActivePlateSnapshot()
     }
 
     fun logResponsivenessEvent(eventName: String) {
@@ -729,6 +1326,7 @@ internal fun ModelLoaderScreen(
                     currentModelBounds = legacyState.modelBounds
                     currentModelFormatName = legacyState.modelFormatName
                 }
+                saveActivePlateSnapshot()
                 logResponsivenessEvent("model_import_completed")
                 workspaceStatus = importApplication.statusMessage
                 val completionPlan = planModelImportCompletionUi(importApplication)
@@ -825,15 +1423,15 @@ internal fun ModelLoaderScreen(
         pendingExportGcodeFilePath = null
     }
 
-    LaunchedEffect(sliceSuccessBanner) {
-        if (sliceSuccessBanner == null) return@LaunchedEffect
+    LaunchedEffect(workspaceEventBanner) {
+        if (workspaceEventBanner == null) return@LaunchedEffect
         delay(1100)
-        sliceSuccessBanner = null
+        workspaceEventBanner = null
     }
 
     sliceCompletionResult?.let { result ->
         if (result.sliced) {
-            sliceSuccessBanner = result.message.lineSequence().firstOrNull { it.isNotBlank() } ?: "Slice successful"
+            workspaceEventBanner = result.message.lineSequence().firstOrNull { it.isNotBlank() } ?: "Slice successful"
             sliceCompletionResult = null
         } else {
             ModelLoaderSliceCompletionDialog(
@@ -915,9 +1513,16 @@ internal fun ModelLoaderScreen(
                 sliceTiming = currentSliceTiming,
                 previewEngineHandle = nativeEngineHandle,
                 previewSliceKey = currentSlicePreviewKey,
+                nativeEngineHandle = nativeEngineHandle,
+                onPrepareNativePaintSessionRequested = { plateObjects, printerBed ->
+                    onSavedProjectNativeLoadRequested(null, plateObjects, printerBed)
+                },
                 gcodePreviewPerformanceMode = gcodePreviewPerformanceMode,
+                activeStylusPaintOnly = activeStylusPaintOnly,
                 worldViewColor = worldViewColor,
                 modelTransform = currentModelTransform,
+                workspacePlates = currentWorkspacePlatesSnapshot(),
+                activePlateId = activePlateId,
                 plateObjects = plateObjects.toList(),
                 filamentSlots = plateFilamentSlots.toList().ifEmpty {
                     listOf(selectedFilament.toPlateFilamentSlot(index = 1))
@@ -925,6 +1530,7 @@ internal fun ModelLoaderScreen(
                 availableFilaments = sliceReadyProfileStore.filaments
                     .filter { it.printerProfileId == selectedPrinter.id || it.printerProfileId.isBlank() },
                 selectedPlateObjectId = selectedPlateObjectId,
+                primeTowerPlacementOverride = primeTowerPlacementOverride,
                 onModelTransformChanged = { transform ->
                     val objectId = selectedPlateObjectId
                     if (objectId != null && transform != null) {
@@ -933,13 +1539,46 @@ internal fun ModelLoaderScreen(
                         currentModelTransform = transform
                     }
                     transformInvalidationKey += 1
+                    saveActivePlateSnapshot()
+                },
+                onActivePlateChanged = { plateId ->
+                    switchWorkspacePlate(plateId)
+                },
+                onAddPlate = {
+                    addWorkspacePlate()
+                },
+                onDuplicateActivePlate = {
+                    duplicateActiveWorkspacePlate()
+                },
+                onDeleteActivePlate = {
+                    deleteActiveWorkspacePlate()
+                },
+                onRenameActivePlate = { name ->
+                    renameActiveWorkspacePlate(name)
+                },
+                onMoveObjectToPlate = { objectId, targetPlateId ->
+                    moveWorkspaceObjectToPlate(objectId, targetPlateId)
+                },
+                onMoveObjectToNewPlate = { objectId ->
+                    moveWorkspaceObjectToNewPlate(objectId)
                 },
                 onPlateObjectSelected = { objectId ->
                     if (objectId == null) {
-                        selectedPlateObjectId = null
+                        if (plateObjects.size == 1) {
+                            syncSelectedObjectToLegacyState(plateObjects.first())
+                        } else {
+                            selectedPlateObjectId = null
+                        }
                     } else {
                         val selected = plateObjects.firstOrNull { objectOnPlate -> objectOnPlate.id == objectId }
                         syncSelectedObjectToLegacyState(selected)
+                    }
+                    saveActivePlateSnapshot()
+                },
+                onPrimeTowerPlacementChanged = { placement, committed ->
+                    primeTowerPlacementOverride = placement
+                    if (committed && currentGcodeFilePath != null) {
+                        workspaceSession.clearGeneratedPreviewState(resetWorkspaceMode = false)
                     }
                 },
                 onAddFilamentSlot = {
@@ -993,12 +1632,22 @@ internal fun ModelLoaderScreen(
                 },
                 onSliceSummaryChanged = { currentSliceSummary = it },
                 onRemoveFilamentSlot = { slotIndex ->
+                    val paintRemapHandle = NativeEngineHandle.fromRaw(nativeEngineHandle)
                     applyPlateMutation(
                         removePlateFilamentSlot(
                             slots = plateFilamentSlots.toList(),
                             objects = plateObjects.toList(),
                             flushVolumes = plateFlushVolumes,
-                            slotIndex = slotIndex
+                            slotIndex = slotIndex,
+                            colorSlotPayloadRemapper = paintRemapHandle?.let { handle ->
+                                { payloadJson, oldSlotToNewSlot ->
+                                    NativePaintCalls.remapColorSlots(
+                                        handle = handle,
+                                        payloadJson = payloadJson,
+                                        oldSlotToNewSlot = oldSlotToNewSlot
+                                    )
+                                }
+                            }
                         )
                     )
                 },
@@ -1015,17 +1664,154 @@ internal fun ModelLoaderScreen(
                         currentSliceSummary = null
                         currentSliceTiming = null
                         syncSelectedObjectToLegacyState(result.nextSelection)
+                        saveActivePlateSnapshot()
                         workspaceStatus = result.statusMessage
                     }
                 },
                 onCloneSelectedObject = {
                     cloneSelectedPlateObject()
                 },
+                onSplitToObjectsRequested = { objectOnPlate ->
+                    splitSelectedPlateObject(objectOnPlate, NativeSplitMode.Objects)
+                },
+                onSplitToPartsRequested = { objectOnPlate ->
+                    splitSelectedPlateObject(objectOnPlate, NativeSplitMode.Parts)
+                },
                 onAutoOrientObjects = {
                     autoOrientPlateObjects()
                 },
-                onAutoArrangeObjects = {
-                    arrangePlateObjects()
+                onAutoArrangeObjects = { allowRotation ->
+                    arrangePlateObjects(allowRotation)
+                },
+                onCutRequested = { objectOnPlate, cutRequest ->
+                    val handle = NativeEngineHandle.fromRaw(nativeEngineHandle)
+                    if (handle == null) {
+                        workspaceStatus = "Cut unavailable: the slicer is not ready."
+                    } else if (
+                        cutRequest.connectorKind != WorkspaceCutConnectorKind.None &&
+                        cutRequest.connectorPositions.isEmpty()
+                    ) {
+                        workspaceStatus = "Cut failed: place at least one connector on the cut face before cutting."
+                    } else {
+                        workspaceStatus = "Cutting ${objectOnPlate.label}..."
+                        coroutineScope.launch {
+                            val printerBed = selectedPrinter.toBedSpec()
+                            val loaded = withContext(Dispatchers.Default) {
+                                onSavedProjectNativeLoadRequested(null, plateObjects.toList(), printerBed)
+                            }
+                            if (!loaded) {
+                                workspaceStatus = "Cut failed: native plate load rejected the current objects."
+                                return@launch
+                            }
+                            val outputDir = File(context.filesDir, "cut-results/${SystemClock.elapsedRealtime()}-${objectOnPlate.id}")
+                            val bounds = objectOnPlate.mesh?.bounds ?: objectOnPlate.bounds
+                            val cutPlane = nativeCutPlane(
+                                cutRequest.heightMm,
+                                cutRequest.rotationXDegrees,
+                                cutRequest.rotationYDegrees,
+                                bounds
+                            )
+                            val result = withContext(Dispatchers.Default) {
+                                NativeCutCalls.cutObject(
+                                    handle,
+                                    NativeCutRequest(
+                                        mobileObjectId = objectOnPlate.id,
+                                        cutMatrixRowMajor = cutPlane.matrixRowMajor,
+                                        mode = cutRequest.mode.toNativeCutMode(),
+                                        attributes = NativeCutAttributes(
+                                            keepUpper = cutRequest.keepUpper,
+                                            keepLower = cutRequest.keepLower,
+                                            keepAsParts = cutRequest.keepAsParts,
+                                            flipUpper = cutRequest.flipUpper,
+                                            flipLower = cutRequest.flipLower,
+                                            placeOnCutUpper = cutRequest.placeOnCutUpper,
+                                            placeOnCutLower = cutRequest.placeOnCutLower
+                                        ),
+                                        outputDirectory = outputDir.absolutePath,
+                                        connectors = nativeCutConnectorsJson(cutRequest, cutPlane),
+                                        groove = nativeCutGrooveJson(cutRequest)
+                                    )
+                                )
+                            }
+                            when (result) {
+                                is com.mobileslicer.nativebridge.NativeCutCallResult.Success -> {
+                                    val preparedObjects = withContext(Dispatchers.Default) {
+                                        result.result.objects.mapNotNull { nativeObject ->
+                                            val file = nativeObject.filePath?.let(::File)?.takeIf { it.exists() } ?: return@mapNotNull null
+                                            val prepared = runCatching { StlMeshParser.parseForDisplay(file) }.getOrNull()
+                                            val mesh = prepared?.mesh
+                                            val cutTransform = mesh?.bounds?.let { cutBounds ->
+                                                ViewerModelTransform(
+                                                    centerXmm = cutBounds.centerX,
+                                                    centerYmm = cutBounds.centerY,
+                                                    rotationXDegrees = 0f,
+                                                    rotationYDegrees = 0f,
+                                                    rotationZDegrees = 0f,
+                                                    uniformScale = 1f
+                                                )
+                                            } ?: objectOnPlate.transform.copy(
+                                                rotationXDegrees = 0f,
+                                                rotationYDegrees = 0f,
+                                                rotationZDegrees = 0f,
+                                                uniformScale = 1f
+                                            )
+                                            PlateObject(
+                                                id = nativeObject.mobileObjectId,
+                                                label = nativeObject.label,
+                                                filePath = file.absolutePath,
+                                                nativeSourceKey = "${result.result.cutGroupId}:${nativeObject.role}:${nativeObject.mobileObjectId}",
+                                                filamentSlotIndex = objectOnPlate.filamentSlotIndex,
+                                                format = ImportedModelFormat.Stl,
+                                                importTiming = null,
+                                                bounds = mesh?.bounds,
+                                                mesh = mesh,
+                                                viewerPreparationError = if (mesh == null) "Could not prepare cut STL mesh." else null,
+                                                workspacePreparationTiming = prepared?.let {
+                                                    com.mobileslicer.workspace.WorkspacePreparationTiming(
+                                                        viewerMeshPrepMs = 0L,
+                                                        sourceTriangleCount = it.sourceTriangleCount,
+                                                        displayTriangleCount = it.displayTriangleCount,
+                                                        reducedForDisplay = it.reducedForDisplay
+                                                    )
+                                                },
+                                                transform = cutTransform,
+                                                geometrySource = PlateObjectGeometrySource.NativeCutResult(
+                                                    cutGroupId = result.result.cutGroupId,
+                                                    sourceMobileObjectId = result.result.sourceMobileObjectId,
+                                                    role = nativeObject.role,
+                                                    resultJson = result.result.rawJson
+                                                )
+                                            )
+                                        }
+                                    }
+                                    if (preparedObjects.isEmpty()) {
+                                        workspaceStatus = "Cut failed: native cut returned no reloadable objects."
+                                    } else {
+                                        val nextObjects = plateObjects.filterNot { it.id == objectOnPlate.id } + preparedObjects
+                                        plateObjects.clear()
+                                        plateObjects.addAll(nextObjects)
+                                        selectedPlateObjectId = preparedObjects.first().id
+                                        nextPlateObjectId = (plateObjects.maxOfOrNull { it.id } ?: 0L) + 1L
+                                        workspaceSession.clearGeneratedPreviewState()
+                                        workspaceMode = WorkspaceMode.Prepare
+                                        currentGcodeFilePath = null
+                                        currentSliceSummary = null
+                                        currentSliceTiming = null
+                                        syncSelectedObjectToLegacyState(preparedObjects.first())
+                                        onNativePlateCacheCurrent(plateObjects.toList(), printerBed)
+                                        saveActivePlateSnapshot()
+                                        workspaceStatus = "Cut complete: ${preparedObjects.size} object(s) created."
+                                    }
+                                }
+                                is com.mobileslicer.nativebridge.NativeCutCallResult.Failure -> {
+                                    workspaceStatus = "Cut failed: ${result.message}"
+                                }
+                                com.mobileslicer.nativebridge.NativeCutCallResult.Unavailable -> {
+                                    workspaceStatus = "Cut unavailable in this build."
+                                }
+                            }
+                        }
+                    }
                 },
                 onAddObject = {
                     launchModelPickerOrPromptForProfiles(appendToPlate = true)
@@ -1042,7 +1828,8 @@ internal fun ModelLoaderScreen(
                     currentScreen = AppScreen.Profiles
                 },
                 onSavePlate = {
-                    when (val savePlan = planSavePlatePrompt(plateObjects, currentModelLabel)) {
+                    val projectObjects = currentWorkspacePlatesSnapshot().flatMap { it.objects }
+                    when (val savePlan = planSavePlatePrompt(projectObjects, currentModelLabel)) {
                         is ModelLoaderSavePlatePromptPlan.Fail -> workspaceStatus = savePlan.statusMessage
                         is ModelLoaderSavePlatePromptPlan.Prompt -> {
                             savePlateThumbnail = it
@@ -1076,12 +1863,18 @@ internal fun ModelLoaderScreen(
                             ModelLoaderSliceStartPlan.Ignore
                         } else {
                             val generatedFootprintFits = normalizeGeneratedFootprintBeforeSlice()
+                            val calibrationFirmwareFailure =
+                                currentCalibrationJob?.unsupportedFirmwareMessage(selectedPrinter.gcodeFlavor)
                             planModelLoaderSliceStart(
                                 modelLoaded = modelLoaded,
                                 sliceInProgress = sliceInProgress,
                                 sendToPrinterInProgress = sendToPrinterInProgress,
                                 generatedFootprintFits = generatedFootprintFits,
-                                printableVolumePreflightFailure = if (generatedFootprintFits) printableVolumePreflightFailure() else null,
+                                printableVolumePreflightFailure = if (generatedFootprintFits) {
+                                    calibrationFirmwareFailure ?: printableVolumePreflightFailure()
+                                } else {
+                                    null
+                                },
                                 nativeSliceTitle = activeConfiguration.nativeSliceTitle()
                             )
                         }
@@ -1109,6 +1902,7 @@ internal fun ModelLoaderScreen(
                                 plateFilamentSlots = plateFilamentSlots.toList(),
                                 fallbackFilament = selectedFilament,
                                 flushVolumes = plateFlushVolumes,
+                                primeTowerPlacementOverride = primeTowerPlacementOverride,
                                 printer = selectedPrinter,
                                 modelFilePath = currentModelFilePath,
                                 preparedMesh = currentPreparedMesh,
@@ -1126,6 +1920,7 @@ internal fun ModelLoaderScreen(
                                         profileFilaments = sliceInputs.profileFilaments,
                                         activePlateSlots = sliceInputs.activePlateSlots,
                                         flushVolumes = sliceInputs.flushVolumes,
+                                        primeTowerPlacementOverride = sliceInputs.primeTowerPlacementOverride,
                                         printer = sliceInputs.printer,
                                         modelFilePath = sliceInputs.modelFilePath,
                                         preparedMesh = sliceInputs.preparedMesh,
@@ -1208,6 +2003,28 @@ internal fun ModelLoaderScreen(
                         workspaceStatus = onShareRequested(action.gcodeFilePath, action.fileName)
                     }
                 },
+                onNativePaintPayloadCommitted = { objectId, mode, payloadJson ->
+                    Log.i(
+                        "MobileSlicerPaint",
+                        "native paint payload committed object=$objectId bytes=${payloadJson.length}"
+                    )
+                    val objectsSnapshot = plateObjects.toList()
+                    val savedProjectIdSnapshot = currentSavedProjectId
+                    coroutineScope.launch {
+                        val result = withContext(Dispatchers.Default) {
+                            applyNativePaintPayloadCommit(
+                                objects = objectsSnapshot,
+                                currentSavedProjectId = savedProjectIdSnapshot,
+                                objectId = objectId,
+                                mode = mode.toWorkspacePaintMode(),
+                                payloadJson = payloadJson
+                            )
+                        }
+                        if (!applyNativePaintPayloadCommitResult(objectId, result)) {
+                            workspaceStatus = "Paint update failed\nNative payload was not usable"
+                        }
+                    }
+                },
                 modifier = Modifier.padding(innerPadding)
             )
             AppScreen.Profiles -> ProfilesScreen(
@@ -1251,18 +2068,20 @@ internal fun ModelLoaderScreen(
                 accentPalette = accentPalette,
                 worldViewColor = worldViewColor,
                 showAdvancedProfileSettings = showAdvancedProfileSettings,
+                activeStylusPaintOnly = activeStylusPaintOnly,
                 gcodePreviewPerformanceMode = gcodePreviewPerformanceMode,
                 onThemeModeSelected = onThemeModeSelected,
                 onAccentPaletteSelected = onAccentPaletteSelected,
                 onWorldViewColorSelected = onWorldViewColorSelected,
                 onShowAdvancedProfileSettingsChanged = onShowAdvancedProfileSettingsChanged,
+                onActiveStylusPaintOnlyChanged = onActiveStylusPaintOnlyChanged,
                 onGcodePreviewPerformanceModeSelected = onGcodePreviewPerformanceModeSelected,
                 onBack = { handleBackNavigation() },
                 modifier = Modifier.padding(innerPadding)
             )
             }
 
-            sliceSuccessBanner?.let { message ->
+            workspaceEventBanner?.let { message ->
                 ModelLoaderSuccessBanner(message)
             }
         }

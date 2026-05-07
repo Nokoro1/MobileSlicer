@@ -4,6 +4,7 @@ import java.io.File
 import java.util.Locale
 import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.workspace.SliceResultSummary
+import org.json.JSONObject
 
 internal const val DEFAULT_ORCA_TEMP_CACHE_MAX_BYTES: Long = 256L * 1024L * 1024L
 internal const val DEFAULT_ORCA_TEMP_CACHE_MAX_AGE_MS: Long = 24L * 60L * 60L * 1000L
@@ -96,28 +97,34 @@ internal fun calibrationGcodeFileName(configJson: String?): String? {
     if (configJson.isNullOrBlank() || "mobile_slicer_calibration_active" !in configJson) {
         return null
     }
-    return when {
-        "\"mobile_slicer_calibration_type\":\"FlowRate\"" in configJson || "FlowRate" in configJson ->
-            "Filament Flow Rate Calibration.gcode"
-        "\"mobile_slicer_calibration_type\":\"PressureAdvance\"" in configJson || "PressureAdvance" in configJson ->
-            "Pressure Advance Calibration.gcode"
-        "\"mobile_slicer_calibration_type\":\"TemperatureTower\"" in configJson || "TemperatureTower" in configJson ->
-            "Temperature Tower Calibration.gcode"
-        "\"mobile_slicer_calibration_type\":\"MaxVolumetricSpeed\"" in configJson || "MaxVolumetricSpeed" in configJson ->
-            "Max Volumetric Speed Calibration.gcode"
-        "\"mobile_slicer_calibration_type\":\"Vfa\"" in configJson || "\"type\":\"Vfa\"" in configJson ->
-            "VFA Calibration.gcode"
-        "\"mobile_slicer_calibration_type\":\"Retraction\"" in configJson || "\"type\":\"Retraction\"" in configJson ->
-            "Retraction Calibration.gcode"
-        "\"mobile_slicer_calibration_type\":\"InputShapingFrequency\"" in configJson || "InputShapingFrequency" in configJson ->
-            "Input Shaping Frequency Calibration.gcode"
-        "\"mobile_slicer_calibration_type\":\"InputShapingDamping\"" in configJson || "InputShapingDamping" in configJson ->
-            "Input Shaping Damping Calibration.gcode"
-        "\"mobile_slicer_calibration_type\":\"Cornering\"" in configJson || "\"type\":\"Cornering\"" in configJson ->
-            "Cornering Calibration.gcode"
-        else -> null
-    }
+    return calibrationGcodeFileNameForType(extractCalibrationType(configJson))
 }
+
+internal fun calibrationGcodeFileNameForType(type: String?): String? = when (type) {
+    "FlowRate" -> "Filament Flow Rate Calibration.gcode"
+    "PressureAdvance" -> "Pressure Advance Calibration.gcode"
+    "TemperatureTower" -> "Temperature Tower Calibration.gcode"
+    "MaxVolumetricSpeed" -> "Max Volumetric Speed Calibration.gcode"
+    "Vfa" -> "VFA Calibration.gcode"
+    "Retraction" -> "Retraction Calibration.gcode"
+    "InputShapingFrequency" -> "Input Shaping Frequency Calibration.gcode"
+    "InputShapingDamping" -> "Input Shaping Damping Calibration.gcode"
+    "Cornering" -> "Cornering Calibration.gcode"
+    "Tolerance" -> "Tolerance Calibration.gcode"
+    else -> null
+}
+
+private fun extractCalibrationType(configJson: String): String? =
+    runCatching {
+        JSONObject(configJson).optString("mobile_slicer_calibration_type")
+            .ifBlank { JSONObject(configJson).optString("type") }
+            .ifBlank { null }
+    }.getOrElse {
+        Regex(""""mobile_slicer_calibration_type"\s*:\s*"([^"]+)"""")
+            .find(configJson)
+            ?.groupValues
+            ?.getOrNull(1)
+    }
 
 internal fun cleanupGeneratedGcodeCache(cacheDir: File, retainedPaths: Set<String>) {
     cacheDir.listFiles()?.forEach { file ->

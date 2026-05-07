@@ -275,7 +275,7 @@ internal fun PrinterProfileEditorDialog(
         }
     ) {
         when (selectedTab) {
-            PrinterEditorTab.BasicInformation -> ProfileEditorSection("Basic information", "Orca printer Basic information groups, in source order.") {
+            PrinterEditorTab.BasicInformation -> ProfileEditorSection("Basic information", "Build volume, bed type, and motion basics for this printer.") {
                 ProfileGroupHeader("Printable space")
                 if (ProfileEditorSetting.PrinterBedDimensions.isVisible(showAdvancedProfileSettings)) {
                     ProfileTextField(draft.bedWidth, { draft.bedWidth = it }, "Bed width (mm)", KeyboardType.Decimal)
@@ -316,18 +316,18 @@ internal fun PrinterProfileEditorDialog(
                         onSelected = { draft.gcodeFlavor = it }
                     )
                     ProfileDropdownField(
-                        label = "Pellet Modded Printer",
+                        label = "Pellet-modded printer",
                         selectedLabel = if (draft.pelletModdedPrinter) "Enabled" else "Disabled",
                         options = options.boolEnabledDisabledOptions,
                         onSelected = { draft.pelletModdedPrinter = it }
                     )
                     ProfileDropdownField(
-                        label = "Disable set remaining print time",
+                        label = "Disable remaining-time updates",
                         selectedLabel = if (draft.disableM73) "Enabled" else "Disabled",
                         options = options.boolEnabledDisabledOptions,
                         onSelected = { draft.disableM73 = it }
                     )
-                    ProfileTextField(draft.thumbnails, { draft.thumbnails = it }, "G-code draft.thumbnails")
+                    ProfileTextField(draft.thumbnails, { draft.thumbnails = it }, "G-code thumbnails")
                     ProfileDropdownField(
                         label = "Use relative E distances",
                         selectedLabel = if (draft.useRelativeEDistances) "Enabled" else "Disabled",
@@ -343,7 +343,7 @@ internal fun PrinterProfileEditorDialog(
                     ProfileTextField(draft.timeCost, { draft.timeCost = it }, "Time cost (money/h)", KeyboardType.Decimal)
                 }
                 if (ProfileEditorSetting.PrinterBasicInformationCoolingFan.isVisible(showAdvancedProfileSettings)) {
-                    ProfileGroupHeader("Cooling Fan")
+                    ProfileGroupHeader("Cooling fan")
                     ProfileTextField(draft.fanSpeedupTime, { draft.fanSpeedupTime = it }, "Fan speed-up time (s)", KeyboardType.Decimal)
                     ProfileDropdownField(
                         label = "Only overhangs",
@@ -354,7 +354,7 @@ internal fun PrinterProfileEditorDialog(
                     ProfileTextField(draft.fanKickstartTime, { draft.fanKickstartTime = it }, "Fan kick-start time (s)", KeyboardType.Decimal)
                 }
                 if (ProfileEditorSetting.PrinterBasicInformationExtruderClearance.isVisible(showAdvancedProfileSettings)) {
-                    ProfileGroupHeader("Extruder Clearance")
+                    ProfileGroupHeader("Extruder clearance")
                     ProfileTextField(draft.extruderClearanceRadius, { draft.extruderClearanceRadius = it }, "Radius (mm)", KeyboardType.Decimal)
                     ProfileTextField(draft.extruderClearanceHeightToRod, { draft.extruderClearanceHeightToRod = it }, "Height to rod (mm)", KeyboardType.Decimal)
                     ProfileTextField(draft.extruderClearanceHeightToLid, { draft.extruderClearanceHeightToLid = it }, "Height to lid (mm)", KeyboardType.Decimal)
@@ -430,7 +430,7 @@ internal fun PrinterProfileEditorDialog(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text(if (browsingConnectionTargets) "Searching..." else "Discover Printers")
+                            Text(if (browsingConnectionTargets) "Searching..." else "Discover printers")
                     }
                     if (connectionFieldVisible(PrinterConnectionField.WebUi)) {
                         ProfileTextField(draft.printHostWebUi, { draft.printHostWebUi = it }, connectionField(PrinterConnectionField.WebUi).label)
@@ -498,7 +498,7 @@ internal fun PrinterProfileEditorDialog(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp)
                         ) {
-                            Text(if (browsingConnectionTargets) "Loading..." else connectionCapabilities.browseGroupsLabel.orEmpty().ifBlank { "Browse Groups" })
+                            Text(if (browsingConnectionTargets) "Loading..." else connectionCapabilities.browseGroupsLabel.orEmpty().ifBlank { "Browse groups" })
                         }
                     }
                     if (connectionFieldVisible(PrinterConnectionField.CaFile)) {
@@ -574,7 +574,7 @@ internal fun PrinterProfileEditorDialog(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp)
                         ) {
-                            Text(if (simplyPrintLoginInProgress) "Logging in..." else "Login to SimplyPrint")
+                            Text(if (simplyPrintLoginInProgress) "Logging in..." else "Log in to SimplyPrint")
                         }
                     }
                     Button(
@@ -586,7 +586,7 @@ internal fun PrinterProfileEditorDialog(
                                 draft.printHostType != PrintHostType.Obico &&
                                 draft.printHostType != PrintHostType.SimplyPrint
                             ) {
-                                connectionStatusDialog = "No printer connection established, go to Profiles, Printer, Connection to establish a connection."
+                                connectionStatusDialog = "Set up a printer connection in Profiles > Printer > Connection first."
                                 return@Button
                             }
                             testingConnection = true
@@ -599,7 +599,7 @@ internal fun PrinterProfileEditorDialog(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text(if (testingConnection) "Testing..." else "Test Connection")
+                        Text(if (testingConnection) "Testing..." else "Test connection")
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -613,7 +613,7 @@ internal fun PrinterProfileEditorDialog(
                                     draft.printHostType != PrintHostType.Obico &&
                                     draft.printHostType != PrintHostType.SimplyPrint
                                 ) {
-                                    connectionStatusDialog = "No printer connection established, go to Profiles, Printer, Connection to establish a connection."
+                                    connectionStatusDialog = "Set up a printer connection in Profiles > Printer > Connection first."
                                     return@Button
                                 }
                                 connectionStatusDialog = "Refreshing printer status..."
@@ -623,7 +623,7 @@ internal fun PrinterProfileEditorDialog(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(16.dp)
                         ) {
-                            Text(if (refreshingPrinterStatus) "Refreshing..." else "Refresh Status")
+                            Text(if (refreshingPrinterStatus) "Refreshing..." else "Refresh status")
                         }
                         Button(
                             onClick = { onOpenPrinterUi(currentConnectionProfile()) },
@@ -633,12 +633,12 @@ internal fun PrinterProfileEditorDialog(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(16.dp)
                         ) {
-                            Text("Open UI")
+                            Text("Open printer UI")
                         }
                     }
                 }
             }
-            PrinterEditorTab.Extruder -> ProfileEditorSection("Extruder", "Orca printer Extruder groups, in source order.") {
+            PrinterEditorTab.Extruder -> ProfileEditorSection("Extruder", "Nozzle, retraction, and tool-change settings for this printer.") {
                 ProfileGroupHeader("Basic information")
                 if (ProfileEditorSetting.PrinterNozzleDiameter.isVisible(showAdvancedProfileSettings)) {
                     ProfileTextField(draft.nozzleDiameter, { draft.nozzleDiameter = it }, "Nozzle diameter (mm)", KeyboardType.Decimal)
@@ -671,9 +671,9 @@ internal fun PrinterProfileEditorDialog(
                         onSelected = { draft.wipe = it }
                     )
                     ProfileTextField(draft.wipeDistance, { draft.wipeDistance = it }, "Wipe distance (mm)", KeyboardType.Decimal)
-                    ProfileTextField(draft.retractBeforeWipe, { draft.retractBeforeWipe = it }, "Retract amount before draft.wipe (%)", KeyboardType.Number)
+                    ProfileTextField(draft.retractBeforeWipe, { draft.retractBeforeWipe = it }, "Retract amount before wipe (%)", KeyboardType.Number)
                 }
-                ProfileGroupHeader("Z-Hop")
+                ProfileGroupHeader("Z-hop")
                 if (ProfileEditorSetting.PrinterExtruderRetractionAdvanced.isVisible(showAdvancedProfileSettings)) {
                     ProfileDropdownField(
                         label = "On surfaces",
@@ -696,7 +696,7 @@ internal fun PrinterProfileEditorDialog(
                     ProfileTextField(draft.retractRestartExtraToolchange, { draft.retractRestartExtraToolchange = it }, "Toolchange extra length on restart (mm)", KeyboardType.Decimal)
                 }
             }
-            PrinterEditorTab.MachineGcode -> ProfileEditorSection("Machine G-code", "Orca printer machine G-code groups, in Orca order.") {
+            PrinterEditorTab.MachineGcode -> ProfileEditorSection("Machine G-code", "Custom G-code blocks used before, during, and after a print.") {
                 if (ProfileEditorSetting.PrinterMachineGcode.isVisible(showAdvancedProfileSettings)) {
                     ProfileGroupHeader("File header")
                     ProfileMultilineTextField(draft.fileStartGcode, { draft.fileStartGcode = it }, "File header G-code")
@@ -712,7 +712,7 @@ internal fun PrinterProfileEditorDialog(
                     ProfileMultilineTextField(draft.layerChangeGcode, { draft.layerChangeGcode = it }, "Layer change G-code")
                     ProfileGroupHeader("Timelapse G-code")
                     ProfileMultilineTextField(draft.timeLapseGcode, { draft.timeLapseGcode = it }, "Timelapse G-code")
-                    ProfileGroupHeader("Clumping Detection G-code")
+                    ProfileGroupHeader("Clumping detection G-code")
                     ProfileMultilineTextField(draft.wrappingDetectionGcode, { draft.wrappingDetectionGcode = it }, "Clumping detection G-code")
                     ProfileGroupHeader("Change filament G-code")
                     ProfileMultilineTextField(draft.changeFilamentGcode, { draft.changeFilamentGcode = it }, "Change filament G-code")
@@ -720,28 +720,28 @@ internal fun PrinterProfileEditorDialog(
                     ProfileMultilineTextField(draft.changeExtrusionRoleGcode, { draft.changeExtrusionRoleGcode = it }, "Change extrusion role G-code")
                     ProfileGroupHeader("Pause G-code")
                     ProfileMultilineTextField(draft.machinePauseGcode, { draft.machinePauseGcode = it }, "Pause G-code")
-                    ProfileGroupHeader("Template Custom G-code")
+                    ProfileGroupHeader("Template custom G-code")
                     ProfileMultilineTextField(draft.templateCustomGcode, { draft.templateCustomGcode = it }, "Template custom G-code")
                 } else {
                     Text(
-                        text = "Enable Advanced slicer controls to edit Orca printer Machine G-code.",
+                        text = "Enable advanced profile controls to edit machine G-code.",
                         style = MaterialTheme.typography.bodySmall,
                         color = appBodyColor()
                     )
                 }
             }
-            PrinterEditorTab.Multimaterial -> ProfileEditorSection("Multimaterial", "Orca printer multimaterial groups, in Orca order.") {
+            PrinterEditorTab.Multimaterial -> ProfileEditorSection("Multimaterial", "Filament change, wipe tower, and tool-change behavior.") {
                 if (ProfileEditorSetting.PrinterMultimaterialAdvanced.isVisible(showAdvancedProfileSettings)) {
                     ProfileGroupHeader("Single extruder multi-material setup")
                     ProfileDropdownField(
-                        label = "Single Extruder Multi Material",
+                        label = "Single-extruder multimaterial",
                         selectedLabel = if (draft.singleExtruderMultiMaterial) "Enabled" else "Disabled",
                         options = options.boolEnabledDisabledOptions,
                         onSelected = { draft.singleExtruderMultiMaterial = it }
                     )
                     ProfileTextField(draft.extrudersCount, { draft.extrudersCount = it }, "Extruders")
                     ProfileDropdownField(
-                        label = "Manual Filament Change",
+                        label = "Manual filament change",
                         selectedLabel = if (draft.manualFilamentChange) "Enabled" else "Disabled",
                         options = options.boolEnabledDisabledOptions,
                         onSelected = { draft.manualFilamentChange = it }
@@ -788,7 +788,7 @@ internal fun PrinterProfileEditorDialog(
                     ProfileTextField(draft.machineToolChangeTime, { draft.machineToolChangeTime = it }, "Tool change time (s)", KeyboardType.Decimal)
                 }
             }
-            PrinterEditorTab.MotionAbility -> ProfileEditorSection("Motion ability", "Orca printer motion limits, in Orca Motion ability order.") {
+            PrinterEditorTab.MotionAbility -> ProfileEditorSection("Motion ability", "Speed, acceleration, jerk, and resonance limits for this printer.") {
                 if (ProfileEditorSetting.PrinterMotionAbilityAdvanced.isVisible(showAdvancedProfileSettings)) {
                     ProfileGroupHeader("Advanced")
                     ProfileDropdownField(
@@ -797,7 +797,7 @@ internal fun PrinterProfileEditorDialog(
                         options = options.boolEnabledDisabledOptions,
                         onSelected = { draft.emitMachineLimitsToGcode = it }
                     )
-                    ProfileGroupHeader("Resonance Avoidance")
+                    ProfileGroupHeader("Resonance avoidance")
                     ProfileDropdownField(
                         label = "Resonance avoidance",
                         selectedLabel = if (draft.resonanceAvoidance) "Enabled" else "Disabled",
@@ -831,13 +831,13 @@ internal fun PrinterProfileEditorDialog(
                 ProfileTextField(draft.machineMaxJerkZ, { draft.machineMaxJerkZ = it }, "Maximum jerk Z (mm/s)", KeyboardType.Decimal)
                 ProfileTextField(draft.machineMaxJerkE, { draft.machineMaxJerkE = it }, "Maximum jerk E (mm/s)", KeyboardType.Decimal)
             }
-            PrinterEditorTab.Notes -> ProfileEditorSection("Notes", "Orca printer notes page.") {
+            PrinterEditorTab.Notes -> ProfileEditorSection("Notes", "Optional notes stored with this printer profile.") {
                 if (ProfileEditorSetting.PrinterNotes.isVisible(showAdvancedProfileSettings)) {
                     ProfileGroupHeader("Notes")
                     ProfileMultilineTextField(draft.printerNotes, { draft.printerNotes = it }, "Printer notes")
                 } else {
                     Text(
-                        text = "Enable Advanced slicer controls to edit Orca printer notes.",
+                        text = "Enable advanced profile controls to edit printer notes.",
                         style = MaterialTheme.typography.bodySmall,
                         color = appBodyColor()
                     )

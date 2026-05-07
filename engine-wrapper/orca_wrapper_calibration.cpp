@@ -76,6 +76,8 @@ Slic3r::Calib_Params extract_calibration_params(const std::string& json)
         params.freqEndX = extract_number(json, "calibration_input_shaping_end").value_or(60.0);
         params.freqStartY = params.freqStartX;
         params.freqEndY = params.freqEndX;
+        params.test_model = static_cast<int>(extract_number(json, "calibration_test_model").value_or(0.0));
+        params.shaper_type = extract_string(json, "calibration_shaper_type").value_or("");
     } else if (type == "InputShapingDamping") {
         params.mode = Slic3r::CalibMode::Calib_Input_shaping_damp;
         params.start = extract_number(json, "calibration_input_shaping_start").value_or(0.05);
@@ -85,11 +87,15 @@ Slic3r::Calib_Params extract_calibration_params(const std::string& json)
         params.freqEndX = 40.0;
         params.freqStartY = 40.0;
         params.freqEndY = 40.0;
+        params.test_model = static_cast<int>(extract_number(json, "calibration_test_model").value_or(0.0));
+        params.shaper_type = extract_string(json, "calibration_shaper_type").value_or("");
     } else if (type == "Cornering") {
         params.mode = Slic3r::CalibMode::Calib_Cornering;
         params.start = extract_number(json, "calibration_cornering_start").value_or(5.0);
         params.end = extract_number(json, "calibration_cornering_end").value_or(20.0);
         params.step = extract_number(json, "calibration_cornering_step").value_or(1.0);
+        params.test_model = static_cast<int>(extract_number(json, "calibration_test_model").value_or(2.0));
+        params.shaper_type = extract_string(json, "calibration_shaper_type").value_or("");
     }
     return params;
 }

@@ -172,25 +172,31 @@ internal fun WorkspaceTopBar(
     val titleColor = appTitleColor()
     val bodyColor = appBodyColor()
     val outlineColor = appOutlineColor()
+    val compactTopBar = LocalConfiguration.current.screenWidthDp < 390
+    val iconButtonWidth = if (compactTopBar) 42.dp else 46.dp
+    val topButtonHeight = if (compactTopBar) 40.dp else 44.dp
+    val topButtonRadius = if (compactTopBar) 15.dp else 17.dp
+    val textButtonRadius = if (compactTopBar) 16.dp else 18.dp
+    val textButtonHorizontalPadding = if (compactTopBar) 10.dp else 12.dp
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = if (compactTopBar) 10.dp else 12.dp, vertical = 8.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(if (compactTopBar) 5.dp else 6.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(15.dp))
+                    .clip(RoundedCornerShape(topButtonRadius))
                     .background(appCardColorMuted().copy(alpha = 0.84f))
-                    .border(1.dp, outlineColor.copy(alpha = 0.82f), RoundedCornerShape(15.dp))
+                    .border(1.dp, outlineColor.copy(alpha = 0.82f), RoundedCornerShape(topButtonRadius))
             ) {
                 IconButton(
                     onClick = onBack,
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(topButtonHeight)
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -205,8 +211,8 @@ internal fun WorkspaceTopBar(
                 Button(
                     onClick = onDeleteObject,
                     enabled = deleteEnabled,
-                    modifier = Modifier.size(width = 46.dp, height = 44.dp),
-                    shape = RoundedCornerShape(17.dp),
+                    modifier = Modifier.size(width = iconButtonWidth, height = topButtonHeight),
+                    shape = RoundedCornerShape(topButtonRadius),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -223,8 +229,8 @@ internal fun WorkspaceTopBar(
                 Button(
                     onClick = onCloneObject,
                     enabled = cloneEnabled,
-                    modifier = Modifier.size(width = 46.dp, height = 44.dp),
-                    shape = RoundedCornerShape(17.dp),
+                    modifier = Modifier.size(width = iconButtonWidth, height = topButtonHeight),
+                    shape = RoundedCornerShape(topButtonRadius),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -240,8 +246,8 @@ internal fun WorkspaceTopBar(
                 }
                 Button(
                     onClick = onAddObject,
-                    modifier = Modifier.size(width = 46.dp, height = 44.dp),
-                    shape = RoundedCornerShape(17.dp),
+                    modifier = Modifier.size(width = iconButtonWidth, height = topButtonHeight),
+                    shape = RoundedCornerShape(topButtonRadius),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
@@ -257,62 +263,62 @@ internal fun WorkspaceTopBar(
                 Button(
                     onClick = onTransformClick,
                     enabled = transformEnabled,
-                    modifier = Modifier.height(44.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.height(topButtonHeight),
+                    shape = RoundedCornerShape(textButtonRadius),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                         disabledContainerColor = appCardColorMuted().copy(alpha = 0.88f),
                         disabledContentColor = bodyColor.copy(alpha = 0.58f)
                     ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                    contentPadding = PaddingValues(horizontal = textButtonHorizontalPadding, vertical = 0.dp)
                 ) {
-                    Text("Transform")
+                    Text("Tools")
                 }
             } else {
                 Button(
                     onClick = onOpenSendMenu,
                     enabled = previewEnabled && !sendToPrinterInProgress,
-                    modifier = Modifier.height(44.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.height(topButtonHeight),
+                    shape = RoundedCornerShape(textButtonRadius),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                         disabledContainerColor = appCardColorMuted().copy(alpha = 0.88f),
                         disabledContentColor = bodyColor.copy(alpha = 0.58f)
                     ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                    contentPadding = PaddingValues(horizontal = textButtonHorizontalPadding, vertical = 0.dp)
                 ) {
                     Text(if (sendToPrinterInProgress) "Sending" else "Send")
                 }
                 Button(
                     onClick = onOpenPrinter,
                     enabled = previewEnabled && !sendToPrinterInProgress,
-                    modifier = Modifier.height(44.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.height(topButtonHeight),
+                    shape = RoundedCornerShape(textButtonRadius),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                         disabledContainerColor = appCardColorMuted().copy(alpha = 0.88f),
                         disabledContentColor = bodyColor.copy(alpha = 0.58f)
                     ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                    contentPadding = PaddingValues(horizontal = textButtonHorizontalPadding, vertical = 0.dp)
                 ) {
-                    Text("UI")
+                    Text("Printer UI")
                 }
                 if (showPreviewInfo) {
                     Button(
                         onClick = onOpenPreviewInfo,
                         enabled = previewEnabled,
-                        modifier = Modifier.height(44.dp),
-                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.height(topButtonHeight),
+                        shape = RoundedCornerShape(textButtonRadius),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary,
                             disabledContainerColor = appCardColorMuted().copy(alpha = 0.88f),
                             disabledContentColor = bodyColor.copy(alpha = 0.58f)
                         ),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                        contentPadding = PaddingValues(horizontal = textButtonHorizontalPadding, vertical = 0.dp)
                     ) {
                         Text("Info")
                     }
@@ -321,15 +327,15 @@ internal fun WorkspaceTopBar(
             Button(
                 onClick = onModeClick,
                 enabled = workspaceMode == WorkspaceMode.Preview || previewEnabled,
-                modifier = Modifier.height(44.dp),
-                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.height(topButtonHeight),
+                shape = RoundedCornerShape(textButtonRadius),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     disabledContainerColor = appCardColorMuted().copy(alpha = 0.88f),
                     disabledContentColor = bodyColor.copy(alpha = 0.58f)
                 ),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
+                contentPadding = PaddingValues(horizontal = if (compactTopBar) 12.dp else 16.dp, vertical = 0.dp)
             ) {
                 Text(if (workspaceMode == WorkspaceMode.Preview) "Prepare" else "Preview")
             }

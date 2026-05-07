@@ -178,10 +178,13 @@ internal fun ProfilesLandingSection(
                 color = appTitleColor(),
                 fontWeight = FontWeight.SemiBold
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SoftPill(label = printerTitle)
-                SoftPill(label = filamentTitle)
-                SoftPill(label = processTitle)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SoftPill(label = printerTitle, modifier = Modifier.weight(1f))
+                SoftPill(label = filamentTitle, modifier = Modifier.weight(1f))
+                SoftPill(label = processTitle, modifier = Modifier.weight(1f))
             }
             Button(
                 onClick = onProfilesClick,
@@ -189,7 +192,7 @@ internal fun ProfilesLandingSection(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp)
             ) {
-                Text("Open Profiles")
+                Text("Open profiles")
             }
         }
     }

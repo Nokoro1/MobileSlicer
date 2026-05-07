@@ -3,9 +3,23 @@ import argparse
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 COMPACT_JSON = {"sort_keys": True, "separators": (",", ":")}
+
+
+def remove_generated_dir(path: Path) -> None:
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(0.1 * (attempt + 1))
 
 
 def safe_asset_name(name: str) -> str:
@@ -267,7 +281,7 @@ def main() -> None:
         raise SystemExit(f"Missing Orca profiles directory: {profiles_root}")
 
     if output_dir.exists():
-        shutil.rmtree(output_dir)
+        remove_generated_dir(output_dir)
     covers_dir.mkdir(parents=True, exist_ok=True)
     bundles_dir.mkdir(parents=True, exist_ok=True)
 

@@ -79,6 +79,9 @@ internal data class PreviewInteractionAutomationRequest(
 }
 
 internal fun MainActivity.maybeRunPreviewInteractionAutomation(intent: Intent?): Boolean {
+    if (!BuildConfig.AUTOMATION_ENABLED) {
+        return false
+    }
     if (intent?.action != PreviewInteractionAutomationRequest.ACTION_PROFILE_PREVIEW) {
         return false
     }

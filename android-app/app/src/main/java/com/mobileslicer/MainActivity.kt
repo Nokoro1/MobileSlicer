@@ -208,6 +208,9 @@ class MainActivity : ComponentActivity() {
             var showAdvancedProfileSettings by rememberSaveable {
                 mutableStateOf(appPreferenceStore.loadShowAdvancedProfileSettings())
             }
+            var activeStylusPaintOnly by rememberSaveable {
+                mutableStateOf(appPreferenceStore.loadActiveStylusPaintOnly())
+            }
             var gcodePreviewPerformanceMode by rememberSaveable {
                 mutableStateOf(appPreferenceStore.loadGcodePreviewPerformanceMode())
             }
@@ -230,7 +233,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     ModelLoaderScreen(
-                        initialOutput = "Select an STL file to validate Android -> JNI -> wrapper loading, then run the first native slice call.",
+                        initialOutput = "Open an STL file to prepare it on the bed, then slice or export from the workspace.",
                         initialProfileStore = loadProfileStore(),
                         initialSavedProjects = loadSavedProjects(),
                         savedProjectRootDir = File(filesDir, "saved-projects"),
@@ -241,6 +244,7 @@ class MainActivity : ComponentActivity() {
                         accentPalette = accentPalette,
                         worldViewColor = worldViewColor,
                         showAdvancedProfileSettings = showAdvancedProfileSettings,
+                        activeStylusPaintOnly = activeStylusPaintOnly,
                         gcodePreviewPerformanceMode = gcodePreviewPerformanceMode,
                         onThemeModeSelected = {
                             themeMode = it
@@ -257,6 +261,10 @@ class MainActivity : ComponentActivity() {
                         onShowAdvancedProfileSettingsChanged = {
                             showAdvancedProfileSettings = it
                             appPreferenceStore.storeShowAdvancedProfileSettings(it)
+                        },
+                        onActiveStylusPaintOnlyChanged = {
+                            activeStylusPaintOnly = it
+                            appPreferenceStore.storeActiveStylusPaintOnly(it)
                         },
                         onGcodePreviewPerformanceModeSelected = {
                             gcodePreviewPerformanceMode = it
@@ -285,6 +293,17 @@ class MainActivity : ComponentActivity() {
                                 suggestedGcodeFileName
                             )
                         },
+                        onNativeAutoArrangeRequested = { configJson, plateObjects, printerBed, allowRotation ->
+                            ensureEngineForUi()
+                            planNativePlateArrangement(configJson, plateObjects, printerBed, allowRotation)
+                        },
+                        onNativeAutoOrientRequested = { configJson, plateObjects, selectedPlateObjectId, printerBed ->
+                            ensureEngineForUi()
+                            planNativeAutoOrientation(configJson, plateObjects, selectedPlateObjectId, printerBed)
+                        },
+                        onNativePlatePlanningCancelRequested = {
+                            cancelNativePlatePlanning()
+                        },
                         onExportRequested = { uri, gcodeFilePath -> exportGcodeToUri(uri, gcodeFilePath) },
                         onSendToPrinterRequested = { gcodeFilePath, remoteFileName, printerProfile, uploadAction, bambuOptions, onProgress ->
                             sendGcodeToPrinter(gcodeFilePath, remoteFileName, printerProfile, uploadAction, bambuOptions, onProgress)
@@ -307,9 +326,12 @@ class MainActivity : ComponentActivity() {
                         onSimplyPrintLoginRequested = { printerProfile ->
                             loginToSimplyPrint(printerProfile)
                         },
-                        onSavedProjectNativeLoadRequested = { plateObjects, printerBed ->
+                        onSavedProjectNativeLoadRequested = { project, plateObjects, printerBed ->
                             ensureEngineForUi()
-                            loadPlateObjectsIntoNativeCache(plateObjects, printerBed)
+                            loadSavedProjectIntoNativeCache(project?.nativeProjectFilePath, plateObjects, printerBed)
+                        },
+                        onNativePlateCacheCurrent = { plateObjects, printerBed ->
+                            markPlateObjectsAsNativeCacheCurrent(plateObjects, printerBed)
                         },
                         onShareRequested = { gcodeFilePath, fileName -> shareGcodeFile(gcodeFilePath, fileName) }
                     )

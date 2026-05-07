@@ -147,6 +147,7 @@ import com.mobileslicer.workspace.ImportedModelFormat
 import com.mobileslicer.workspace.ModelImportTiming
 import com.mobileslicer.workspace.ModelLoadResult
 import com.mobileslicer.workspace.PlateObject
+import com.mobileslicer.workspace.PlateObjectGeometrySource
 import com.mobileslicer.workspace.SlicePipelineTiming
 import com.mobileslicer.workspace.SliceResult
 import com.mobileslicer.workspace.WorkspacePreparationResult
@@ -170,26 +171,24 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
         val handle = NativeEngineHandle.fromRaw(ensureEngine())
         if (handle == null) {
             return ModelLoadResult(
-                message = "Failed to load model\nNative engine is unavailable.",
+                message = "Failed to load model\nThe slicer is not ready. Restart the app and try again.",
                 loaded = false
             )
         }
 
         val fileName = queryDisplayName(uri) ?: "selected_model.stl"
         val normalizedName = sanitizeFileName(fileName)
+        val normalizedNameLower = normalizedName.lowercase(Locale.US)
         val fileFormat = when {
-            normalizedName.lowercase(Locale.US).endsWith(".stl") -> ImportedModelFormat.Stl
-            normalizedName.lowercase(Locale.US).endsWith(".3mf") -> ImportedModelFormat.ThreeMf
+            normalizedNameLower.endsWith(".stl") -> ImportedModelFormat.Stl
+            normalizedNameLower.endsWith(".3mf") -> ImportedModelFormat.ThreeMf
             else -> null
         }
-        if (fileFormat != ImportedModelFormat.Stl) {
+        if (fileFormat == null) {
             NativeEngineCalls.clearGeneratedGcode(handle)
             currentModelName = null
             return ModelLoadResult(
-                message = when (fileFormat) {
-                    ImportedModelFormat.ThreeMf -> "Failed to load model\n3MF import and viewer rendering are not yet supported in this Android app build."
-                    else -> "Failed to load model\nSelected file is not an STL."
-                },
+                message = "Failed to load model\nSelected file is not an STL or 3MF.",
                 loaded = false,
                 format = fileFormat
             )
@@ -206,38 +205,81 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
                 )
             }
         val stagingMs = SystemClock.elapsedRealtime() - stagingStartedAt
+        var workspaceModelFile = stagedFile
+        var workspaceModelFormat = fileFormat
+        var workspaceGeometrySource: PlateObjectGeometrySource = PlateObjectGeometrySource.StagedFile
+        val importExtraDetail = if (fileFormat == ImportedModelFormat.ThreeMf) {
+            val extractedName = normalizedName.substringBeforeLast('.', normalizedName) + "-3mf-mesh.stl"
+            val extractedStl = File(cacheDir, "selected-model-${SystemClock.elapsedRealtime()}-$extractedName")
+            val extractionResult = NativeEngineCalls.extractModelMeshToStl(
+                handle = handle,
+                inputPath = stagedFile.absolutePath,
+                outputStlPath = extractedStl.absolutePath
+            )
+            if (extractionResult !is NativeEngineCallResult.Success) {
+                NativeEngineCalls.clearGeneratedGcode(handle)
+                stagedFile.delete()
+                extractedStl.delete()
+                if (stagedModelFile?.absolutePath == stagedFile.absolutePath) {
+                    stagedModelFile = null
+                }
+                currentModelName = null
+                nativeLoadedModelPath = null
+                return ModelLoadResult(
+                    message = modelLoadStatusMessage(
+                        loaded = false,
+                        fileName = normalizedName,
+                        timing = ModelImportTiming(stagingMs = stagingMs, nativeLoadMs = 0L),
+                        extraDetail = "MobileSlicer could not find printable model geometry in this 3MF.\n${extractionResult.statusMessage}"
+                    ),
+                    loaded = false,
+                    format = ImportedModelFormat.ThreeMf
+                )
+            }
+            stagedModelFile = extractedStl
+            workspaceModelFile = extractedStl
+            workspaceModelFormat = ImportedModelFormat.Stl
+            workspaceGeometrySource = PlateObjectGeometrySource.ThreeMfMeshExtract(
+                originalPath = stagedFile.absolutePath,
+                extractedStlPath = extractedStl.absolutePath
+            )
+            "3MF model loaded for the workspace preview."
+        } else {
+            "The workspace preview will finish loading after the model opens."
+        }
 
         val bounds = runCatching {
-            StlMeshParser.parseBounds(stagedFile)
+            StlMeshParser.parseBounds(workspaceModelFile)
         }.getOrNull()
 
         val nativeLoadStartedAt = SystemClock.elapsedRealtime()
-        val loadResult = NativeEngineCalls.loadModel(handle, stagedFile.absolutePath)
+        val loadResult = NativeEngineCalls.loadModel(handle, workspaceModelFile.absolutePath)
         val nativeLoadMs = SystemClock.elapsedRealtime() - nativeLoadStartedAt
         val timing = ModelImportTiming(
             stagingMs = stagingMs,
             nativeLoadMs = nativeLoadMs
         )
         return if (loadResult is NativeEngineCallResult.Success) {
-            currentModelName = normalizedName.removeSuffix(".stl")
-            nativeLoadedModelPath = stagedFile.absolutePath
+            currentModelName = normalizedName.substringBeforeLast('.', normalizedName)
+            nativeLoadedModelPath = workspaceModelFile.absolutePath
             ModelLoadResult(
                 message = modelLoadStatusMessage(
                     loaded = true,
                     fileName = normalizedName,
                     timing = timing,
-                    extraDetail = "Workspace mesh preparation will continue after Workspace opens."
+                    extraDetail = importExtraDetail
                 ),
                 loaded = true,
-                stagedFilePath = stagedFile.absolutePath,
-                format = fileFormat,
+                stagedFilePath = workspaceModelFile.absolutePath,
+                format = workspaceModelFormat,
                 loadTiming = timing,
-                bounds = bounds
+                bounds = bounds,
+                geometrySource = workspaceGeometrySource
             )
         } else {
             NativeEngineCalls.clearGeneratedGcode(handle)
-            stagedFile.delete()
-            if (stagedModelFile?.absolutePath == stagedFile.absolutePath) {
+            workspaceModelFile.delete()
+            if (stagedModelFile?.absolutePath == workspaceModelFile.absolutePath) {
                 stagedModelFile = null
             }
             currentModelName = null
@@ -247,11 +289,11 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
                     loaded = false,
                     fileName = normalizedName,
                     timing = timing,
-                    extraDetail = "The native engine rejected the STL."
+                    extraDetail = "MobileSlicer could not load this model."
                 ),
                 loaded = false,
-                stagedFilePath = stagedFile.absolutePath,
-                format = fileFormat,
+                stagedFilePath = workspaceModelFile.absolutePath,
+                format = workspaceModelFormat,
                 loadTiming = timing,
                 bounds = bounds
             )
@@ -262,7 +304,7 @@ internal fun MainActivity.prepareWorkspaceMesh(modelFilePath: String): Workspace
         val stagedFile = File(modelFilePath)
         if (!stagedFile.exists()) {
             return WorkspacePreparationResult(
-                viewerPreparationError = "The staged STL is no longer available."
+                viewerPreparationError = "The model file is no longer available."
             )
         }
 

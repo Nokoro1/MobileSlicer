@@ -223,7 +223,7 @@ internal fun ProcessPresetSelectionScreen(
                     }
                 }
                 Text(
-                    text = "Process Presets",
+                    text = "Process presets",
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleLarge,
                     color = titleColor,
@@ -237,8 +237,8 @@ internal fun ProcessPresetSelectionScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
-                placeholder = { Text("Search Processes") },
-                label = { Text("Process Name") },
+                placeholder = { Text("Search processes") },
+                label = { Text("Process name") },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = appCardColor().copy(alpha = 0.72f),
                     unfocusedContainerColor = appCardColor().copy(alpha = 0.72f),

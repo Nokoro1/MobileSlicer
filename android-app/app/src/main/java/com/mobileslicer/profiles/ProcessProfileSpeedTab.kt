@@ -105,7 +105,7 @@ internal fun ProcessSpeedTabContent(
     extrusionRateSmoothingExternalPerimeterOnly: Boolean,
     onExtrusionRateSmoothingExternalPerimeterOnlyChange: (Boolean) -> Unit,
 ) {
-    ProfileEditorSection("Speed", "All current speed controls live here in Orca-style order.") {
+    ProfileEditorSection("Speed", "Print, travel, acceleration, jerk, and overhang speed settings.") {
         if (ProfileEditorSetting.ProcessSpeedAndAcceleration.isVisible(showAdvancedProfileSettings)) {
             ProfileGroupHeader("First layer speed")
             ProfileTextField(firstLayerPrintSpeed, onFirstLayerPrintSpeedChange, "First layer (mm/s)", KeyboardType.Decimal)

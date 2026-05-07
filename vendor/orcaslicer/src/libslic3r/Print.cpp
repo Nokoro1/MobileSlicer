@@ -2646,6 +2646,29 @@ void Print::_make_skirt()
     if (config().draft_shield == dsDisabled)
         append(points, m_first_layer_convex_hull.points);
 
+#ifdef __ANDROID__
+    {
+        static constexpr int64_t android_clipper_limit = int64_t(65536) * int64_t(16384);
+        const size_t before_filter_count = points.size();
+        points.erase(
+            std::remove_if(
+                points.begin(),
+                points.end(),
+                [](const Point& point) {
+                    return std::llabs(int64_t(point.x())) > android_clipper_limit ||
+                        std::llabs(int64_t(point.y())) > android_clipper_limit;
+                }),
+            points.end());
+        if (before_filter_count != points.size()) {
+            __android_log_print(
+                ANDROID_LOG_ERROR,
+                "MobileSlicerNative",
+                "orca_skirt_hull: removed %zu out-of-range source points before Clipper offset",
+                before_filter_count - points.size());
+        }
+    }
+#endif
+
     if (points.size() < 3)
         // At least three points required for a convex hull.
         return;

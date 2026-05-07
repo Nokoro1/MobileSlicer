@@ -46,13 +46,84 @@ internal data class ViewerPickHit(
     val distance: Float
 )
 
+internal enum class ViewerPaintMode {
+    Color,
+    Seam,
+    Support,
+    FuzzySkin
+}
+
+internal enum class ViewerPaintBrushShape {
+    Circle,
+    Sphere,
+    Triangle,
+    HeightRange,
+    Fill,
+    GapFill
+}
+
+internal enum class ViewerPaintAction {
+    Paint,
+    Erase,
+    Enforce,
+    Block
+}
+
+internal data class ViewerPaintSession(
+    val selectedObjectId: Long,
+    val mode: ViewerPaintMode,
+    val brushShape: ViewerPaintBrushShape = ViewerPaintBrushShape.Circle,
+    val brushRadiusMm: Float = 2.0f,
+    val brushHeightMm: Float = 0.2f,
+    val action: ViewerPaintAction = ViewerPaintAction.Paint,
+    val activeColorInt: Int? = null,
+    val overlay: ViewerPaintOverlay = ViewerPaintOverlay.Empty
+) {
+    val hasOverlay: Boolean get() = overlay.layers.isNotEmpty()
+}
+
+internal data class ViewerPaintOverlay(
+    val layers: List<ViewerPaintOverlayLayer>
+) {
+    companion object {
+        val Empty = ViewerPaintOverlay(emptyList())
+    }
+}
+
+internal data class ViewerPaintOverlayLayer(
+    val id: String,
+    val colorInt: Int,
+    val state: Int = 0,
+    val vertices: FloatArray,
+    val normals: FloatArray,
+    val sourceBounds: MeshBounds? = null,
+    val modelMatrix: FloatArray? = null,
+    val deleteOnly: Boolean = false
+)
+
+internal data class ViewerPaintStrokePoint(
+    val x: Float,
+    val y: Float,
+    val hit: ViewerPickHit?,
+    val gestureDownUptimeMs: Long = 0L
+)
+
+internal data class ViewerPaintRay(
+    val values: FloatArray
+) {
+    init {
+        require(values.size == 6) { "Paint ray must contain origin xyz and direction xyz." }
+    }
+}
+
 internal data class ViewerModelTransform(
     val centerXmm: Float,
     val centerYmm: Float,
     val rotationXDegrees: Float = 0f,
     val rotationYDegrees: Float = 0f,
     val rotationZDegrees: Float = 0f,
-    val uniformScale: Float = 1f
+    val uniformScale: Float = 1f,
+    val orientationMatrix: List<Float>? = null
 )
 
 internal data class ViewerPlateObject(
@@ -61,7 +132,62 @@ internal data class ViewerPlateObject(
     val mesh: StlMesh,
     val transform: ViewerModelTransform,
     val colorInt: Int? = null,
-    val selected: Boolean = false
+    val selected: Boolean = false,
+    val movable: Boolean = false
+)
+
+internal enum class ViewerCutPlaneAxis {
+    X,
+    Y,
+    Z,
+    Custom
+}
+
+internal enum class ViewerCutConnectorKind {
+    None,
+    Plug,
+    Dowel,
+    Snap
+}
+
+internal enum class ViewerCutConnectorStyle {
+    Prism,
+    Frustum
+}
+
+internal enum class ViewerCutConnectorShape {
+    Triangle,
+    Square,
+    Hexagon,
+    Circle
+}
+
+internal data class ViewerCutPlaneSession(
+    val selectedObjectId: Long,
+    val axis: ViewerCutPlaneAxis,
+    val offsetMm: Float,
+    val rotationXDegrees: Float = 0f,
+    val rotationYDegrees: Float = 0f,
+    val keepUpper: Boolean,
+    val keepLower: Boolean,
+    val connectorKind: ViewerCutConnectorKind = ViewerCutConnectorKind.None,
+    val connectorStyle: ViewerCutConnectorStyle = ViewerCutConnectorStyle.Prism,
+    val connectorShape: ViewerCutConnectorShape = ViewerCutConnectorShape.Circle,
+    val connectorDepthMm: Float = 3f,
+    val connectorDepthToleranceMm: Float = 0.1f,
+    val connectorSizeMm: Float = 2.5f,
+    val connectorSizeToleranceMm: Float = 0f,
+    val connectorRotationDegrees: Float = 0f,
+    val connectorSnapBulgePercent: Float = 15f,
+    val connectorSnapSpacePercent: Float = 30f,
+    val connectorsEditing: Boolean = false,
+    val connectorPoints: List<ViewerCutConnectorPoint> = emptyList()
+)
+
+internal data class ViewerCutConnectorPoint(
+    val xMm: Float,
+    val yMm: Float,
+    val zMm: Float
 )
 
 internal data class ViewerAppearance(

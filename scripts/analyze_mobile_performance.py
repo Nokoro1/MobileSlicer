@@ -45,6 +45,23 @@ REGRESSION_METRIC_GROUPS = {
     "bytes": "output",
 }
 
+REPEATED_SLICE_TIMING_METRICS = {
+    "elapsed_ms",
+    "native_load_ms",
+    "native_slice_ms",
+    "write_gcode_ms",
+    "preview_plan_ms",
+    "preview_cache_build_ms",
+}
+
+REPEATED_SLICE_RETAINED_GROWTH_METRICS = {
+    "native_after_release_rss_kb",
+    "native_after_stats_rss_kb",
+    "native_before_return_rss_kb",
+    "cache_total_kb",
+    "cache_orca_temp_kb",
+}
+
 
 def env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -123,6 +140,24 @@ REPEAT_SUFFIX_RE = re.compile(r"-r[0-9]+$")
 
 def base_record_name(name: str) -> str:
     return REPEAT_SUFFIX_RE.sub("", name)
+
+
+def baseline_records_for_base(baseline: dict[str, dict[str, Any]], base_name: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for record in baseline.values():
+        if id(record) in seen:
+            continue
+        name = str(record.get("name", ""))
+        if name == base_name or base_record_name(name) == base_name:
+            records.append(record)
+            seen.add(id(record))
+    return records
+
+
+def best_metric_value(records: list[dict[str, Any]], metric: str) -> float | None:
+    values = [value for record in records if (value := record_metric(record, metric)) is not None]
+    return min(values) if values else None
 
 
 def build_markdown(records: list[dict[str, Any]], failures: list[str]) -> str:
@@ -434,6 +469,8 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
         if not previous:
             continue
         for metric, group_name in REGRESSION_METRIC_GROUPS.items():
+            if base_name != name and metric in REPEATED_SLICE_TIMING_METRICS:
+                continue
             current_value = record_metric(record, metric)
             previous_value = record_metric(previous, metric)
             if current_value is None or previous_value in (None, 0):
@@ -450,19 +487,30 @@ def analyze(records: list[dict[str, Any]], baseline: dict[str, dict[str, Any]]) 
                 )
 
     for base_name, repeat_records in sorted(repeated_slices.items()):
+        baseline_repeat_records = baseline_records_for_base(baseline, base_name)
+        if baseline_repeat_records:
+            for metric in sorted(REPEATED_SLICE_TIMING_METRICS):
+                current_best = best_metric_value(repeat_records, metric)
+                previous_best = best_metric_value(baseline_repeat_records, metric)
+                if current_best is None or previous_best in (None, 0):
+                    continue
+                group_name = REGRESSION_METRIC_GROUPS[metric]
+                change = percent_change(current_best, previous_best)
+                allowed_percent, allowed_min_delta = regression_groups[group_name]
+                allowed_min_delta = metric_regression_min_delta(metric, allowed_min_delta)
+                delta = current_best - previous_best
+                if change > allowed_percent and delta > allowed_min_delta:
+                    failures.append(
+                        f"{base_name}: best repeated {metric} regressed by {change:.1f}% "
+                        f"({previous_best:.0f} -> {current_best:.0f}, allowed {allowed_percent:.1f}% "
+                        f"and {allowed_min_delta:.0f} absolute growth)"
+                    )
+
         if len(repeat_records) < 2:
             continue
         first = repeat_records[0]
         last = repeat_records[-1]
-        for metric in [
-            "peak_pss_kb",
-            "peak_java_heap_kb",
-            "peak_native_heap_kb",
-            "peak_graphics_kb",
-            "peak_private_other_kb",
-            "cache_total_kb",
-            "cache_orca_temp_kb",
-        ]:
+        for metric in sorted(REPEATED_SLICE_RETAINED_GROWTH_METRICS):
             first_value = record_metric(first, metric)
             last_value = record_metric(last, metric)
             if first_value is None or last_value is None:

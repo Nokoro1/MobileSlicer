@@ -297,7 +297,7 @@ internal fun ConnectionStatusDialog(
                 Text("OK")
             }
         },
-        title = { Text("Printer Connection") },
+        title = { Text("Printer connection") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(status)

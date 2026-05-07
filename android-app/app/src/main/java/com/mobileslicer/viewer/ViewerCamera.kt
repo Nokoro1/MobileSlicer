@@ -12,7 +12,8 @@ internal data class ViewerCameraState(
     val orbitPitchDegrees: Float,
     val zoom: Float,
     val panX: Float,
-    val panY: Float
+    val panY: Float,
+    val panZ: Float = 0f
 )
 
 internal class ViewerCamera(
@@ -23,6 +24,7 @@ internal class ViewerCamera(
     private var zoom = DEFAULT_ZOOM
     private var panX = 0f
     private var panY = 0f
+    private var panZ = 0f
     private var focusX = 0f
     private var focusY = 0f
     private var focusZ = 0f
@@ -49,10 +51,14 @@ internal class ViewerCamera(
         val panScale = sceneSpan / viewportHeight.toFloat().coerceAtLeast(1f) * PAN_SCALE / zoom
         val rightX = -sinYaw
         val rightY = cosYaw
-        val forwardX = -cosYaw
-        val forwardY = -sinYaw
-        panX += (-deltaX * rightX + deltaY * forwardX) * panScale
-        panY += (-deltaX * rightY + deltaY * forwardY) * panScale
+        val rightZ = 0f
+        val upX = -cosYaw * sinPitch
+        val upY = -sinYaw * sinPitch
+        val upZ = cosPitch
+        panX += (-deltaX * rightX + deltaY * upX) * panScale
+        panY += (-deltaX * rightY + deltaY * upY) * panScale
+        panZ = (panZ + (-deltaX * rightZ + deltaY * upZ) * panScale)
+            .coerceIn(-sceneSpan, sceneSpan)
         return true
     }
 
@@ -69,7 +75,8 @@ internal class ViewerCamera(
             orbitPitchDegrees = orbitPitchDegrees,
             zoom = zoom,
             panX = panX,
-            panY = panY
+            panY = panY,
+            panZ = panZ
         )
 
     fun restoreState(state: ViewerCameraState) {
@@ -78,6 +85,7 @@ internal class ViewerCamera(
         zoom = state.zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
         panX = state.panX
         panY = state.panY
+        panZ = state.panZ.coerceIn(-sceneSpan, sceneSpan)
         updateOrbitCache()
     }
 
@@ -149,9 +157,10 @@ internal class ViewerCamera(
         val distance = cameraDistance()
         val targetX = focusX + panX
         val targetY = focusY + panY
+        val targetZ = focusZ + panZ
         val eyeX = targetX + cosYaw * cosPitch * distance
         val eyeY = targetY + sinYaw * cosPitch * distance
-        val eyeZ = focusZ + sinPitch * distance
+        val eyeZ = targetZ + sinPitch * distance
 
         Matrix.setLookAtM(
             viewMatrix,
@@ -161,7 +170,7 @@ internal class ViewerCamera(
             eyeZ,
             targetX,
             targetY,
-            focusZ,
+            targetZ,
             0f,
             0f,
             1f
@@ -184,6 +193,7 @@ internal class ViewerCamera(
     private fun resetPan() {
         panX = 0f
         panY = 0f
+        panZ = 0f
     }
 
     private fun cameraDistance(): Float {

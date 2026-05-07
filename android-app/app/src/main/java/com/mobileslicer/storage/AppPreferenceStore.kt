@@ -14,6 +14,7 @@ private const val KEY_THEME_MODE = "theme_mode"
 private const val KEY_ACCENT_PALETTE = "accent_palette"
 private const val KEY_WORLD_VIEW_COLOR = "world_view_color"
 private const val KEY_SHOW_ADVANCED_PROFILE_SETTINGS = "show_advanced_profile_settings"
+private const val KEY_ACTIVE_STYLUS_PAINT_ONLY = "active_stylus_paint_only"
 private const val KEY_GCODE_PREVIEW_PERFORMANCE_MODE = "gcode_preview_performance_mode"
 
 internal class AppPreferenceStore private constructor(
@@ -40,6 +41,9 @@ internal class AppPreferenceStore private constructor(
     fun loadShowAdvancedProfileSettings(): Boolean =
         preferences.getBoolean(KEY_SHOW_ADVANCED_PROFILE_SETTINGS, false)
 
+    fun loadActiveStylusPaintOnly(): Boolean =
+        preferences.getBoolean(KEY_ACTIVE_STYLUS_PAINT_ONLY, false)
+
     fun loadGcodePreviewPerformanceMode(): GcodePreviewPerformanceMode =
         GcodePreviewPerformanceMode.fromStoredName(preferences.getString(KEY_GCODE_PREVIEW_PERFORMANCE_MODE, null))
 
@@ -57,6 +61,10 @@ internal class AppPreferenceStore private constructor(
 
     fun storeShowAdvancedProfileSettings(showAdvancedProfileSettings: Boolean) {
         preferences.edit().putBoolean(KEY_SHOW_ADVANCED_PROFILE_SETTINGS, showAdvancedProfileSettings).apply()
+    }
+
+    fun storeActiveStylusPaintOnly(activeStylusPaintOnly: Boolean) {
+        preferences.edit().putBoolean(KEY_ACTIVE_STYLUS_PAINT_ONLY, activeStylusPaintOnly).apply()
     }
 
     fun storeGcodePreviewPerformanceMode(mode: GcodePreviewPerformanceMode) {

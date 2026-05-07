@@ -159,11 +159,11 @@ internal fun ViewerStatePanel(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         val (title, body) = when (state) {
-            WorkspaceViewerState.Empty -> "No model on the plate" to "Import an STL from Home to open it in the full-screen workspace viewer."
-            WorkspaceViewerState.Preparing -> "Preparing workspace" to "The native model load already finished. Workspace mesh preparation and first-frame upload are still running."
-            WorkspaceViewerState.Unsupported -> "3MF viewer pending" to "The current Android app import/load boundary is still STL-only, so this build does not claim 3MF viewing support."
+            WorkspaceViewerState.Empty -> "No model on the plate" to "Import an STL or 3MF from Home to start preparing it."
+            WorkspaceViewerState.Preparing -> "Preparing workspace" to "Loading the model and getting the first view ready."
+            WorkspaceViewerState.Unsupported -> "Preview unavailable" to "This model imported, but the workspace preview could not be prepared."
             is WorkspaceViewerState.Error -> state.title to state.message
-            is WorkspaceViewerState.Loaded -> "Viewer ready" to "The STL is loaded and ready to render."
+            is WorkspaceViewerState.Loaded -> "Model ready" to "The model is loaded and ready to prepare."
         }
         Text(
             text = title,

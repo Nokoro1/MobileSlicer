@@ -330,6 +330,12 @@ public:
     int                  num_facets(EnforcerBlockerType state) const;
     // Get facets at a given state. Don't triangulate T-joints.
     indexed_triangle_set get_facets(EnforcerBlockerType state) const;
+    // Get facets at a given state, limited to source triangles changed since the
+    // last dirty-source consume. Used by interactive paint renderers to avoid
+    // rebuilding full paint overlays while dragging.
+    indexed_triangle_set get_facets_for_sources(EnforcerBlockerType state, const std::vector<int>& source_triangles) const;
+    std::vector<int> consume_dirty_source_triangles();
+    std::vector<int> consume_dirty_source_triangles(size_t max_count);
     // Get facets at a given state. Triangulate T-joints.
     indexed_triangle_set get_facets_strict(EnforcerBlockerType state) const;
     // Get edges around the selected area by seed fill.
@@ -515,12 +521,20 @@ private:
         const Vec3i32                                 &neighbors,
         EnforcerBlockerType                          state,
         std::vector<stl_triangle_vertex_indices>    &out_triangles) const;
+    void get_facets_for_sources_recursive(
+        const Triangle                              &tr,
+        EnforcerBlockerType                          state,
+        std::vector<int>                             &vertex_map,
+        indexed_triangle_set                         &out) const;
     void get_facets_split_by_tjoints(const Vec3i32 &vertices, const Vec3i32 &neighbors, std::vector<stl_triangle_vertex_indices> &out_triangles) const;
 
     void get_seed_fill_contour_recursive(int facet_idx, const Vec3i32 &neighbors, const Vec3i32 &neighbors_propagated, std::vector<Vec2i32> &edges_out) const;
+    void mark_dirty_source_triangle(int source_triangle);
 
     int m_free_triangles_head { -1 };
     int m_free_vertices_head { -1 };
+    std::vector<int> m_dirty_source_triangles;
+    std::vector<unsigned char> m_dirty_source_triangle_flags;
 };
 
 

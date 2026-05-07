@@ -236,7 +236,7 @@ internal fun processSettingTruthRows(): List<SettingTruthRow> = listOf(
     SettingTruthRow(
         label = "Skirts",
         status = "Device-proven",
-        detail = "Current 0 -> 3 proof now changes emitted skirt toolpaths on RFCYA01ANVE."
+        detail = "Current skirt parity proof on RFCYA01ANVE verifies disabled, combined, per-object, and brim-plus-skirt outputs with real ;TYPE:Skirt G-code and finite in-bed first-layer geometry."
     ),
     SettingTruthRow(
         label = "Brim width",

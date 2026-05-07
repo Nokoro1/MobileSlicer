@@ -215,7 +215,7 @@ internal fun ProcessQualityTabContent(
     overhangReverseThreshold: String,
     onOverhangReverseThresholdChange: (String) -> Unit,
 ) {
-    ProfileEditorSection("Quality", "Layer and seam controls in the Orca-style order.") {
+    ProfileEditorSection("Quality", "Layer height, line width, seams, walls, bridging, and overhang settings.") {
         ProfileGroupHeader("Layer height")
         ProfileTextField(layerHeight, onLayerHeightChange, "Layer height (mm)", KeyboardType.Decimal)
         ProfileTextField(firstLayerHeight, onFirstLayerHeightChange, "Initial layer height (mm)", KeyboardType.Decimal)

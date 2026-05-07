@@ -5,6 +5,7 @@ import com.mobileslicer.profiles.ProfileStoreRepository
 import com.mobileslicer.profiles.activeConfiguration
 import com.mobileslicer.profiles.newProcessProfileUnchecked
 import com.mobileslicer.storage.SavedProject
+import com.mobileslicer.storage.SavedProjectPlate
 import com.mobileslicer.storage.SavedProjectPlateObject
 import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.ViewerModelTransform
@@ -202,11 +203,48 @@ class ModelLoaderProjectActionsTest {
         }
     }
 
+    @Test
+    fun openSavedProjectStatePreservesMultiPlateObjectTransforms() {
+        val firstFile = File.createTempFile("mobileslicer-project-open-first-", ".stl")
+        val secondFile = File.createTempFile("mobileslicer-project-open-second-", ".stl")
+        try {
+            firstFile.writeText(minimalStl())
+            secondFile.writeText(minimalStl())
+            val firstTransform = ViewerModelTransform(centerXmm = 12f, centerYmm = 34f, rotationZDegrees = 15f)
+            val secondTransform = ViewerModelTransform(centerXmm = 56f, centerYmm = 78f, rotationZDegrees = 30f)
+            val project = savedProject(
+                plates = listOf(
+                    SavedProjectPlate(
+                        label = "Plate A",
+                        plateObjects = listOf(savedPlateObject(filePath = firstFile.absolutePath, transform = firstTransform))
+                    ),
+                    SavedProjectPlate(
+                        label = "Plate B",
+                        plateObjects = listOf(savedPlateObject(filePath = secondFile.absolutePath, transform = secondTransform))
+                    )
+                )
+            )
+
+            val opened = openSavedProjectState(project)
+
+            assertNotNull(opened)
+            checkNotNull(opened)
+            assertEquals(listOf("Plate A", "Plate B"), opened.plates.map { it.label })
+            assertEquals(firstTransform, opened.plates[0].objects.single().transform)
+            assertEquals(secondTransform, opened.plates[1].objects.single().transform)
+            assertEquals(firstTransform, opened.plateObjects.single().transform)
+        } finally {
+            firstFile.delete()
+            secondFile.delete()
+        }
+    }
+
     private fun savedProject(
         id: String = "project",
         updatedAtEpochMs: Long = 1L,
         profileStore: ProfileStore = defaultStore(),
         plateObjects: List<SavedProjectPlateObject> = emptyList(),
+        plates: List<SavedProjectPlate> = emptyList(),
         filamentSlots: List<PlateFilamentSlot> = emptyList()
     ): SavedProject = SavedProject(
         id = id,
@@ -214,10 +252,14 @@ class ModelLoaderProjectActionsTest {
         updatedAtEpochMs = updatedAtEpochMs,
         profileStore = profileStore,
         plateObjects = plateObjects,
+        plates = plates,
         filamentSlots = filamentSlots
     )
 
-    private fun savedPlateObject(filePath: String): SavedProjectPlateObject =
+    private fun savedPlateObject(
+        filePath: String,
+        transform: ViewerModelTransform = ViewerModelTransform(centerXmm = 5f, centerYmm = 5f)
+    ): SavedProjectPlateObject =
         SavedProjectPlateObject(
             label = "Test Model",
             filePath = filePath,
@@ -230,7 +272,7 @@ class ModelLoaderProjectActionsTest {
                 minZ = 0f,
                 maxZ = 1f
             ),
-            transform = ViewerModelTransform(centerXmm = 5f, centerYmm = 5f)
+            transform = transform
         )
 
     private fun minimalStl(): String =

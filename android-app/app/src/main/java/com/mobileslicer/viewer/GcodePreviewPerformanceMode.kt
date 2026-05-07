@@ -7,18 +7,18 @@ internal enum class GcodePreviewPerformanceMode(
 ) {
     Low(
         vertexBudget = 400_000L,
-        displayLabel = "Low end",
-        description = "400k vertices per exact Preview chunk for older or slower phones."
+        displayLabel = "Low",
+        description = "Smaller preview chunks for older phones."
     ),
     MidRange(
         vertexBudget = 750_000L,
-        displayLabel = "Mid range",
-        description = "750k vertices per exact Preview chunk for most phones."
+        displayLabel = "Medium",
+        description = "Balanced preview loading for most phones."
     ),
     HighEnd(
         vertexBudget = 1_000_000L,
-        displayLabel = "High end",
-        description = "1m vertices per exact Preview chunk for stronger phones."
+        displayLabel = "High",
+        description = "Larger preview chunks for faster phones."
     );
 
     companion object {

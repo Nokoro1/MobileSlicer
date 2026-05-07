@@ -1,0 +1,33 @@
+package com.mobileslicer.workspace
+
+internal const val PreviewRangePlanningByteThreshold = 8_000_000
+internal const val PaintOverlayRefreshMinIntervalMs = 80L
+internal const val PaintMovePumpIntervalMs = 8L
+internal const val PaintOverlaySnapshotTriangleLimit = 500_000
+internal const val PaintOverlaySnapshotByteLimit = 32_000_000
+internal const val PaintDragOverlaySnapshotTriangleLimit = 20_000
+internal const val PaintOverlayConsolidationDelayMs = 120L
+internal const val PaintOverlayConsolidationLayerThreshold = 96
+internal const val PaintOverlayConsolidationVertexThreshold = 300_000
+internal const val PaintOverlayRetainedConsolidationLayerThreshold = 96
+internal const val PaintOverlayCompactLayerThreshold = 16
+internal const val PaintOverlayPerfLogVertexThreshold = 120_000
+internal const val PaintOverlayDeltaDrainPasses = 3
+internal const val PaintLiveOverlayDeltaDrainPasses = 1
+internal const val PaintTapOverlayDeltaDrainPasses = 48
+internal const val PaintTapLiveOverlayDeltaDrainPasses = 12
+internal const val PaintTapFlushSmallVertexThreshold = 1_500
+internal const val PaintTapFlushSmallLayerThreshold = 10
+internal const val PaintTapFlushConsecutiveSmallLimit = 3
+internal const val PaintTapFlushMinimumPasses = 4
+internal const val PaintOverlayDeltaDrainFrameDelayMs = 8L
+internal const val PaintLiveOverlayDrainMinIntervalMs = 120L
+internal const val PaintLiveOverlayCompactionLayerThreshold = 240
+internal const val PaintLiveOverlayCompactionMaxPromotionLayerThreshold = 192
+internal const val PaintLiveOverlayCompactionVertexThreshold = 220_000
+internal const val PaintLiveOverlayCompactionMaxPromotionVertexThreshold = 360_000
+internal const val PaintLiveOverlayCompactionMinIntervalMs = 750L
+internal const val PaintLiveOverlayActiveCompactionBaseVertexLimit = 320_000
+internal const val PaintLiveOverlayCompactionSkipLogMinIntervalMs = 750L
+internal const val PaintOverlayRecentSnapshotSkipMs = 600L
+internal const val PaintTapOverlaySnapshotIdleDelayMs = 80L

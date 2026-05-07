@@ -921,6 +921,8 @@ bool TriangleSelector::select_triangle_recursive(int facet_idx, const Vec3i32 &n
 
     if (num_of_inside_vertices == 3) {
         // dump any subdivision and select whole triangle
+        if (tr->is_split() || tr->get_state() != type)
+            mark_dirty_source_triangle(tr->source_triangle);
         undivide_triangle(facet_idx);
         tr->set_state(type);
     } else {
@@ -933,10 +935,14 @@ bool TriangleSelector::select_triangle_recursive(int facet_idx, const Vec3i32 &n
             return true;
         }
 
-        if (triangle_splitting)
+        if (triangle_splitting) {
+            if (!tr->is_split())
+                mark_dirty_source_triangle(tr->source_triangle);
             split_triangle(facet_idx, neighbors);
-        else if (!m_triangles[facet_idx].is_split())
+        } else if (!m_triangles[facet_idx].is_split() && m_triangles[facet_idx].get_state() != type) {
+            mark_dirty_source_triangle(tr->source_triangle);
             m_triangles[facet_idx].set_state(type);
+        }
         tr = &m_triangles[facet_idx]; // might have been invalidated by split_triangle().
 
         int num_of_children = tr->number_of_split_sides() + 1;
@@ -958,6 +964,7 @@ bool TriangleSelector::select_triangle_recursive(int facet_idx, const Vec3i32 &n
 void TriangleSelector::set_facet(int facet_idx, EnforcerBlockerType state)
 {
     assert(facet_idx < m_orig_size_indices);
+    mark_dirty_source_triangle(facet_idx);
     undivide_triangle(facet_idx);
     assert(! m_triangles[facet_idx].is_split());
     m_triangles[facet_idx].set_state(state);
@@ -1284,6 +1291,8 @@ void TriangleSelector::reset()
 {
     m_vertices.clear();
     m_triangles.clear();
+    m_dirty_source_triangles.clear();
+    m_dirty_source_triangle_flags.clear();
     m_invalid_triangles = 0;
     m_free_triangles_head = -1;
     m_free_vertices_head = -1;
@@ -1297,11 +1306,24 @@ void TriangleSelector::reset()
     }
     m_orig_size_vertices = int(m_vertices.size());
     m_orig_size_indices  = int(m_triangles.size());
+    m_dirty_source_triangle_flags.assign(size_t(m_orig_size_indices), 0);
 }
 
 void TriangleSelector::set_edge_limit(float edge_limit)
 {
     m_edge_limit_sqr = std::pow(edge_limit, 2.f);
+}
+
+void TriangleSelector::mark_dirty_source_triangle(int source_triangle)
+{
+    if (source_triangle < 0 || source_triangle >= m_orig_size_indices)
+        return;
+    if (m_dirty_source_triangle_flags.size() != size_t(m_orig_size_indices))
+        m_dirty_source_triangle_flags.assign(size_t(m_orig_size_indices), 0);
+    if (m_dirty_source_triangle_flags[size_t(source_triangle)] != 0)
+        return;
+    m_dirty_source_triangle_flags[size_t(source_triangle)] = 1;
+    m_dirty_source_triangles.emplace_back(source_triangle);
 }
 
 int TriangleSelector::push_triangle(int a, int b, int c, int source_triangle, const EnforcerBlockerType state)
@@ -1443,6 +1465,50 @@ indexed_triangle_set TriangleSelector::get_facets(EnforcerBlockerType state) con
     return out;
 }
 
+indexed_triangle_set TriangleSelector::get_facets_for_sources(EnforcerBlockerType state, const std::vector<int>& source_triangles) const
+{
+    indexed_triangle_set out;
+    if (source_triangles.empty())
+        return out;
+
+    std::vector<int> vertex_map(m_vertices.size(), -1);
+    for (int source_triangle : source_triangles) {
+        if (source_triangle < 0 || source_triangle >= m_orig_size_indices)
+            continue;
+        get_facets_for_sources_recursive(m_triangles[source_triangle], state, vertex_map, out);
+    }
+    return out;
+}
+
+std::vector<int> TriangleSelector::consume_dirty_source_triangles()
+{
+    std::vector<int> dirty;
+    dirty.swap(m_dirty_source_triangles);
+    std::fill(m_dirty_source_triangle_flags.begin(), m_dirty_source_triangle_flags.end(), 0);
+    return dirty;
+}
+
+std::vector<int> TriangleSelector::consume_dirty_source_triangles(size_t max_count)
+{
+    if (max_count == 0 || m_dirty_source_triangles.empty())
+        return {};
+    if (m_dirty_source_triangles.size() <= max_count)
+        return consume_dirty_source_triangles();
+
+    std::vector<int> dirty;
+    dirty.reserve(max_count);
+    for (size_t i = 0; i < max_count; ++i) {
+        const int source_triangle = m_dirty_source_triangles[i];
+        dirty.push_back(source_triangle);
+        if (source_triangle >= 0 && source_triangle < int(m_dirty_source_triangle_flags.size()))
+            m_dirty_source_triangle_flags[source_triangle] = 0;
+    }
+    m_dirty_source_triangles.erase(
+        m_dirty_source_triangles.begin(),
+        m_dirty_source_triangles.begin() + ptrdiff_t(max_count));
+    return dirty;
+}
+
 // BBS
 void TriangleSelector::get_facets(std::vector<indexed_triangle_set>& facets_per_type) const
 {
@@ -1510,6 +1576,34 @@ void TriangleSelector::get_facets_strict_recursive(
                 state, out_triangles);
     } else if (tr.get_state() == state)
         this->get_facets_split_by_tjoints({tr.verts_idxs[0], tr.verts_idxs[1], tr.verts_idxs[2]}, neighbors, out_triangles);
+}
+
+void TriangleSelector::get_facets_for_sources_recursive(
+    const Triangle      &tr,
+    EnforcerBlockerType  state,
+    std::vector<int>     &vertex_map,
+    indexed_triangle_set &out) const
+{
+    if (!tr.valid())
+        return;
+    if (tr.is_split()) {
+        for (int i = 0; i <= tr.number_of_split_sides(); ++i)
+            get_facets_for_sources_recursive(m_triangles[tr.children[i]], state, vertex_map, out);
+        return;
+    }
+    if (tr.get_state() != state)
+        return;
+
+    stl_triangle_vertex_indices indices;
+    for (int i = 0; i < 3; ++i) {
+        const int vertex_idx = tr.verts_idxs[i];
+        if (vertex_map[vertex_idx] == -1) {
+            vertex_map[vertex_idx] = int(out.vertices.size());
+            out.vertices.emplace_back(m_vertices[vertex_idx].v);
+        }
+        indices[i] = vertex_map[vertex_idx];
+    }
+    out.indices.emplace_back(indices);
 }
 
 void TriangleSelector::get_facets_split_by_tjoints(const Vec3i32 &vertices, const Vec3i32 &neighbors, std::vector<stl_triangle_vertex_indices> &out_triangles) const
@@ -1937,8 +2031,10 @@ void TriangleSelector::seed_fill_unselect_all_triangles()
 void TriangleSelector::seed_fill_apply_on_triangles(EnforcerBlockerType new_state)
 {
     for (Triangle &triangle : m_triangles)
-        if (!triangle.is_split() && triangle.is_selected_by_seed_fill())
+        if (!triangle.is_split() && triangle.is_selected_by_seed_fill()) {
+            mark_dirty_source_triangle(triangle.source_triangle);
             triangle.set_state(new_state);
+        }
 
     for (Triangle &triangle : m_triangles)
         if (triangle.is_split() && triangle.valid()) {

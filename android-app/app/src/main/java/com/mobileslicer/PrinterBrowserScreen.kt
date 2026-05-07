@@ -276,7 +276,7 @@ internal fun PrinterBrowserScreen(
                 currentUrl = url
                 browserStatus = "Loading printer UI..."
             }) {
-                Text("UI")
+                Text("Printer UI")
             }
             if (showingCamera) {
                 TextButton(onClick = {

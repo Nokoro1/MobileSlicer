@@ -370,7 +370,7 @@ internal fun DomainProfileCard(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text("Edit / Rename")
+                    Text("Edit")
                 }
             }
             Row(
