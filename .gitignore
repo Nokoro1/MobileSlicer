@@ -1,21 +1,15 @@
 # Local tooling and editor state
 .android-sdk/
-.codex
-.codex/
-.claude/
 .idea/
 
 # Keep local docs/site/operator files out of the public GitHub repo.
 /README/
 /Website/
 
-# Upstream/editor metadata that does not belong in the public Android source tree.
-vendor/orcaslicer/.cursorignore
+# Upstream metadata and generated dependency folders that do not belong in the
+# public Android source tree.
 vendor/orcaslicer/.devcontainer/
 vendor/orcaslicer/.github/
-vendor/orcaslicer/AGENTS.md
-vendor/orcaslicer/CLAUDE.md
-vendor/orcaslicer/tests/CLAUDE.md
 vendor/orcaslicer/resources/**/node_modules/
 
 # Root build outputs
@@ -26,6 +20,7 @@ vendor/orcaslicer/resources/**/node_modules/
 /android-app/.kotlin/
 /android-app/app/build/
 /android-app/app/.cxx/
+/android-app/local.properties
 /android-app/release-signing.properties
 hs_err*.log
 __pycache__/
@@ -39,8 +34,7 @@ __pycache__/
 # Local artifact holding areas
 /_quarantine/
 /artifacts/
-/Website/private/
-/Website/.wrangler/
+/tools/adb
 *.apk
 *.gcode
 

@@ -7,6 +7,7 @@ This inventory is a release checklist starter, not a substitute for legal review
 - OrcaSlicer / libSlic3r-derived code: `vendor/orcaslicer/`, `engine-wrapper/orca-android-libslic3r/`
 - cereal 1.3.0: `engine-wrapper/orca-android-libslic3r/third_party/cereal-1.3.0/`
 - rapidjson and rapidxml copies under cereal external headers
+- libnoise-compatible Android header shim: `third_party/libnoise_compat/`
 - Android Gradle Plugin, Kotlin, AndroidX, Jetpack Compose, Material components: declared under `android-app/gradle/libs.versions.toml` and `android-app/app/build.gradle.kts`
 
 ## Release Rule
