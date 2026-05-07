@@ -197,7 +197,7 @@ target_link_libraries(orca_engine
     ${log-lib}
 )
 
-option(MOBILE_SLICER_BUILD_NATIVE_PAINT_PROBES "Build native paint replay proof executables" OFF)
+option(MOBILE_SLICER_BUILD_NATIVE_PAINT_PROBES "Build native paint replay validation executables" OFF)
 if (ORCA_SHIPPING_REAL_WRAPPER AND MOBILE_SLICER_BUILD_NATIVE_PAINT_PROBES)
     add_executable(orca_engine_v2_paint_replay_probe
         ../../../../../engine-wrapper/orca_android_v2_paint_replay_probe.cpp

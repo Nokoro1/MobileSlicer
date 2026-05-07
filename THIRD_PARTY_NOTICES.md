@@ -8,7 +8,6 @@ This inventory is a release checklist starter, not a substitute for legal review
 - cereal 1.3.0: `engine-wrapper/orca-android-libslic3r/third_party/cereal-1.3.0/`
 - rapidjson and rapidxml copies under cereal external headers
 - Android Gradle Plugin, Kotlin, AndroidX, Jetpack Compose, Material components: declared under `android-app/gradle/libs.versions.toml` and `android-app/app/build.gradle.kts`
-- Cloudflare Pages Functions runtime for `Website/functions/`
 
 ## Release Rule
 

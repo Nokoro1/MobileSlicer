@@ -69,19 +69,15 @@ GROUP_RULES = (
     ),
     GroupRule(
         name="docs",
-        prefixes=("README/", "docs/", "THIRD_PARTY_NOTICES.md"),
-    ),
-    GroupRule(
-        name="website",
-        prefixes=("Website/",),
+        prefixes=("docs/", "THIRD_PARTY_NOTICES.md"),
     ),
     GroupRule(
         name="vendor-patches",
         prefixes=("vendor/orcaslicer/", "patches/orcaslicer/"),
     ),
     GroupRule(
-        name="proof-fixtures",
-        prefixes=("proof-fixtures/", "regression-fixtures/", "mobileslicer_test_cube.stl"),
+        name="regression-fixtures/slicing",
+        prefixes=("regression-fixtures/slicing/", "regression-fixtures/", "regression-fixtures/slicing/mobileslicer_test_cube.stl"),
     ),
 )
 

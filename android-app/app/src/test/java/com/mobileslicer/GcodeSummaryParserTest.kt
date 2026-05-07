@@ -221,7 +221,7 @@ class GcodeSummaryParserTest {
     }
 
     @Test
-    fun extractsRegressionMetricsForSlicingParameterProofs() {
+    fun extractsRegressionMetricsForSlicingParameterValidation() {
         val narrowBrim = GcodeSummaryParser.fromGcode(firstLayerSquareGcode(min = 10.0, max = 30.0))
         val wideBrim = GcodeSummaryParser.fromGcode(firstLayerSquareGcode(min = 5.0, max = 35.0))
 

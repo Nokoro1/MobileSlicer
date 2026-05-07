@@ -52,7 +52,7 @@
       "classification": "mixed_print_compatibility_layer",
       "allowedProductScope": "Single/normal-material Android print/export paths where linked real Orca sources own the exercised behavior.",
       "blockedProductAreas": [
-        "wipe tower and prime tower functional proof",
+        "wipe tower and prime tower functional validation",
         "paint-based multimaterial segmentation",
         "paint-based fuzzy-skin segmentation",
         "interlocking infill",

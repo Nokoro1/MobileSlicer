@@ -18,21 +18,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-class PaintFullAppPathProofTest {
+class PaintFullAppPathValidationTest {
     @Test
-    fun nativePayloadSurvivesSavedProjectAndWritesReplayPayloadForNativeProof() {
-        val payloadPath = System.getenv("PAINT_PROOF_PAYLOAD_PATH").orEmpty()
-        val replayOutputPath = System.getenv("PAINT_PROOF_REPLAY_OUTPUT_PATH").orEmpty()
-        val mode = System.getenv("PAINT_PROOF_MODE").orEmpty().toPaintModeOrNull()
-        assumeTrue("PAINT_PROOF_* env vars not set", payloadPath.isNotBlank() && replayOutputPath.isNotBlank() && mode != null)
+    fun nativePayloadSurvivesSavedProjectAndWritesReplayPayloadForNativeValidation() {
+        val payloadPath = System.getenv("PAINT_VALIDATION_PAYLOAD_PATH").orEmpty()
+        val replayOutputPath = System.getenv("PAINT_VALIDATION_REPLAY_OUTPUT_PATH").orEmpty()
+        val mode = System.getenv("PAINT_VALIDATION_MODE").orEmpty().toPaintModeOrNull()
+        assumeTrue("PAINT_VALIDATION_* env vars not set", payloadPath.isNotBlank() && replayOutputPath.isNotBlank() && mode != null)
 
         val nativePayload = File(payloadPath).readText()
         val objectId = nativePayload.mobileObjectIdOrDefault(42L)
         val plateObject = PlateObject(
             id = objectId,
-            label = "Paint proof",
-            filePath = System.getenv("PAINT_PROOF_MODEL_PATH").orEmpty().ifBlank { "/tmp/paint-proof.stl" },
-            nativeSourceKey = "paint-proof-source",
+            label = "Paint validation",
+            filePath = System.getenv("PAINT_VALIDATION_MODEL_PATH").orEmpty().ifBlank { "/tmp/paint-validation.stl" },
+            nativeSourceKey = "paint-validation-source",
             format = ImportedModelFormat.Stl,
             importTiming = null,
             bounds = MeshBounds(0f, 0f, 0f, 20f, 20f, 20f),
@@ -51,8 +51,8 @@ class PaintFullAppPathProofTest {
             preferences,
             listOf(
                 SavedProject(
-                    id = "paint_full_app_path_proof",
-                    name = "Paint Full App Path Proof",
+                    id = "paint_full_app_path_validation",
+                    name = "Paint Full App Path Validation",
                     updatedAtEpochMs = 123L,
                     profileStore = defaultStore(),
                     plateObjects = listOf(
@@ -118,8 +118,8 @@ class PaintFullAppPathProofTest {
         val filaments = ProfileStoreRepository.defaultFilamentProfiles()
         val processes = listOf(
             newProcessProfileUnchecked(
-                0 to "process_paint_full_app_path_proof",
-                1 to "Paint Full App Path Proof Process",
+                0 to "process_paint_full_app_path_validation",
+                1 to "Paint Full App Path Validation Process",
                 3 to false,
                 5 to 0.20f,
                 259 to printers.first().id,

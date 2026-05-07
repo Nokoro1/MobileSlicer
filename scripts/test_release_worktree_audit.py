@@ -5,10 +5,10 @@ from release_worktree_audit import group_for_path, parse_status_line, summarize
 
 class ReleaseWorktreeAuditTest(unittest.TestCase):
     def test_parses_renames_to_destination_path(self):
-        status, path = parse_status_line("R  README/OLD.md -> README/plans/OLD.md")
+        status, path = parse_status_line("R  docs/OLD.md -> docs/plans/OLD.md")
 
         self.assertEqual("R ", status)
-        self.assertEqual("README/plans/OLD.md", path)
+        self.assertEqual("docs/plans/OLD.md", path)
 
     def test_groups_release_candidate_paths(self):
         groups = summarize(
@@ -17,9 +17,9 @@ class ReleaseWorktreeAuditTest(unittest.TestCase):
                 "?? engine-wrapper/orca_wrapper_internal.cpp",
                 " M android-app/app/src/main/java/com/mobileslicer/workspace/WorkspaceScreen.kt",
                 " M android-app/app/src/main/java/com/mobileslicer/profiles/OrcaProfileTransfer.kt",
-                " M Website/index.html",
+                " M docs/LEGAL.md",
                 " M vendor/orcaslicer/src/libslic3r/TriangleSelector.cpp",
-                "?? README/RELEASE_STATUS.md",
+                "?? docs/RELEASE_STATUS.md",
             ]
         )
 
@@ -33,12 +33,12 @@ class ReleaseWorktreeAuditTest(unittest.TestCase):
             (" M", "android-app/app/src/main/java/com/mobileslicer/profiles/OrcaProfileTransfer.kt"),
             groups["profiles-storage-printer"],
         )
-        self.assertIn((" M", "Website/index.html"), groups["website"])
+        self.assertIn((" M", "docs/LEGAL.md"), groups["docs"])
         self.assertIn(
             (" M", "vendor/orcaslicer/src/libslic3r/TriangleSelector.cpp"),
             groups["vendor-patches"],
         )
-        self.assertIn(("??", "README/RELEASE_STATUS.md"), groups["docs"])
+        self.assertIn(("??", "docs/RELEASE_STATUS.md"), groups["docs"])
 
     def test_uncategorized_paths_are_explicit(self):
         self.assertEqual("uncategorized", group_for_path("unknown/file.txt"))

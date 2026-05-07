@@ -386,7 +386,7 @@ internal class AutomationConfigResolver(
             val duplicatedPrinter = activePrinter.copy(
                 id = printerId,
                 name = printerName,
-                subtitle = "Automated real-device proof printer profile.",
+                subtitle = "Automated real-device validation printer profile.",
                 builtIn = false,
                 bedWidthMm = nextBedWidth,
                 bedDepthMm = nextBedDepth,
@@ -439,7 +439,7 @@ internal class AutomationConfigResolver(
             val duplicatedFilament = activeFilament.copy(
                 id = filamentId,
                 name = filamentName,
-                subtitle = "Automated real-device proof filament profile.",
+                subtitle = "Automated real-device validation filament profile.",
                 builtIn = false,
                 printerProfileId = updatedStore.selectedPrinterId,
                 materialType = materialType ?: activeFilament.materialType,
@@ -480,7 +480,7 @@ internal class AutomationConfigResolver(
         val duplicated = active.withValues(
             "id" to processId,
             "name" to processName,
-            "subtitle" to "Automated real-device proof profile.",
+            "subtitle" to "Automated real-device validation profile.",
             "builtIn" to false,
             "printerProfileId" to updatedStore.selectedPrinterId,
             "nozzleDiameterMm" to updatedStore.activeConfiguration().printer.nozzleDiameterMm,

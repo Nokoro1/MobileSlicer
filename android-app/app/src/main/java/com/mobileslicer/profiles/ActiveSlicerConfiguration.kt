@@ -283,8 +283,8 @@ internal data class ActiveSlicerConfiguration(
         append(String.format(java.util.Locale.US, "%.1f mm brim", process.brimWidthMm))
     }
 
-    fun nativeSliceProofBody(): String =
-        "Current Stage 2 proof on RFCYA01ANVE: Nozzle diameter, filament diameter, filament max volumetric speed, layer height, first layer height, first-layer speed cluster, outer wall speed, inner wall speed, top surface speed, travel speed, outer wall acceleration, inner wall acceleration, top surface acceleration, sparse infill acceleration, bridge speed, small perimeter speed, small perimeter threshold, sparse infill speed, internal solid infill speed, top shell layers, bottom shell layers, seam position, sparse infill density, sparse infill pattern, print speed baseline, brim width, skirt output, and precise wall are Device-proven. Skirt parity proof covers disabled, combined, per-object, and brim-plus-skirt outputs with finite in-bed first-layer geometry. Flow ratio, filament retraction length, filament retraction speed, filament deretraction speed, pressure advance, volumetric speed coefficients, and adaptive volumetric speed are Config-only Waydroid-validated ownership lanes only; they are not accepted device proof yet. Gap infill speed remains Config-labeling-only effect. Top surface pattern, only one wall on top surfaces, and wall count are Stronger-fixture proven. First-layer nozzle and bed temperatures are Start-sequence only, while later-layer nozzle and bed temperatures are Layer-change command only. Cooling baseline and no cooling for first X layers are Fan-command only. The weak cached ms_box fixture is too weak for wall-count proof."
+    fun nativeSliceValidationBody(): String =
+        "Core slicer settings are covered by automated release validation across printer, filament, process, adhesion, and G-code export paths. Network and device checks are kept behind explicit automation flags, while normal release builds keep automation disabled."
 
     fun appLayerSummaryTitle(): String = "${filament.name} • ${process.name}"
 
@@ -299,7 +299,7 @@ internal data class ActiveSlicerConfiguration(
     fun appLayerOnlyBody(): String = buildString {
         append("Workspace bed: ")
         append(workspaceBedLabel())
-        append(" • Workspace still renders the original STL mesh only, not emitted toolpaths or layer walls. Bed dimensions now reach slicer as printable_area/printable_height and stay Error-state only when emitted extrusion exceeds that volume. Filament material still reaches slicer only as Orca filament_type and stays Source-wired. Flow ratio now reaches slicer as Orca filament_flow_ratio. Filament retraction core overrides now reach slicer as Orca filament_retraction_length, filament_retraction_speed, and filament_deretraction_speed when explicitly set, and otherwise stay inherited from printer/extruder defaults. Pressure advance now reaches slicer as Orca enable_pressure_advance and pressure_advance. Max volumetric speed now reaches slicer as explicit Orca filament_max_volumetric_speed. Adaptive volumetric speed now reaches slicer as Orca filament_adaptive_volumetric_speed, volumetric speed coefficients reach slicer as Orca volumetric_speed_coefficients, and filament start/end G-code reaches slicer as Orca filament_start_gcode and filament_end_gcode; all retraction, pressure-advance, adaptive-flow, and filament G-code fields stay Config-only until phone proof returns.")
+        append(" • Workspace rendering, slicer configuration, and G-code export use separate validation paths. Bed dimensions reach the slicer as printable_area/printable_height and fail slicing when emitted extrusion exceeds the printable volume. Filament material, flow ratio, retraction, pressure advance, max volumetric speed, adaptive volumetric speed, volumetric speed coefficients, and filament start/end G-code are mapped through Orca-compatible configuration keys.")
     }
 
 

@@ -42,16 +42,16 @@ internal data class PaintInteractionAutomationRequest(
     val statusPath: String
 ) {
     companion object {
-        const val ACTION_PAINT_INTERACTION = "com.mobileslicer.action.PAINT_INTERACTION_PROOF"
-        const val EXTRA_MODEL_PATH = "paint_proof_model_path"
-        const val EXTRA_STATUS_PATH = "paint_proof_status_path"
+        const val ACTION_PAINT_INTERACTION = "com.mobileslicer.action.PAINT_INTERACTION_VALIDATION"
+        const val EXTRA_MODEL_PATH = "paint_validation_model_path"
+        const val EXTRA_STATUS_PATH = "paint_validation_status_path"
 
         fun fromIntent(intent: Intent): PaintInteractionAutomationRequest? {
             if (intent.action != ACTION_PAINT_INTERACTION) return null
             val modelPath = intent.getStringExtra(EXTRA_MODEL_PATH)?.takeIf { it.isNotBlank() } ?: return null
             val statusPath = intent.getStringExtra(EXTRA_STATUS_PATH)
                 ?.takeIf { it.isNotBlank() }
-                ?: "$modelPath.paint-proof.status.txt"
+                ?: "$modelPath.paint-validation.status.txt"
             return PaintInteractionAutomationRequest(modelPath, statusPath)
         }
     }
@@ -62,12 +62,12 @@ internal fun MainActivity.maybeRunPaintInteractionAutomation(intent: Intent?): B
         return false
     }
     val request = intent?.let(PaintInteractionAutomationRequest::fromIntent) ?: return false
-    Log.i(MainActivity.TAG, "paint_proof:start model=${request.modelPath} status=${request.statusPath}")
+    Log.i(MainActivity.TAG, "paint_validation:start model=${request.modelPath} status=${request.statusPath}")
     lifecycleScope.launch {
         val success = try {
             runPaintInteractionAutomation(request)
         } catch (throwable: Throwable) {
-            Log.e(MainActivity.TAG, "paint_proof:failed unexpected", throwable)
+            Log.e(MainActivity.TAG, "paint_validation:failed unexpected", throwable)
             runCatching {
                 File(request.statusPath).apply { parentFile?.mkdirs() }
                     .writeText(
@@ -88,12 +88,12 @@ private suspend fun MainActivity.runPaintInteractionAutomation(
 ): Boolean {
     val statusFile = File(request.statusPath)
     fun writeStatus(message: String) {
-        Log.i(MainActivity.TAG, "paint_proof:$message")
+        Log.i(MainActivity.TAG, "paint_validation:$message")
         runCatching {
             statusFile.parentFile?.mkdirs()
             statusFile.writeText(message, StandardCharsets.UTF_8)
         }.onFailure { throwable ->
-            Log.e(MainActivity.TAG, "paint_proof:status write failed path=${statusFile.absolutePath}", throwable)
+            Log.e(MainActivity.TAG, "paint_validation:status write failed path=${statusFile.absolutePath}", throwable)
         }
     }
 
@@ -151,7 +151,7 @@ private suspend fun MainActivity.runPaintInteractionAutomation(
             )
         )
     )
-    val scenarioProofs = mutableListOf<String>()
+    val scenarioResults = mutableListOf<String>()
 
     if (!waitForViewerSurfaceReady(view)) {
         writeStatus("failed: initial viewer surface not ready ${viewerDiagnostics(view, lastRenderReady)}")
@@ -265,7 +265,7 @@ private suspend fun MainActivity.runPaintInteractionAutomation(
                 val payload = NativePaintCalls.serialize(engine).orEmpty()
                 publishedPayloadBytes = payload.length
                 if (payload.isNotBlank()) {
-                    writeProofArtifact(artifactDir, "paint-payload-scenario-$name-support.json", payload)
+                    writeValidationArtifact(artifactDir, "paint-payload-scenario-$name-support.json", payload)
                 }
                 val overlay = parseNativePaintOverlayDeltaInterleaved(
                     NativePaintCalls.overlayInterleaved(engine),
@@ -336,7 +336,7 @@ private suspend fun MainActivity.runPaintInteractionAutomation(
             return false
         }
 
-        scenarioProofs +=
+        scenarioResults +=
             "$name(hit=${hitPoint.first.toInt()},${hitPoint.second.toInt()} " +
                 "begins=$strokeBegins moves=$strokeMoves ends=$strokeEnds " +
                 "payload=$publishedPayloadBytes overlayLayers=$overlayLayers overlayVertices=$overlayVertices " +
@@ -345,7 +345,7 @@ private suspend fun MainActivity.runPaintInteractionAutomation(
                 "clearPayload=$clearPayloadBytes)"
     }
 
-    val modeProofs = mutableListOf<String>()
+    val modeResults = mutableListOf<String>()
     val modeTransform = ViewerModelTransform(centerXmm = 110f, centerYmm = 110f)
     val modeTransforms = DoubleArray(NativeModelTransformInputStride)
     defaultNativeModelTransform(mesh.bounds, bed, modeTransform).writeTo(modeTransforms)
@@ -367,7 +367,7 @@ private suspend fun MainActivity.runPaintInteractionAutomation(
         listOf(
             ViewerPlateObject(
                 id = objectId,
-                label = "mode-proof",
+                label = "mode-validation",
                 mesh = mesh,
                 transform = modeTransform,
                 selected = true
@@ -461,7 +461,7 @@ private suspend fun MainActivity.runPaintInteractionAutomation(
         }
         val payload = NativePaintCalls.serialize(engine).orEmpty()
         if (payload.isNotBlank()) {
-            writeProofArtifact(artifactDir, "paint-payload-mode-$modeName.json", payload)
+            writeValidationArtifact(artifactDir, "paint-payload-mode-$modeName.json", payload)
         }
         if (nativeMode == NativePaintMode.Color && !payload.includesColorSlot(case.colorSlot)) {
             writeStatus("failed: $modeName payload did not preserve color slot ${case.colorSlot}")
@@ -475,19 +475,19 @@ private suspend fun MainActivity.runPaintInteractionAutomation(
         NativePaintCalls.endSession(engine, commit = true)
         if (!stroke.succeeded || !end.succeeded || overlay.layers.isEmpty() || payload.isBlank()) {
             writeStatus(
-                "failed: $modeName mode proof stroke=${paintResultMessage(stroke)} end=${paintResultMessage(end)} " +
+                "failed: $modeName mode validation stroke=${paintResultMessage(stroke)} end=${paintResultMessage(end)} " +
                     "overlayLayers=${overlay.layers.size} payload=${payload.length}"
             )
             return false
         }
-        modeProofs += "$modeName(payload=${payload.length} overlayLayers=${overlay.layers.size} overlayVertices=${overlay.layers.sumOf { it.vertices.size / 3 }})"
+        modeResults += "$modeName(payload=${payload.length} overlayLayers=${overlay.layers.size} overlayVertices=${overlay.layers.sumOf { it.vertices.size / 3 }})"
     }
 
     writeStatus(
         "success: model=${sourceModel.absolutePath} staged=${stagedModel.absolutePath} " +
             "payloadDir=${artifactDir.absolutePath} " +
-            "scenarios=${scenarioProofs.joinToString(";")} " +
-            "modes=${modeProofs.joinToString(";")} " +
+            "scenarios=${scenarioResults.joinToString(";")} " +
+            "modes=${modeResults.joinToString(";")} " +
             "elapsedMs=${SystemClock.elapsedRealtime() - startedAtMs}"
     )
     return true
@@ -626,12 +626,12 @@ private fun paintResultMessage(result: NativePaintCallResult): String =
         is NativePaintCallResult.Failure -> result.message
     }
 
-private fun writeProofArtifact(directory: File, name: String, contents: String) {
+private fun writeValidationArtifact(directory: File, name: String, contents: String) {
     runCatching {
         directory.mkdirs()
         File(directory, name).writeText(contents, StandardCharsets.UTF_8)
     }.onFailure { throwable ->
-        Log.e(MainActivity.TAG, "paint_proof:artifact write failed name=$name", throwable)
+        Log.e(MainActivity.TAG, "paint_validation:artifact write failed name=$name", throwable)
     }
 }
 

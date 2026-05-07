@@ -22,10 +22,10 @@ def ascii_stl_bounds(path: Path):
     return (min(xs), max(xs)), (min(ys), max(ys)), (min(zs), max(zs))
 
 
-class ProofFixtureTest(unittest.TestCase):
+class RegressionFixtureTest(unittest.TestCase):
     def test_support_release_fixture_has_non_degenerate_support_depth(self):
         _, y_bounds, z_bounds = ascii_stl_bounds(
-            ROOT_DIR / "proof-fixtures" / "stage2_bridge_speed_fixture.stl"
+            ROOT_DIR / "regression-fixtures/slicing" / "stage2_bridge_speed_fixture.stl"
         )
 
         self.assertGreaterEqual(y_bounds[1] - y_bounds[0], 20.0)

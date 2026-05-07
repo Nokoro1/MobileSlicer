@@ -165,8 +165,7 @@ internal class WorkspaceRenderThread(
     private var cutClippedObjectUpload: TriangleUpload? = null
     private var cutPlaneSessionUploadKey: ViewerCutPlaneSession? = null
 
-    // Paint overlay GL ownership lives in PaintOverlayUploadManager. Keep the
-    // split contract in README/WORKSPACE_RENDER_GL_OWNERSHIP.md in sync.
+    // Paint overlay GL ownership lives in PaintOverlayUploadManager.
     private var modelPlacementX = 0f
     private var modelPlacementY = 0f
     private var modelPlacementZ = 0f

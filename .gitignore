@@ -9,6 +9,15 @@
 /README/
 /Website/
 
+# Upstream/editor metadata that does not belong in the public Android source tree.
+vendor/orcaslicer/.cursorignore
+vendor/orcaslicer/.devcontainer/
+vendor/orcaslicer/.github/
+vendor/orcaslicer/AGENTS.md
+vendor/orcaslicer/CLAUDE.md
+vendor/orcaslicer/tests/CLAUDE.md
+vendor/orcaslicer/resources/**/node_modules/
+
 # Root build outputs
 /build/
 

@@ -9,10 +9,9 @@ PACKAGE_NAME="com.mobileslicer"
 MAIN_ACTIVITY="com.mobileslicer/.MainActivity"
 AUTOMATION_ACTION="com.mobileslicer.action.AUTOMATE_SLICE"
 PREVIEW_INTERACTION_ACTION="com.mobileslicer.action.PROFILE_PREVIEW_INTERACTION"
-DEFAULT_SERIAL="RFCYA01ANVE"
-DEFAULT_SLICE_SMOKE_STL="$ROOT_DIR/mobileslicer_test_cube.stl"
-SUPPORT_SLICE_SMOKE_STL="$ROOT_DIR/proof-fixtures/stage2_bridge_speed_fixture.stl"
-PERIMETER_ARRAY_SLICE_SMOKE_STL="$ROOT_DIR/proof-fixtures/stage2_small_perimeter_array_fixture.stl"
+DEFAULT_SLICE_SMOKE_STL="$ROOT_DIR/regression-fixtures/slicing/mobileslicer_test_cube.stl"
+SUPPORT_SLICE_SMOKE_STL="$ROOT_DIR/regression-fixtures/slicing/stage2_bridge_speed_fixture.stl"
+PERIMETER_ARRAY_SLICE_SMOKE_STL="$ROOT_DIR/regression-fixtures/slicing/stage2_small_perimeter_array_fixture.stl"
 MEDIUM_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/volumetric_speed/SpeedTestStructure.stl"
 COMPLEX_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/vfa/vfa.stl"
 STRESS_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/temperature_tower/temperature_tower.stl"
@@ -194,7 +193,7 @@ Modes:
           Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   all     Run local checks and install the debug APK.
 
-Device serial defaults to $ANDROID_SERIAL, then RFCYA01ANVE.
+Device serial defaults to $ANDROID_SERIAL. Pass a serial explicitly when more than one device is connected.
 USAGE
 }
 
@@ -290,7 +289,7 @@ device_serial() {
   elif [[ -n "${ANDROID_SERIAL:-}" ]]; then
     printf '%s\n' "$ANDROID_SERIAL"
   else
-    printf '%s\n' "$DEFAULT_SERIAL"
+    fail "Device serial not provided. Pass a serial argument or set ANDROID_SERIAL."
   fi
 }
 
@@ -320,7 +319,7 @@ run_script_tests() {
   (cd "$ROOT_DIR" && python3 scripts/test_analyze_mobile_performance.py)
   (cd "$ROOT_DIR" && python3 scripts/test_analyze_preview_responsiveness.py)
   (cd "$ROOT_DIR" && python3 scripts/test_gcode_preview_layer_counter.py)
-  (cd "$ROOT_DIR" && python3 scripts/test_proof_fixtures.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_regression_fixtures.py)
   (cd "$ROOT_DIR" && python3 scripts/test_release_worktree_audit.py)
   (cd "$ROOT_DIR" && python3 scripts/test_validate_orca_profile_bundle.py)
   (cd "$ROOT_DIR" && python3 scripts/test_validate_orca_export_with_cli.py)

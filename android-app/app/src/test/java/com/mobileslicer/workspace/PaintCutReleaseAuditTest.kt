@@ -51,14 +51,8 @@ class PaintCutReleaseAuditTest {
     }
 
     @Test
-    fun paintCutAuditDocAndNativeUnsupportedGuardsStayPresent() {
-        val audit = repoFile("README/PAINT_CUT_RELEASE_AUDIT.md").readText()
+    fun paintCutNativeUnsupportedGuardsStayPresent() {
         val native = repoFile("engine-wrapper/orca_wrapper_paint_cut_api.cpp").readText()
-        assertTrue(audit.contains("Release-supported visible paint surface"))
-        assertTrue(audit.contains("Line cut is a planar cut gesture"))
-        assertTrue(audit.contains("Unsupported native paint ids remain rejected"))
-        assertTrue(audit.contains("must not run whole-model CSG display baking on device"))
-        assertTrue(audit.contains("Orca-style connector names and connector counts"))
         assertTrue(native.contains("shape < 0 || shape > 6"))
         assertTrue(native.contains("action < 0 || action > 3"))
         assertTrue(native.contains("mode == \"contour\""))

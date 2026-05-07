@@ -72,9 +72,6 @@ class ReleaseHardeningTest {
         val application = androidManifest().documentElement.children("application").single()
         assertEquals("true", application.androidAttr("usesCleartextTraffic"))
 
-        val securityDoc = repoFile("README/SECURITY.md").readText()
-        assertTrue(securityDoc.contains("Runtime printer networking refuses cleartext `http://` for non-local hosts"))
-
         val urlGuards = File("src/main/java/com/mobileslicer/printerconnection/PrinterConnectionUrls.kt").readText()
         assertTrue(urlGuards.contains("requireAllowedPrinterBaseUrl"))
         assertTrue(urlGuards.contains("requireAllowedPrinterNetworkUrl"))
@@ -86,13 +83,11 @@ class ReleaseHardeningTest {
 
     @Test
     fun skirtOutputSupportIsVisibleInReleaseClaims() {
-        val releaseStatus = repoFile("README/RELEASE_STATUS.md").readText()
         val truthRows = File("src/main/java/com/mobileslicer/profiles/ProfileSettingTruthRows.kt").readText()
         val wrapperAdhesion = repoFile("engine-wrapper/orca_wrapper_config_adhesion_helpers.h").readText()
         val releaseGateScript = repoFile("scripts/verify_android.sh").readText()
 
-        assertTrue(releaseStatus.contains("Skirt output is device-tested through the skirt parity matrix"))
-        assertTrue(truthRows.contains("Current skirt parity proof"))
+        assertTrue(truthRows.contains("brim-plus-skirt outputs"))
         assertTrue(wrapperAdhesion.contains("""config.set_deserialize_strict("skirt_loops", std::to_string(loops))"""))
         assertTrue(wrapperAdhesion.contains("""extract_number(json, "skirts")"""))
         assertTrue(releaseGateScript.contains("skirt-parity"))

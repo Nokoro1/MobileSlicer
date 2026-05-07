@@ -3,8 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERIFY_SCRIPT="$ROOT_DIR/scripts/verify_android.sh"
-DEFAULT_SERIAL="RFCYA01ANVE"
-SERIAL="${1:-${ANDROID_SERIAL:-$DEFAULT_SERIAL}}"
+SERIAL="${1:-${ANDROID_SERIAL:-}}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT_ROOT="$ROOT_DIR/artifacts/release-gates"
 RUN_DIR="$ARTIFACT_ROOT/$STAMP"
@@ -51,6 +50,10 @@ USAGE
 if [[ "${SERIAL:-}" == "-h" || "${SERIAL:-}" == "--help" ]]; then
   usage
   exit 0
+fi
+
+if [[ -z "$SERIAL" ]]; then
+  fail "Device serial not provided. Pass a serial argument or set ANDROID_SERIAL."
 fi
 
 if [[ ! -x "$VERIFY_SCRIPT" ]]; then

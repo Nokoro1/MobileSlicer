@@ -3,15 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$ROOT_DIR/android-app"
-PACKAGE_NAME="${PAINT_PROOF_PACKAGE_NAME:-com.mobileslicer}"
-DEVICE_PAYLOAD_DIR="${PAINT_PROOF_DEVICE_PAYLOAD_DIR:-files/paint-proof}"
-WORK_DIR="${PAINT_PROOF_WORK_DIR:-/tmp/mobileslicer_paint_unified_app_path_proof}"
-LOCAL_MODEL="${PAINT_PROOF_MODEL_LOCAL:-$ROOT_DIR/engine-wrapper/orca-android-libslic3r/testdata/paint_support_overhang_ascii.stl}"
-DEVICE_MODEL="${PAINT_PROOF_MODEL_DEVICE:-/data/local/tmp/paint_full_app_path_fixture.stl}"
-DEVICE_CONFIG="${PAINT_PROOF_CONFIG_DEVICE:-/data/local/tmp/mobileslicer_paint_support_probe_config.json}"
-LOCAL_CONFIG="${PAINT_PROOF_CONFIG_LOCAL:-$ROOT_DIR/engine-wrapper/orca-android-libslic3r/testdata/paint_support_probe_config.json}"
-RUN_UI_AUTOMATION="${PAINT_PROOF_RUN_UI_AUTOMATION:-1}"
-SKIP_BUILD="${PAINT_PROOF_SKIP_BUILD:-0}"
+PACKAGE_NAME="${PAINT_VALIDATION_PACKAGE_NAME:-com.mobileslicer}"
+DEVICE_PAYLOAD_DIR="${PAINT_VALIDATION_DEVICE_PAYLOAD_DIR:-files/paint-validation}"
+WORK_DIR="${PAINT_VALIDATION_WORK_DIR:-/tmp/mobileslicer_paint_unified_app_path_validation}"
+LOCAL_MODEL="${PAINT_VALIDATION_MODEL_LOCAL:-$ROOT_DIR/engine-wrapper/orca-android-libslic3r/testdata/paint_support_overhang_ascii.stl}"
+DEVICE_MODEL="${PAINT_VALIDATION_MODEL_DEVICE:-/data/local/tmp/paint_full_app_path_fixture.stl}"
+DEVICE_CONFIG="${PAINT_VALIDATION_CONFIG_DEVICE:-/data/local/tmp/mobileslicer_paint_support_probe_config.json}"
+LOCAL_CONFIG="${PAINT_VALIDATION_CONFIG_LOCAL:-$ROOT_DIR/engine-wrapper/orca-android-libslic3r/testdata/paint_support_probe_config.json}"
+RUN_UI_AUTOMATION="${PAINT_VALIDATION_RUN_UI_AUTOMATION:-1}"
+SKIP_BUILD="${PAINT_VALIDATION_SKIP_BUILD:-0}"
 
 mkdir -p "$WORK_DIR"
 rm -f "$WORK_DIR"/*_ui_payload.json \
@@ -20,7 +20,7 @@ rm -f "$WORK_DIR"/*_ui_payload.json \
   "$WORK_DIR"/ui-status.txt
 
 log() {
-  printf '[paint-proof] %s\n' "$*"
+  printf '[paint-validation] %s\n' "$*"
 }
 
 require_file() {
@@ -69,9 +69,9 @@ if [[ "$RUN_UI_AUTOMATION" == "1" ]]; then
   adb shell "run-as $PACKAGE_NAME rm -f $DEVICE_PAYLOAD_DIR/status.txt $DEVICE_PAYLOAD_DIR/paint-payload-*.json"
   adb shell am start -W -f 0x10008000 \
     -n "$PACKAGE_NAME/.MainActivity" \
-    -a com.mobileslicer.action.PAINT_INTERACTION_PROOF \
-    --es paint_proof_model_path "/data/user/0/$PACKAGE_NAME/$DEVICE_PAYLOAD_DIR/paint_full_app_path_fixture.stl" \
-    --es paint_proof_status_path "/data/user/0/$PACKAGE_NAME/$DEVICE_PAYLOAD_DIR/status.txt" >/dev/null
+    -a com.mobileslicer.action.PAINT_INTERACTION_VALIDATION \
+    --es paint_validation_model_path "/data/user/0/$PACKAGE_NAME/$DEVICE_PAYLOAD_DIR/paint_full_app_path_fixture.stl" \
+    --es paint_validation_status_path "/data/user/0/$PACKAGE_NAME/$DEVICE_PAYLOAD_DIR/status.txt" >/dev/null
   for _ in $(seq 1 120); do
     if adb shell "run-as $PACKAGE_NAME test -f $DEVICE_PAYLOAD_DIR/status.txt" >/dev/null 2>&1; then
       break
@@ -98,7 +98,7 @@ pull_payload() {
   fi
 }
 
-run_mode_proof() {
+run_mode_validation() {
   local label="$1"
   local paint_mode="$2"
   local probe_mode="$3"
@@ -108,32 +108,32 @@ run_mode_proof() {
   local device_replay_payload="/data/local/tmp/${label}_app_replay_payload.json"
   local output="$WORK_DIR/${label}_external_replay.txt"
 
-  log "proving $label with UI payload $payload_name"
+  log "validating $label with UI payload $payload_name"
   pull_payload "$payload_name" "$ui_payload"
   (
     cd "$APP_DIR"
-    PAINT_PROOF_PAYLOAD_PATH="$ui_payload" \
-    PAINT_PROOF_REPLAY_OUTPUT_PATH="$app_replay_payload" \
-    PAINT_PROOF_MODE="$paint_mode" \
-    PAINT_PROOF_MODEL_PATH="$DEVICE_MODEL" \
+    PAINT_VALIDATION_PAYLOAD_PATH="$ui_payload" \
+    PAINT_VALIDATION_REPLAY_OUTPUT_PATH="$app_replay_payload" \
+    PAINT_VALIDATION_MODE="$paint_mode" \
+    PAINT_VALIDATION_MODEL_PATH="$DEVICE_MODEL" \
     ./gradlew --no-build-cache :app:testDebugUnitTest --rerun-tasks \
       -x :app:generateOrcaFilamentAssets \
       -x :app:generateOrcaPrinterAssets \
       -x :app:generateOrcaSettingMetadata \
-      --tests 'com.mobileslicer.storage.PaintFullAppPathProofTest.nativePayloadSurvivesSavedProjectAndWritesReplayPayloadForNativeProof'
+      --tests 'com.mobileslicer.storage.PaintFullAppPathValidationTest.nativePayloadSurvivesSavedProjectAndWritesReplayPayloadForNativeValidation'
   )
   adb push "$app_replay_payload" "$device_replay_payload" >/dev/null
   adb shell "LD_LIBRARY_PATH=/data/local/tmp /data/local/tmp/orca_engine_v2_paint_replay_probe $DEVICE_MODEL $DEVICE_CONFIG $probe_mode $device_replay_payload" | tee "$output"
   grep -q 'result=v2_replay_changed_slice_output' "$output"
 }
 
-run_mode_proof support Support support paint-payload-mode-support-circle.json
-run_mode_proof seam Seam seam paint-payload-mode-seam-circle.json
-run_mode_proof color Color color paint-payload-mode-color-circle.json
-run_mode_proof fuzzy FuzzySkin fuzzy paint-payload-mode-fuzzy-circle.json
-run_mode_proof support_fill Support support paint-payload-mode-support-fill.json
-run_mode_proof color_fill Color color paint-payload-mode-color-fill.json
-run_mode_proof fuzzy_fill FuzzySkin fuzzy paint-payload-mode-fuzzy-fill.json
+run_mode_validation support Support support paint-payload-mode-support-circle.json
+run_mode_validation seam Seam seam paint-payload-mode-seam-circle.json
+run_mode_validation color Color color paint-payload-mode-color-circle.json
+run_mode_validation fuzzy FuzzySkin fuzzy paint-payload-mode-fuzzy-circle.json
+run_mode_validation support_fill Support support paint-payload-mode-support-fill.json
+run_mode_validation color_fill Color color paint-payload-mode-color-fill.json
+run_mode_validation fuzzy_fill FuzzySkin fuzzy paint-payload-mode-fuzzy-fill.json
 
 log "running focused mutation/cache/persistence regression tests"
 (cd "$APP_DIR" && ./gradlew :app:testDebugUnitTest \
@@ -142,5 +142,5 @@ log "running focused mutation/cache/persistence regression tests"
   --tests 'com.mobileslicer.storage.SavedProjectRepositoryTest' \
   --tests 'com.mobileslicer.NativeSliceConfigTest')
 
-log "full UI-created payload app-path proof passed for support, seam, color, fuzzy, support_fill, color_fill, and fuzzy_fill"
+log "full UI-created payload app-path validation passed for support, seam, color, fuzzy, support_fill, color_fill, and fuzzy_fill"
 log "artifacts: $WORK_DIR"
