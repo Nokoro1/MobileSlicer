@@ -420,7 +420,7 @@ private fun InfoSettingsSection(
             HorizontalDivider(color = outlineColor)
             LegalInfoRow(
                 title = "Source code",
-                value = "Source code and release license materials are provided with public MobileSlicer releases, including the corresponding source for AGPL-covered changes."
+                value = "Public source and release license materials are available at github.com/Nokoro1/MobileSlicer, including corresponding source for AGPL-covered changes."
             )
             HorizontalDivider(color = outlineColor)
             LegalInfoRow(
