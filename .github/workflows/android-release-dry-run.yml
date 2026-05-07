@@ -49,9 +49,9 @@ jobs:
         run: ./gradlew compileReleaseKotlin lintVitalRelease
 
       - name: Signed release artifact dry run
-        if: ${{ secrets.MOBILE_SLICER_RELEASE_KEYSTORE_BASE64 != '' }}
         working-directory: android-app
         env:
+          MOBILE_SLICER_RELEASE_KEYSTORE_BASE64: ${{ secrets.MOBILE_SLICER_RELEASE_KEYSTORE_BASE64 }}
           MOBILE_SLICER_RELEASE_STORE_FILE: ${{ runner.temp }}/mobileslicer-release.jks
           MOBILE_SLICER_RELEASE_STORE_PASSWORD: ${{ secrets.MOBILE_SLICER_RELEASE_STORE_PASSWORD }}
           MOBILE_SLICER_RELEASE_KEY_ALIAS: ${{ secrets.MOBILE_SLICER_RELEASE_KEY_ALIAS }}
@@ -59,11 +59,10 @@ jobs:
           MOBILE_SLICER_VERSION_CODE: ${{ github.run_number }}
           MOBILE_SLICER_VERSION_NAME: 0.1.0-rc.${{ github.run_number }}
         run: |
-          printf '%s' "${{ secrets.MOBILE_SLICER_RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > "$MOBILE_SLICER_RELEASE_STORE_FILE"
+          if [ -z "$MOBILE_SLICER_RELEASE_KEYSTORE_BASE64" ]; then
+            echo "Release signing secrets are not configured; compileReleaseKotlin and lintVitalRelease were run only."
+            echo "Configure MOBILE_SLICER_RELEASE_KEYSTORE_BASE64 and matching password/alias secrets before RC."
+            exit 0
+          fi
+          printf '%s' "$MOBILE_SLICER_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$MOBILE_SLICER_RELEASE_STORE_FILE"
           ./gradlew assembleRelease bundleRelease
-
-      - name: Unsigned environment note
-        if: ${{ secrets.MOBILE_SLICER_RELEASE_KEYSTORE_BASE64 == '' }}
-        run: |
-          echo "Release signing secrets are not configured; compileReleaseKotlin and lintVitalRelease were run only."
-          echo "Configure MOBILE_SLICER_RELEASE_KEYSTORE_BASE64 and matching password/alias secrets before RC."
