@@ -83,6 +83,32 @@ The only acceptable production path until those blockers are removed is:
 4. require desktop-Orca reference fixtures and timing gates before any renderer
    behavior is considered shippable.
 
+Current extraction probe:
+
+- `engine-wrapper/orca_thumbnail_render_contract_probe.cpp` is the first
+  non-shipping native extraction boundary.
+- It compiles as a standalone C++17 probe with
+  `MOBILE_SLICER_ORCA_THUMBNAIL_CONTRACT_PROBE_MAIN`.
+- It emits the extracted thumbnail role contract as JSON:
+  - `gcode`, `plate`, and `no_light` use angled iso behavior,
+  - `top` and `pick` use top-plate behavior,
+  - `no_light` and `pick` carry `ban_light`,
+  - `pick` carries `picking`,
+  - small-thumbnail supersampling limits match the Android policy.
+- It intentionally does not include or reference desktop renderer code in the
+  compiled body: no wxWidgets, `GUI_App`, `MainFrame`, `Plater`,
+  `GLCanvas3D`, `GLVolumeCollection`, `GLShaderProgram`, or
+  `OpenGLManager`.
+- `scripts/orca_thumbnail_extraction_probe_gate.py --pretty` compiles and runs
+  the probe, verifies the emitted contract against
+  `OrcaThumbnailRenderPolicy.kt`, and verifies the vendored Orca source still
+  exposes the thumbnail markers the contract is based on.
+- `scripts/verify_android.sh script-tests` now runs that gate.
+
+This is not yet a replacement renderer. It is the first shippable-quality
+constraint on the extraction path: if the contract changes, the gate fails
+before any Android thumbnail behavior can drift silently.
+
 Current implementation checkpoint:
 
 - `android-app/app/src/main/java/com/mobileslicer/workspace/OrcaThumbnailRenderPolicy.kt`

@@ -124,6 +124,15 @@ replaced. That keeps the project honest: current thumbnails are Orca-compatible
 and desktop-reference-gated, while implementation-identical Orca renderer
 parity remains a separate extraction task.
 
+The first native extraction probe now exists:
+`engine-wrapper/orca_thumbnail_render_contract_probe.cpp`. It is intentionally
+non-shipping and standalone. `scripts/orca_thumbnail_extraction_probe_gate.py`
+compiles it locally, runs it, verifies the emitted role/camera/supersampling
+contract against `OrcaThumbnailRenderPolicy.kt`, and checks the vendored Orca
+source still contains the role markers the contract depends on. This gives the
+renderer-port work a real buildable artifact without pretending full
+`GLCanvas3D` can be imported directly.
+
 ### Sliced 3MF Bbox JSON
 
 MobileSlicer now generates `PlateBBoxData` after native slicing and attaches it

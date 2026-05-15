@@ -466,6 +466,7 @@ run_script_tests() {
   (cd "$ROOT_DIR" && python3 scripts/test_orca_metadata_fixture_gate.py)
   (cd "$ROOT_DIR" && python3 scripts/test_orca_gcode_metadata_parity_audit.py)
   (cd "$ROOT_DIR" && python3 scripts/test_orca_thumbnail_port_audit.py)
+  (cd "$ROOT_DIR" && python3 scripts/orca_thumbnail_extraction_probe_gate.py --pretty >/dev/null)
   (cd "$ROOT_DIR" && python3 scripts/test_orca_thumbnail_visual_diff.py)
   (cd "$ROOT_DIR" && python3 scripts/test_orca_thumbnail_reference_fixture_audit.py)
   (cd "$ROOT_DIR" && python3 scripts/test_orca_3mf_project_preservation_audit.py)
