@@ -14,6 +14,7 @@ class NativeEngineBridge private constructor() {
         @JvmStatic external fun nativeClearGeneratedGcode(handle: Long)
         @JvmStatic external fun nativeLoadPlateModels(handle: Long, paths: Array<String>, transforms: DoubleArray, extruderIds: IntArray): Boolean
         @JvmStatic external fun nativeLoadPlateModelsV2(handle: Long, paths: Array<String>, transforms: DoubleArray, extruderIds: IntArray, mobileObjectIds: LongArray, paintPayloadJson: String): Boolean
+        @JvmStatic external fun nativeLoadPlateModelsV2WithSourcePaths(handle: Long, paths: Array<String>, sourcePaths: Array<String>, transforms: DoubleArray, extruderIds: IntArray, mobileObjectIds: LongArray, paintPayloadJson: String): Boolean
         @JvmStatic external fun nativeLoadProject3mf(handle: Long, path: String, mobileObjectIds: LongArray): Boolean
         @JvmStatic external fun nativeExtractModelMeshToStl(handle: Long, inputPath: String, outputStlPath: String): Boolean
         @JvmStatic external fun nativeConvertStepToStl(handle: Long, inputPath: String, outputStlPath: String, linearDeflection: Double, angleDeflection: Double): Boolean

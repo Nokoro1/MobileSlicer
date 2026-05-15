@@ -15,6 +15,7 @@ void orca_destroy(OrcaEngine* engine);
 int orca_load_model(OrcaEngine* engine, const char* path);
 int orca_load_plate_models(OrcaEngine* engine, const char* const* paths, const double* transforms, const int* extruder_ids, int count);
 int orca_load_plate_models_v2(OrcaEngine* engine, const char* const* paths, const double* transforms, int transform_stride, const int* extruder_ids, const long long* mobile_object_ids, const char* paint_payload_json, int count);
+int orca_load_plate_models_v3(OrcaEngine* engine, const char* const* paths, const char* const* source_paths, const double* transforms, int transform_stride, const int* extruder_ids, const long long* mobile_object_ids, const char* paint_payload_json, int count);
 int orca_load_project_3mf(OrcaEngine* engine, const char* path, const long long* mobile_object_ids, int count);
 int orca_prewarm_plate_planning_models(OrcaEngine* engine, const char* const* paths, int count);
 int orca_extract_model_mesh_to_stl(OrcaEngine* engine, const char* input_path, const char* output_stl_path);

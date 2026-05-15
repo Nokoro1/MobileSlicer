@@ -147,6 +147,7 @@ Usage:
   scripts/verify_android.sh orca-object-label-parity [serial]
   scripts/verify_android.sh orca-import-smoke [serial]
   scripts/verify_android.sh sliced-3mf-metadata [serial]
+  scripts/verify_android.sh step-sliced-3mf-source-metadata [serial]
   scripts/verify_android.sh multi-plate-sliced-3mf-metadata [serial]
   scripts/verify_android.sh skirt-parity [serial]
   scripts/verify_android.sh profile-ui [serial]
@@ -2940,6 +2941,35 @@ run_sliced_3mf_metadata_smoke() {
   assert_no_crash_after_launch "$serial"
 }
 
+run_step_sliced_3mf_source_metadata_smoke() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$STEP_IMPORT_SMOKE_MODEL" "STEP sliced 3MF source metadata smoke model"
+  install_apk "$serial"
+  local config_json
+  config_json="$(automation_config_with_overrides "thumbnails=\"128x128\"" "thumbnails_format=\"PNG\"")"
+  run_automation_slice "$STEP_IMPORT_SMOKE_MODEL" "$serial" "step-sliced-3mf-source-metadata" "0" "$config_json" "0" ".gcode.3mf"
+  assert_automation_thumbnail_scope "$serial" "step-sliced-3mf-source-metadata" "true" "5" "offscreen_egl"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local package_path="$tmp_dir/step-sliced-metadata.gcode.3mf"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$package_path"
+  log "Auditing STEP sliced 3MF source metadata package"
+  python3 "$ROOT_DIR/scripts/orca_3mf_project_preservation_audit.py" \
+    --three-mf "$package_path" \
+    --min-plate-count 1 \
+    --min-object-count 1 \
+    --require-object-names \
+    --require-project-thumbnails \
+    --require-plate-json-metadata \
+    --require-sliced-plate-gcode \
+    --require-project-settings \
+    --require-step-source \
+    --pretty
+  rm -rf "$tmp_dir"
+  assert_no_crash_after_launch "$serial"
+}
+
 run_multi_plate_sliced_3mf_metadata_smoke() {
   local serial="$1"
   require_device_automation
@@ -4429,6 +4459,9 @@ case "$mode" in
     ;;
   sliced-3mf-metadata)
     run_sliced_3mf_metadata_smoke "$(device_serial "${2:-}")"
+    ;;
+  step-sliced-3mf-source-metadata)
+    run_step_sliced_3mf_source_metadata_smoke "$(device_serial "${2:-}")"
     ;;
   multi-plate-sliced-3mf-metadata)
     run_multi_plate_sliced_3mf_metadata_smoke "$(device_serial "${2:-}")"

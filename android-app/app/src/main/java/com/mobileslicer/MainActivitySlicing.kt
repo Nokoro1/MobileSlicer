@@ -150,6 +150,7 @@ import com.mobileslicer.workspace.ModelImportTiming
 import com.mobileslicer.workspace.ModelLoadResult
 import com.mobileslicer.workspace.OffscreenEglSliceThumbnailRenderer
 import com.mobileslicer.workspace.PlateObject
+import com.mobileslicer.workspace.PlateObjectGeometrySource
 import com.mobileslicer.workspace.SlicePipelineTiming
 import com.mobileslicer.workspace.SliceResult
 import com.mobileslicer.workspace.WorkspacePreparationResult
@@ -177,6 +178,7 @@ import com.mobileslicer.workspace.writeTo
 
 private data class NativePlateLoadRequest(
     val paths: Array<String>,
+    val sourcePaths: Array<String>,
     val transforms: DoubleArray,
     val extruderIds: IntArray,
     val mobileObjectIds: LongArray,
@@ -198,6 +200,7 @@ private fun nativePlateLoadRequest(
     if (sliceObjects.size != plateObjects.size) return null
 
     val paths = Array(sliceObjects.size) { index -> sliceObjects[index].filePath }
+    val sourcePaths = Array(sliceObjects.size) { index -> sliceObjects[index].nativeSourceFilePath() }
     val transformStride = nativePlateTransformInputStride(sliceObjects.map { it.transform })
     val transforms = DoubleArray(sliceObjects.size * transformStride)
     val extruderIds = IntArray(sliceObjects.size)
@@ -221,8 +224,15 @@ private fun nativePlateLoadRequest(
         val paintHash = objectOnPlate.paint.paintHash().takeIf { it.isNotBlank() } ?: "none"
         "$index:id=${objectOnPlate.id}:${objectOnPlate.nativeSourceKey}:slot=$originalSlot:paint=$paintHash:${objectOnPlate.transform}"
     }.joinToString("|")
-    return NativePlateLoadRequest(paths, transforms, extruderIds, mobileObjectIds, paintPayloadJson, signature)
+    return NativePlateLoadRequest(paths, sourcePaths, transforms, extruderIds, mobileObjectIds, paintPayloadJson, signature)
 }
+
+private fun PlateObject.nativeSourceFilePath(): String =
+    when (val source = geometrySource) {
+        is PlateObjectGeometrySource.StepMeshConvert -> source.originalPath.takeIf { it.isNotBlank() } ?: filePath
+        is PlateObjectGeometrySource.ThreeMfMeshExtract -> source.originalPath.takeIf { it.isNotBlank() } ?: filePath
+        else -> filePath
+    }
 
 private fun nativeSlicePlateObjects(
     plateObjects: List<PlateObject>,
@@ -317,6 +327,7 @@ internal fun MainActivity.loadPlateObjectsIntoNativeCache(
     val loadResult = NativeEngineCalls.loadPlateModelsV2(
         handle = handle,
         paths = request.paths,
+        sourcePaths = request.sourcePaths,
         transforms = request.transforms,
         extruderIds = request.extruderIds,
         mobileObjectIds = request.mobileObjectIds,
@@ -708,6 +719,7 @@ internal fun MainActivity.sliceCurrentModel(
             val loadPlateResult = NativeEngineCalls.loadPlateModelsV2(
                 handle = handle,
                 paths = request.paths,
+                sourcePaths = request.sourcePaths,
                 transforms = request.transforms,
                 extruderIds = request.extruderIds,
                 mobileObjectIds = request.mobileObjectIds,

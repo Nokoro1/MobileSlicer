@@ -362,8 +362,13 @@ STEP_MODEL_SETTINGS_XML = """<?xml version="1.0" encoding="UTF-8"?>
   <object id="2">
     <metadata key="name" value="occt_screw"/>
     <metadata key="extruder" value="1"/>
-    <metadata key="source_file" value="occt_screw.step"/>
     <metadata key="wall_loops" value="5"/>
+    <part id="1" subtype="normal_part">
+      <metadata key="name" value="occt_screw"/>
+      <metadata key="source_file" value="occt_screw.step"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="0"/>
+    </part>
   </object>
   <plate>
     <metadata key="plater_id" value="1"/>

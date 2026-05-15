@@ -1045,9 +1045,10 @@ extern "C" const char* orca_get_last_cut_result_json(OrcaEngine* engine)
     return engine->impl.last_cut_result_json.empty() ? nullptr : engine->impl.last_cut_result_json.c_str();
 }
 
-extern "C" int orca_load_plate_models_v2(
+static int orca_load_plate_models_v2_internal(
     OrcaEngine* engine,
     const char* const* paths,
+    const char* const* source_paths,
     const double* transforms,
     int transform_stride,
     const int* extruder_ids,
@@ -1132,7 +1133,10 @@ extern "C" int orca_load_plate_models_v2(
                 }
                 const int combined_object_index = int(combined_model.objects.size()) - 1;
                 binding.model_object_indices.push_back(combined_object_index);
-                combined_object->input_file = path;
+                const char* source_path = (source_paths != nullptr && source_paths[index] != nullptr && source_paths[index][0] != '\0') ?
+                    source_paths[index] :
+                    path;
+                combined_object->input_file = source_path;
                 combined_object->config.set_key_value("extruder", new Slic3r::ConfigOptionInt(extruder_id));
                 combined_object->config.set_key_value("wall_filament", new Slic3r::ConfigOptionInt(extruder_id));
                 combined_object->config.set_key_value("sparse_infill_filament", new Slic3r::ConfigOptionInt(extruder_id));
@@ -1149,6 +1153,9 @@ extern "C" int orca_load_plate_models_v2(
                     volume->config.set_key_value("wall_filament", new Slic3r::ConfigOptionInt(extruder_id));
                     volume->config.set_key_value("sparse_infill_filament", new Slic3r::ConfigOptionInt(extruder_id));
                     volume->config.set_key_value("solid_infill_filament", new Slic3r::ConfigOptionInt(extruder_id));
+                    if (volume->type() == Slic3r::ModelVolumeType::MODEL_PART) {
+                        volume->source.input_file = source_path;
+                    }
                     binding.volume_triangle_counts.push_back(volume->mesh().empty() ? 0 : int(volume->mesh().facets_count()));
                     binding.volume_fingerprints.push_back(volume->mesh().empty() ? std::string{} : mobileslicer::orca_paint::mesh_fingerprint(volume->mesh()));
                     binding.volume_bounds.push_back(volume->mesh().empty() ? PaintVolumeBounds{} : native_volume_bounds(volume->mesh()));
@@ -1201,6 +1208,51 @@ extern "C" int orca_load_plate_models_v2(
         log_native_error("orca_load_plate_models_v2", "unknown exception");
         return ORCA_ERROR_LOAD_MODEL;
     }
+}
+
+extern "C" int orca_load_plate_models_v2(
+    OrcaEngine* engine,
+    const char* const* paths,
+    const double* transforms,
+    int transform_stride,
+    const int* extruder_ids,
+    const long long* mobile_object_ids,
+    const char* paint_payload_json,
+    int count)
+{
+    return orca_load_plate_models_v2_internal(
+        engine,
+        paths,
+        nullptr,
+        transforms,
+        transform_stride,
+        extruder_ids,
+        mobile_object_ids,
+        paint_payload_json,
+        count);
+}
+
+extern "C" int orca_load_plate_models_v3(
+    OrcaEngine* engine,
+    const char* const* paths,
+    const char* const* source_paths,
+    const double* transforms,
+    int transform_stride,
+    const int* extruder_ids,
+    const long long* mobile_object_ids,
+    const char* paint_payload_json,
+    int count)
+{
+    return orca_load_plate_models_v2_internal(
+        engine,
+        paths,
+        source_paths,
+        transforms,
+        transform_stride,
+        extruder_ids,
+        mobile_object_ids,
+        paint_payload_json,
+        count);
 }
 
 static std::optional<mobileslicer::orca_paint::PaintMode> paint_mode_from_int(int mode)

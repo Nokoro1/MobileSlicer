@@ -280,6 +280,8 @@ run_step "slice-regression" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY
 run_step "object-process" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" object-process "$SERIAL"
 run_step "orca-object-label-parity" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" orca-object-label-parity "$SERIAL"
 run_step "orca-import-smoke" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" orca-import-smoke "$SERIAL"
+run_step "orca-3mf-roundtrip-device" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" orca-3mf-roundtrip-device "$SERIAL"
+run_step "step-sliced-3mf-source-metadata" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" step-sliced-3mf-source-metadata "$SERIAL"
 run_step "egl-thumbnail-smoke" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" egl-thumbnail-smoke "$SERIAL"
 run_step "egl-slice-thumbnail-smoke" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" egl-slice-thumbnail-smoke "$SERIAL"
 run_step "orca-thumbnail-reference-fixtures" "$VERIFY_SCRIPT" orca-thumbnail-reference-fixtures

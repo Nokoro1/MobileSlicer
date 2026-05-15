@@ -114,3 +114,28 @@ The project preservation audit already has a `--require-step-source` switch for
 future app-produced STEP project packages. A valid STEP project package must
 preserve STEP/STP source-file evidence instead of only preserving the converted
 STL mesh.
+
+## Source Metadata In Sliced Packages
+
+STEP/STP slicing still uses the Orca-compatible tessellation model: the CAD file
+is converted to STL before native slicing. The native load path must therefore
+receive two paths for every object:
+
+- the mesh path used for slicing and arrangement
+- the original source path used for Orca `source_file` metadata
+
+MobileSlicer now sends both through the `nativeLoadPlateModelsV2WithSourcePaths`
+path. The native wrapper loads geometry from the mesh path, then restores the
+original source path on the `ModelObject` and model-part volume source metadata
+before exporting `.3mf`/`.gcode.3mf`. This keeps normal slice performance the
+same as the existing tessellated mesh path while preserving STEP/STP evidence in
+`Metadata/model_settings.config`.
+
+The device gate for this behavior is:
+
+```bash
+MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh step-sliced-3mf-source-metadata
+```
+
+Do not replace this with a pre-converted STL-only path. That would slice, but it
+would lose the source evidence needed for Orca-style project/package parity.

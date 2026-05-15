@@ -202,7 +202,9 @@ class ReleaseHardeningTest {
         assertTrue(verifyScript.contains("orca-import-3mf"))
         assertTrue(verifyScript.contains("orca-import-step"))
         assertTrue(verifyScript.contains("orca-3mf-roundtrip-device"))
+        assertTrue(verifyScript.contains("step-sliced-3mf-source-metadata"))
         assertTrue(releaseGate.contains("orca-3mf-roundtrip-device"))
+        assertTrue(releaseGate.contains("step-sliced-3mf-source-metadata"))
         assertTrue(verifyScript.contains("regression-fixtures/import/occt_screw.step"))
         assertTrue(releaseGate.contains("orca-import-smoke"))
         assertTrue(stepDoc.contains("orca-import-smoke"))
@@ -216,6 +218,8 @@ class ReleaseHardeningTest {
         assertTrue(runnerSource.contains("NativeEngineCalls.extractModelMeshToStl"))
         assertTrue(runnerSource.contains("NativeEngineCalls.convertStepToStl"))
         assertTrue(runnerSource.contains("AUTOMATION_STEP_LINEAR_DEFLECTION"))
+        assertTrue(runnerSource.contains("originalSourcePath"))
+        assertTrue(runnerSource.contains("sourcePaths = arrayOf(originalSourcePath)"))
         assertTrue(runnerSource.contains("EXTRA_PRESERVE_PROJECT_OBJECTS"))
         assertTrue(runnerSource.contains("EXTRA_EXPORT_PROJECT_3MF"))
         assertTrue(runnerSource.contains("runProject3mfRoundTripExport"))
@@ -224,6 +228,27 @@ class ReleaseHardeningTest {
         assertTrue(runnerSource.contains("sourceFormat == SourceModelFileFormat.ThreeMf"))
         assertTrue(runnerSource.contains("loadPaths = arrayOf(modelToLoad.absolutePath, modelToLoad.absolutePath)"))
         assertTrue(runnerSource.contains("loadPaths = arrayOf(modelToLoad.absolutePath)"))
+    }
+
+    @Test
+    fun convertedStepSourcePathSurvivesNativePlateLoadForProjectMetadata() {
+        val nativeBridge = File("src/main/java/com/mobileslicer/nativebridge/NativeEngineBridge.kt").readText()
+        val nativeHandle = File("src/main/java/com/mobileslicer/nativebridge/NativeEngineHandle.kt").readText()
+        val slicingSource = File("src/main/java/com/mobileslicer/MainActivitySlicing.kt").readText()
+        val jniSource = repoFile("android-app/app/src/main/cpp/jni_bridge.cpp").readText()
+        val wrapperHeader = repoFile("engine-wrapper/orca_wrapper.h").readText()
+        val paintCutSource = repoFile("engine-wrapper/orca_wrapper_paint_cut_api.cpp").readText()
+
+        assertTrue(nativeBridge.contains("nativeLoadPlateModelsV2WithSourcePaths"))
+        assertTrue(nativeHandle.contains("sourcePaths: Array<String>"))
+        assertTrue(slicingSource.contains("private fun PlateObject.nativeSourceFilePath()"))
+        assertTrue(slicingSource.contains("PlateObjectGeometrySource.StepMeshConvert"))
+        assertTrue(slicingSource.contains("sourcePaths = request.sourcePaths"))
+        assertTrue(jniSource.contains("Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadPlateModelsV2WithSourcePaths"))
+        assertTrue(wrapperHeader.contains("orca_load_plate_models_v3"))
+        assertTrue(paintCutSource.contains("const char* source_path"))
+        assertTrue(paintCutSource.contains("combined_object->input_file = source_path"))
+        assertTrue(paintCutSource.contains("volume->source.input_file = source_path"))
     }
 
     @Test

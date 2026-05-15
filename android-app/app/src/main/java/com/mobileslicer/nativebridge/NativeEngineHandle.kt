@@ -84,6 +84,45 @@ internal object NativeEngineCalls {
         }
     }
 
+    fun loadPlateModelsV2(
+        handle: NativeEngineHandle,
+        paths: Array<String>,
+        sourcePaths: Array<String>,
+        transforms: DoubleArray,
+        extruderIds: IntArray,
+        mobileObjectIds: LongArray,
+        paintPayloadJson: String
+    ): NativeEngineCallResult {
+        if (sourcePaths.size != paths.size) {
+            return NativeEngineCallResult.Failure(
+                operation = "nativeLoadPlateModelsV2WithSourcePaths",
+                error = null
+            )
+        }
+        return try {
+            booleanCall(handle, "nativeLoadPlateModelsV2WithSourcePaths") {
+                NativeEngineBridge.nativeLoadPlateModelsV2WithSourcePaths(
+                    handle.raw,
+                    paths,
+                    sourcePaths,
+                    transforms,
+                    extruderIds,
+                    mobileObjectIds,
+                    paintPayloadJson
+                )
+            }
+        } catch (error: UnsatisfiedLinkError) {
+            loadPlateModelsV2(
+                handle = handle,
+                paths = paths,
+                transforms = transforms,
+                extruderIds = extruderIds,
+                mobileObjectIds = mobileObjectIds,
+                paintPayloadJson = paintPayloadJson
+            )
+        }
+    }
+
     fun loadProject3mf(
         handle: NativeEngineHandle,
         path: String,

@@ -89,6 +89,13 @@ def child_metadata(element: ET.Element) -> dict[str, str]:
     return result
 
 
+def append_source_file_evidence(target: list[str], metadata: dict[str, str]) -> None:
+    for key in ("input_file", "source_file"):
+        value = metadata.get(key, "").strip()
+        if value and value not in target:
+            target.append(value)
+
+
 def iter_elements(root: ET.Element | None, name: str) -> list[ET.Element]:
     if root is None:
         return []
@@ -195,15 +202,13 @@ def inspect_3mf(path: Path) -> dict[str, object]:
         extruder = metadata.get("extruder", "").strip()
         if name and extruder.isdigit() and int(extruder) > 0:
             assignments.append(ObjectAssignment(object_name=name, filament_index=int(extruder)))
-        for key in ("input_file", "source_file"):
-            value = metadata.get(key, "").strip()
-            if value:
-                source_file_evidence.append(value)
+        append_source_file_evidence(source_file_evidence, metadata)
         for key, value in sorted(metadata.items()):
             if key not in STRUCTURAL_OBJECT_METADATA_KEYS:
                 object_settings.append(ObjectSettingEvidence(object_name=name or "<unnamed object>", key=key, value=value))
         for part in [child for child in list(object_element) if local_name(child.tag) == "part"]:
             part_metadata = child_metadata(part)
+            append_source_file_evidence(source_file_evidence, part_metadata)
             part_name = part_metadata.get("name", "").strip()
             subtype = part.attrib.get("subtype", "").strip()
             part_settings = [

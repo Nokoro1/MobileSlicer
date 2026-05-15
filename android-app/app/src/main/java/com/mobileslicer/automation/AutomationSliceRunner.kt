@@ -409,12 +409,17 @@ internal class AutomationSliceRunner(
             false
         )
         val loadPaths: Array<String>
+        val sourcePaths: Array<String>
         val loadTransforms: DoubleArray
         val extruderIds: IntArray
         val mobileObjectIds: LongArray
+        val originalSourcePath = stagedModel.absolutePath.takeIf {
+            sourceFormat == SourceModelFileFormat.Step || sourceFormat == SourceModelFileFormat.ThreeMf
+        } ?: modelToLoad.absolutePath
         if (twoFilamentObjects) {
             val spacingMm = 24.0
             loadPaths = arrayOf(modelToLoad.absolutePath, modelToLoad.absolutePath)
+            sourcePaths = arrayOf(originalSourcePath, originalSourcePath)
             loadTransforms = DoubleArray(NativeModelTransformInputStride * 2)
             placement.copy(xMm = placement.xMm - spacingMm / 2.0)
                 .writeTo(loadTransforms, offset = 0, stride = NativeModelTransformInputStride)
@@ -424,6 +429,7 @@ internal class AutomationSliceRunner(
             mobileObjectIds = longArrayOf(1L, 2L)
         } else {
             loadPaths = arrayOf(modelToLoad.absolutePath)
+            sourcePaths = arrayOf(originalSourcePath)
             loadTransforms = transforms
             extruderIds = intArrayOf(1)
             mobileObjectIds = longArrayOf(1L)
@@ -432,6 +438,7 @@ internal class AutomationSliceRunner(
         val loadResult = NativeEngineCalls.loadPlateModelsV2(
             handle = engineHandle,
             paths = loadPaths,
+            sourcePaths = sourcePaths,
             transforms = loadTransforms,
             extruderIds = extruderIds,
             mobileObjectIds = mobileObjectIds,
@@ -564,6 +571,7 @@ internal class AutomationSliceRunner(
                     val secondLoadResult = NativeEngineCalls.loadPlateModelsV2(
                         handle = engineHandle,
                         paths = arrayOf(modelToLoad.absolutePath),
+                        sourcePaths = arrayOf(originalSourcePath),
                         transforms = secondTransforms,
                         extruderIds = intArrayOf(1),
                         mobileObjectIds = longArrayOf(2L),
@@ -635,6 +643,7 @@ internal class AutomationSliceRunner(
                                     val combinedLoadResult = NativeEngineCalls.loadPlateModelsV2(
                                         handle = engineHandle,
                                         paths = arrayOf(modelToLoad.absolutePath, modelToLoad.absolutePath),
+                                        sourcePaths = arrayOf(originalSourcePath, originalSourcePath),
                                         transforms = finalTransforms,
                                         extruderIds = intArrayOf(1, 1),
                                         mobileObjectIds = longArrayOf(1L, 2L),

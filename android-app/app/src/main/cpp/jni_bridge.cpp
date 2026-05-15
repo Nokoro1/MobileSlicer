@@ -504,6 +504,66 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadPlateModelsV2(JN
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadPlateModelsV2WithSourcePaths(JNIEnv* env, jclass, jlong handle, jobjectArray paths, jobjectArray source_paths, jdoubleArray transforms, jintArray extruder_ids, jlongArray mobile_object_ids, jstring paint_payload_json)
+{
+    if (handle == 0 || paths == nullptr || source_paths == nullptr || transforms == nullptr || extruder_ids == nullptr || mobile_object_ids == nullptr || paint_payload_json == nullptr) {
+        return JNI_FALSE;
+    }
+
+    const jsize count = env->GetArrayLength(paths);
+    const jsize source_count = env->GetArrayLength(source_paths);
+    const jsize transform_count = env->GetArrayLength(transforms);
+    const jsize extruder_count = env->GetArrayLength(extruder_ids);
+    const jsize object_id_count = env->GetArrayLength(mobile_object_ids);
+    const jsize transform_stride = transform_count == count * 16 ? 16 : 7;
+    if (count <= 0 || source_count != count || (transform_count != count * 7 && transform_count != count * 16) || extruder_count != count || object_id_count != count) {
+        return JNI_FALSE;
+    }
+
+    JniStringArrayUtf raw_paths(env, paths, count);
+    if (!raw_paths.ok()) {
+        return JNI_FALSE;
+    }
+    JniStringArrayUtf raw_source_paths(env, source_paths, count);
+    if (!raw_source_paths.ok()) {
+        return JNI_FALSE;
+    }
+    JniDoubleArrayElements raw_transforms(env, transforms);
+    if (!raw_transforms.ok()) {
+        return JNI_FALSE;
+    }
+    JniIntArrayElements raw_extruder_ids(env, extruder_ids);
+    if (!raw_extruder_ids.ok()) {
+        return JNI_FALSE;
+    }
+    JniLongArrayElements raw_mobile_object_ids(env, mobile_object_ids);
+    if (!raw_mobile_object_ids.ok()) {
+        return JNI_FALSE;
+    }
+    JniUtfString raw_paint_payload(env, paint_payload_json);
+    if (!raw_paint_payload.ok()) {
+        return JNI_FALSE;
+    }
+
+    std::vector<int> extruder_ids_copy = raw_extruder_ids.copy(count);
+    std::vector<long long> mobile_object_ids_copy = raw_mobile_object_ids.copy(count);
+
+    const int result = orca_load_plate_models_v3(
+        engine_from_handle(handle),
+        raw_paths.data(),
+        raw_source_paths.data(),
+        raw_transforms.data(),
+        static_cast<int>(transform_stride),
+        extruder_ids_copy.data(),
+        mobile_object_ids_copy.data(),
+        raw_paint_payload.get(),
+        static_cast<int>(count)
+    );
+
+    return jni_bool_from_result(result);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeLoadProject3mf(JNIEnv* env, jclass, jlong handle, jstring path, jlongArray mobile_object_ids)
 {
     if (handle == 0 || path == nullptr || mobile_object_ids == nullptr) {
