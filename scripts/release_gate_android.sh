@@ -283,12 +283,13 @@ run_step "orca-import-smoke" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIF
 run_step "egl-thumbnail-smoke" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" egl-thumbnail-smoke "$SERIAL"
 run_step "egl-slice-thumbnail-smoke" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" egl-slice-thumbnail-smoke "$SERIAL"
 run_step "orca-thumbnail-reference-fixtures" "$VERIFY_SCRIPT" orca-thumbnail-reference-fixtures
+run_step "orca-project-parity-matrix" "$VERIFY_SCRIPT" orca-project-parity-matrix
 run_step "orca-thumbnail-reference-matrix" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$ROOT_DIR/scripts/run_orca_thumbnail_reference_matrix.sh" "$SERIAL"
 run_step "orca-gcode-metadata-parity" "$VERIFY_SCRIPT" orca-gcode-metadata-parity
 run_step "printer-thumbnail-compatibility" "$VERIFY_SCRIPT" printer-thumbnail-compatibility
 run_step "sliced-3mf-metadata" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" sliced-3mf-metadata "$SERIAL"
 run_step "multi-plate-sliced-3mf-metadata" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" multi-plate-sliced-3mf-metadata "$SERIAL"
-run_step "orca-3mf-roundtrip-device" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" orca-3mf-roundtrip-device "$SERIAL"
+run_step "orca-project-parity-device-matrix" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" orca-project-parity-device-matrix "$SERIAL"
 run_step "fluidd-thumbnail-metadata" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" fluidd-thumbnail-metadata "$SERIAL"
 run_step "device-idle-preflight" wait_for_device_idle
 run_step "perf-heavy" env \

@@ -313,8 +313,7 @@ only prove isolated export behavior.
 
 ### 5. Release Hygiene
 
-The worktree is large and dirty. Before claiming broad Orca support, keep these
-as mandatory gates:
+Before claiming broad Orca support, keep these as mandatory gates:
 
 - `scripts/verify_android.sh local`
 - `scripts/release_gate_android.sh <serial>` when device time allows
@@ -339,6 +338,12 @@ as mandatory gates:
 - `scripts/verify_android.sh orca-height-range-project-roundtrip-device <serial>`
 - `scripts/verify_android.sh orca-project-parity-device-matrix <serial>`
 - `git diff --check`
+
+The Android release gate now runs both `orca-project-parity-matrix` and the
+full `orca-project-parity-device-matrix <serial>` instead of only the base
+`orca-3mf-roundtrip-device` case. That means release validation covers the base
+package, rich object settings, modifier volumes/settings, and height ranges on
+device whenever device automation is available.
 
 ## Recommended Next Step
 
