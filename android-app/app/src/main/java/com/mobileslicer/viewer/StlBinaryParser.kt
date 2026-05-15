@@ -99,98 +99,115 @@ return BufferedInputStream(file.inputStream(), 1 shl 20).use { input ->
 }
 }
 
-internal fun parseBinaryForDisplay(file: File, maxDisplayTriangles: Int): PreparedViewerMesh {
-require(file.length() >= 84L) { "Binary STL too small." }
+internal fun parseBinaryForDisplay(file: File, maxPreviewMeshBytes: Long): PreparedViewerMesh {
+    require(file.length() >= 84L) { "Binary STL too small." }
 
-return BufferedInputStream(file.inputStream(), 1 shl 20).use { input ->
-    skipExactly(input, 80)
-    val triangleCount = readLittleEndianInt(input)
-    require(triangleCount in 1..STL_MAX_TRIANGLES) { "Binary STL triangle count is invalid." }
-    val expectedSize = 84L + triangleCount.toLong() * 50L
-    require(expectedSize == file.length()) { "Binary STL size does not match triangle count." }
-
-    if (triangleCount <= maxDisplayTriangles) {
-    return@use parseBinary(file).let { mesh ->
-        PreparedViewerMesh(
-        mesh = mesh,
-        sourceTriangleCount = triangleCount,
-        displayTriangleCount = triangleCount,
-        sourceBounds = mesh.bounds,
-        reducedForDisplay = false
-        )
+    val triangleCount = RandomAccessFile(file, "r").use { raf ->
+        raf.seek(80L)
+        val triangleCount = readLittleEndianInt(raf)
+        require(triangleCount in 1..STL_MAX_TRIANGLES) { "Binary STL triangle count is invalid." }
+        val expectedSize = 84L + triangleCount.toLong() * 50L
+        require(expectedSize == file.length()) { "Binary STL size does not match triangle count." }
+        triangleCount
     }
-    }
-
-    val displayTriangleCount = maxDisplayTriangles
-    val vertices = FloatArray(displayTriangleCount * 9)
-    val normals = FloatArray(displayTriangleCount * 9)
-    val triangleBytes = ByteArray(50)
-    val normal = FloatArray(3)
-    var displayVertexIndex = 0
-
-    var minX = Float.POSITIVE_INFINITY
-    var minY = Float.POSITIVE_INFINITY
-    var minZ = Float.POSITIVE_INFINITY
-    var maxX = Float.NEGATIVE_INFINITY
-    var maxY = Float.NEGATIVE_INFINITY
-    var maxZ = Float.NEGATIVE_INFINITY
-
-    repeat(triangleCount) { triangleIndex ->
-    readFully(input, triangleBytes, 0, triangleBytes.size)
-    normalizeNormal(
-        readLittleEndianFloat(triangleBytes, 0),
-        readLittleEndianFloat(triangleBytes, 4),
-        readLittleEndianFloat(triangleBytes, 8),
-        normal
-    )
-    val keepTriangle = shouldKeepDisplayTriangle(
-        triangleIndex = triangleIndex,
-        sourceTriangleCount = triangleCount,
-        displayTriangleBudget = maxDisplayTriangles
-    )
-
-    repeat(3) { vertexInTriangle ->
-        val base = 12 + vertexInTriangle * 12
-        val x = readLittleEndianFloat(triangleBytes, base)
-        val y = readLittleEndianFloat(triangleBytes, base + 4)
-        val z = readLittleEndianFloat(triangleBytes, base + 8)
-
-        minX = minOf(minX, x)
-        minY = minOf(minY, y)
-        minZ = minOf(minZ, z)
-        maxX = maxOf(maxX, x)
-        maxY = maxOf(maxY, y)
-        maxZ = maxOf(maxZ, z)
-
-        if (keepTriangle) {
-        vertices[displayVertexIndex] = x
-        normals[displayVertexIndex] = normal[0]
-        displayVertexIndex++
-        vertices[displayVertexIndex] = y
-        normals[displayVertexIndex] = normal[1]
-        displayVertexIndex++
-        vertices[displayVertexIndex] = z
-        normals[displayVertexIndex] = normal[2]
-        displayVertexIndex++
+    if (exactPreviewMeshByteSize(triangleCount) <= maxPreviewMeshBytes) {
+        return parseBinary(file).let { mesh ->
+            PreparedViewerMesh(
+                mesh = mesh,
+                sourceTriangleCount = triangleCount,
+                displayTriangleCount = triangleCount,
+                sourceBounds = mesh.bounds,
+                renderArrayBytes = mesh.exactPreviewMeshByteSize()
+            )
         }
     }
-    }
-
-    val sourceBounds = MeshBounds(minX, minY, minZ, maxX, maxY, maxZ)
-    val selectedTriangles = displayVertexIndex / 9
-    PreparedViewerMesh(
-    mesh = StlMesh(
-        vertices = vertices.copyOf(displayVertexIndex),
-        normals = normals.copyOf(displayVertexIndex),
-        triangleCount = selectedTriangles,
-        bounds = sourceBounds
-    ),
-    sourceTriangleCount = triangleCount,
-    displayTriangleCount = selectedTriangles,
-    sourceBounds = sourceBounds,
-    reducedForDisplay = true
-    )
+    return parseBinaryIndexedForDisplay(file, maxPreviewMeshBytes)
 }
+
+private fun parseBinaryIndexedForDisplay(file: File, maxPreviewMeshBytes: Long): PreparedViewerMesh {
+    return BufferedInputStream(file.inputStream(), 1 shl 20).use { input ->
+        skipExactly(input, 80)
+        val triangleCount = readLittleEndianInt(input)
+        require(triangleCount in 1..STL_MAX_TRIANGLES) { "Binary STL triangle count is invalid." }
+        val expectedSize = 84L + triangleCount.toLong() * 50L
+        require(expectedSize == file.length()) { "Binary STL size does not match triangle count." }
+
+        val vertices = FloatCollector(4096)
+        val indices = IntArray(triangleCount * 3)
+        val keyToIndex = VertexPositionIndexMap()
+        val triangleBytes = ByteArray(50)
+        val normal = FloatArray(3)
+        var indexOffset = 0
+        var minX = Float.POSITIVE_INFINITY
+        var minY = Float.POSITIVE_INFINITY
+        var minZ = Float.POSITIVE_INFINITY
+        var maxX = Float.NEGATIVE_INFINITY
+        var maxY = Float.NEGATIVE_INFINITY
+        var maxZ = Float.NEGATIVE_INFINITY
+
+        repeat(triangleCount) {
+            readFully(input, triangleBytes, 0, triangleBytes.size)
+            normalizeNormal(
+                readLittleEndianFloat(triangleBytes, 0),
+                readLittleEndianFloat(triangleBytes, 4),
+                readLittleEndianFloat(triangleBytes, 8),
+                normal
+            )
+            repeat(3) { vertexInTriangle ->
+                val base = 12 + vertexInTriangle * 12
+                val x = readLittleEndianFloat(triangleBytes, base)
+                val y = readLittleEndianFloat(triangleBytes, base + 4)
+                val z = readLittleEndianFloat(triangleBytes, base + 8)
+                minX = minOf(minX, x)
+                minY = minOf(minY, y)
+                minZ = minOf(minZ, z)
+                maxX = maxOf(maxX, x)
+                maxY = maxOf(maxY, y)
+                maxZ = maxOf(maxZ, z)
+
+                val vertexIndex = keyToIndex.getOrPut(x, y, z) {
+                    val nextIndex = vertices.size / 3
+                    vertices.append(x, y, z)
+                    val byteSize = exactFlatIndexedPreviewMeshByteSize(nextIndex + 1, indices.size)
+                    require(byteSize <= maxPreviewMeshBytes) {
+                        "STL is too large for exact workspace preview (${formatExactPreviewBytes(byteSize)} required, " +
+                            "${formatExactPreviewBytes(maxPreviewMeshBytes)} available)."
+                    }
+                    nextIndex
+                }
+                indices[indexOffset++] = vertexIndex
+            }
+        }
+        val mesh = StlMesh(
+            vertices = vertices.toFloatArray(),
+            normals = FloatArray(0),
+            triangleCount = triangleCount,
+            bounds = MeshBounds(minX, minY, minZ, maxX, maxY, maxZ),
+            indices = indices,
+            flatShaded = true
+        )
+        val renderBytes = mesh.exactPreviewMeshByteSize()
+        require(renderBytes <= maxPreviewMeshBytes) {
+            "STL is too large for exact workspace preview (${formatExactPreviewBytes(renderBytes)} required, " +
+                "${formatExactPreviewBytes(maxPreviewMeshBytes)} available)."
+        }
+        PreparedViewerMesh(
+            mesh = mesh,
+            sourceTriangleCount = triangleCount,
+            displayTriangleCount = triangleCount,
+            sourceBounds = mesh.bounds,
+            renderArrayBytes = renderBytes
+        )
+    }
+}
+
+internal fun formatExactPreviewBytes(bytes: Long): String {
+    val mib = bytes.toDouble() / (1024.0 * 1024.0)
+    return if (mib >= 10.0) {
+        "${mib.toInt()} MiB"
+    } else {
+        "${java.lang.String.format(java.util.Locale.US, "%.1f", mib)} MiB"
+    }
 }
 
 internal fun parseBinaryBounds(file: File): MeshBounds {

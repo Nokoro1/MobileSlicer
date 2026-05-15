@@ -15,12 +15,14 @@ import com.mobileslicer.printerconnection.SimplyPrintOAuthResult
 import com.mobileslicer.profiles.ProfileStore
 import com.mobileslicer.profiles.PrinterProfile
 import com.mobileslicer.profiles.ProfilesScreen
+import com.mobileslicer.scanner.ScannerScreen
 import com.mobileslicer.storage.SavedProject
 import com.mobileslicer.ui.theme.AccentPaletteOption
 import com.mobileslicer.ui.theme.ThemeModeOption
 import com.mobileslicer.ui.theme.WorldViewColorOption
 import com.mobileslicer.viewer.GcodePreviewPerformanceMode
 import com.mobileslicer.workspace.AppScreen
+import com.mobileslicer.workspace.ModelLoadResult
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -105,6 +107,19 @@ internal fun ModelLoaderIncompleteProfileGate(
                 modifier = Modifier.padding(innerPadding)
             )
 
+            AppScreen.Scanner -> ScannerScreen(
+                onBack = { onCurrentScreenChanged(AppScreen.Home) },
+                onWorkspaceImportRequested = {
+                    ModelLoadResult(
+                        message = "Scanner workspace import requires a selected printer, filament, and process.",
+                        loaded = false
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+
             else -> ModelLoaderHomeScreen(
                 importedModel = currentModelLabel,
                 printerTitle = profileStore.printers.firstOrNull { it.id == profileStore.selectedPrinterId }?.name
@@ -121,6 +136,15 @@ internal fun ModelLoaderIncompleteProfileGate(
                         profileStore.profileRequirementMessage()
                             ?: "Select a printer, filament, and process before importing a model."
                     )
+                },
+                onFindAndImportModel = {
+                    onMissingProfileMessage(
+                        profileStore.profileRequirementMessage()
+                            ?: "Select a printer, filament, and process before finding a model."
+                    )
+                },
+                onScannerClick = {
+                    onCurrentScreenChanged(AppScreen.Scanner)
                 },
                 onCalibrationsClick = {
                     onMissingProfileMessage(

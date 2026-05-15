@@ -1,0 +1,137 @@
+{
+  "filament_profile": "red PLA, blue PLA",
+  "model": "two generated probe cubes",
+  "notes": "",
+  "orca_build": "OrcaSlicer-2.4.0-dev:",
+  "package_metadata": {
+    "model_object_extruders": [
+      "1",
+      "2"
+    ],
+    "plate_json_filament_colors": [
+      "#F2754E",
+      "#4EA3F2"
+    ],
+    "plate_json_filament_ids": [
+      "0",
+      "1"
+    ],
+    "slice_info_filament_colors": [
+      "#F2754E",
+      "#4EA3F2"
+    ],
+    "slice_info_filament_ids": [
+      "1",
+      "2"
+    ],
+    "slice_info_filament_maps": [
+      "1 2"
+    ]
+  },
+  "printer_profile": "Bambu Lab H2D 0.4 nozzle",
+  "process_profile": "0.20mm Standard",
+  "requirements": {
+    "active_filaments": 2
+  },
+  "roles": [
+    {
+      "metrics": {
+        "alpha_coverage": 0.5315399169921875,
+        "average_luma": 107.62328545131584,
+        "bbox": [
+          17,
+          13,
+          494,
+          498
+        ],
+        "bit_depth": 8,
+        "color_type": 6,
+        "height": 512,
+        "nontransparent_pixels": 139340,
+        "pixels": 262144,
+        "transparent_pixels": 122804,
+        "unique_rgba": 6,
+        "width": 512
+      },
+      "output_file": "plate.png",
+      "role": "plate",
+      "source_entry": "Metadata/plate_1.png"
+    },
+    {
+      "metrics": {
+        "alpha_coverage": 0.5315399169921875,
+        "average_luma": 145.24115115218146,
+        "bbox": [
+          17,
+          13,
+          494,
+          498
+        ],
+        "bit_depth": 8,
+        "color_type": 6,
+        "height": 512,
+        "nontransparent_pixels": 139340,
+        "pixels": 262144,
+        "transparent_pixels": 122804,
+        "unique_rgba": 2,
+        "width": 512
+      },
+      "output_file": "no_light.png",
+      "role": "no_light",
+      "source_entry": "Metadata/plate_no_light_1.png"
+    },
+    {
+      "metrics": {
+        "alpha_coverage": 0.0016021728515625,
+        "average_luma": 129.76879999999846,
+        "bbox": [
+          249,
+          240,
+          262,
+          271
+        ],
+        "bit_depth": 8,
+        "color_type": 6,
+        "height": 512,
+        "nontransparent_pixels": 420,
+        "pixels": 262144,
+        "transparent_pixels": 261724,
+        "unique_rgba": 2,
+        "width": 512
+      },
+      "output_file": "top.png",
+      "role": "top",
+      "source_entry": "Metadata/top_1.png"
+    },
+    {
+      "metrics": {
+        "alpha_coverage": 0.0016021728515625,
+        "average_luma": 9.992199999999999,
+        "bbox": [
+          249,
+          240,
+          262,
+          271
+        ],
+        "bit_depth": 8,
+        "color_type": 6,
+        "height": 512,
+        "nontransparent_pixels": 420,
+        "pixels": 262144,
+        "transparent_pixels": 261724,
+        "unique_rgba": 2,
+        "width": 512
+      },
+      "output_file": "pick.png",
+      "role": "pick",
+      "source_entry": "Metadata/pick_1.png"
+    }
+  ],
+  "schema_version": 1,
+  "source_3mf": "h2d-direct-two-filament-objects.gcode.3mf",
+  "source_colors": [
+    "#F2754E",
+    "#4EA3F2"
+  ],
+  "source_layout": "two_filament_objects"
+}

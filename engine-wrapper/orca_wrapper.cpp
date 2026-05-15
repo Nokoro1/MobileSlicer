@@ -56,6 +56,8 @@ extern "C" int orca_load_model(OrcaEngine* engine, const char* path)
         }
 
         engine->impl.model = std::move(model);
+        engine->impl.imported_project_plate_data.clear();
+        engine->impl.imported_project_config.reset();
         ++engine->impl.model_generation;
         engine->impl.paint_object_bindings.clear();
         invalidate_paint_session_unlocked(engine);
@@ -75,6 +77,74 @@ extern "C" int orca_load_model(OrcaEngine* engine, const char* path)
 extern "C" void orca_clear_generated_gcode(OrcaEngine* engine)
 {
     clear_generated_gcode(engine);
+}
+
+static bool validate_binary_stl_output(const char* path, size_t expected_min_facets, std::string& error)
+{
+    if (path == nullptr || path[0] == '\0') {
+        error = "converted STEP output path is empty";
+        return false;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path output_path(path);
+    if (!std::filesystem::is_regular_file(output_path, ec)) {
+        error = "converted STEP STL was not written";
+        return false;
+    }
+
+    const auto file_size = std::filesystem::file_size(output_path, ec);
+    if (ec) {
+        error = "converted STEP STL size could not be read";
+        return false;
+    }
+    if (file_size < 84) {
+        error = "converted STEP STL is too small to contain binary STL geometry";
+        return false;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        error = "converted STEP STL could not be reopened";
+        return false;
+    }
+
+    input.seekg(80, std::ios::beg);
+    unsigned char facet_count_bytes[4] = {0, 0, 0, 0};
+    input.read(reinterpret_cast<char*>(facet_count_bytes), sizeof(facet_count_bytes));
+    if (input.gcount() != static_cast<std::streamsize>(sizeof(facet_count_bytes))) {
+        error = "converted STEP STL triangle count could not be read";
+        return false;
+    }
+
+    const std::uint32_t written_facets =
+        static_cast<std::uint32_t>(facet_count_bytes[0]) |
+        (static_cast<std::uint32_t>(facet_count_bytes[1]) << 8) |
+        (static_cast<std::uint32_t>(facet_count_bytes[2]) << 16) |
+        (static_cast<std::uint32_t>(facet_count_bytes[3]) << 24);
+    if (written_facets == 0) {
+        error = "converted STEP STL contains zero triangles";
+        return false;
+    }
+    if (expected_min_facets > 0 && written_facets < expected_min_facets) {
+        std::ostringstream message;
+        message << "converted STEP STL lost triangles while writing: expected at least "
+                << expected_min_facets << ", wrote " << written_facets;
+        error = message.str();
+        return false;
+    }
+
+    const std::uint64_t expected_size = 84ULL + static_cast<std::uint64_t>(written_facets) * 50ULL;
+    if (file_size != expected_size) {
+        std::ostringstream message;
+        message << "converted STEP STL has invalid binary size: expected "
+                << expected_size << " bytes for " << written_facets
+                << " triangles, got " << file_size;
+        error = message.str();
+        return false;
+    }
+
+    return true;
 }
 
 static std::string split_filesystem_safe_slug(std::string value)
@@ -226,6 +296,84 @@ extern "C" int orca_extract_model_mesh_to_stl(OrcaEngine* engine, const char* in
         log_native_error("orca_extract_model_mesh_to_stl", "unknown exception");
         return ORCA_ERROR_LOAD_MODEL;
     }
+}
+
+extern "C" int orca_convert_step_to_stl(
+    OrcaEngine* engine,
+    const char* input_path,
+    const char* output_stl_path,
+    double linear_deflection,
+    double angle_deflection)
+{
+    if (engine == nullptr ||
+        input_path == nullptr ||
+        input_path[0] == '\0' ||
+        output_stl_path == nullptr ||
+        output_stl_path[0] == '\0' ||
+        linear_deflection <= 0.0 ||
+        angle_deflection <= 0.0) {
+        return ORCA_ERROR_INVALID_ARGUMENT;
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(engine->impl.mutex);
+    clear_last_error(engine);
+
+#if defined(ORCA_ANDROID_REAL_STEP)
+    try {
+        Slic3r::Model model;
+        bool cancel = false;
+        Slic3r::Step step_file{std::string(input_path)};
+        const bool loaded = step_file.load() == Slic3r::Step::Step_Status::LOAD_SUCCESS;
+        const bool meshed = loaded &&
+            step_file.mesh(&model, cancel, false, linear_deflection, angle_deflection) ==
+                Slic3r::Step::Step_Status::MESH_SUCCESS;
+        if (cancel) {
+            set_last_error(engine, "STEP import was cancelled");
+            return ORCA_ERROR_LOAD_MODEL;
+        }
+        if (!loaded || !meshed || model.objects.empty()) {
+            set_last_error(engine, "STEP import produced no printable mesh geometry");
+            return ORCA_ERROR_LOAD_MODEL;
+        }
+        size_t facet_count = 0;
+        for (Slic3r::ModelObject* object : model.objects) {
+            if (object == nullptr) {
+                continue;
+            }
+            const Slic3r::TriangleMesh raw_mesh = object->raw_mesh();
+            facet_count += raw_mesh.facets_count();
+            if (object->instances.empty() && !raw_mesh.empty()) {
+                object->add_instance();
+            }
+        }
+        if (facet_count == 0) {
+            set_last_error(engine, "STEP import produced no triangulated facets");
+            return ORCA_ERROR_LOAD_MODEL;
+        }
+        if (!Slic3r::store_stl(output_stl_path, &model, true)) {
+            set_last_error(engine, "failed to write converted STEP mesh as STL");
+            return ORCA_ERROR_LOAD_MODEL;
+        }
+        std::string validation_error;
+        if (!validate_binary_stl_output(output_stl_path, facet_count, validation_error)) {
+            set_last_error(engine, validation_error);
+            return ORCA_ERROR_LOAD_MODEL;
+        }
+        clear_last_error(engine);
+        return ORCA_SUCCESS;
+    } catch (const std::exception& exception) {
+        set_last_error(engine, exception.what());
+        log_native_error("orca_convert_step_to_stl", exception.what());
+        return ORCA_ERROR_LOAD_MODEL;
+    } catch (...) {
+        set_last_error(engine, "unknown exception");
+        log_native_error("orca_convert_step_to_stl", "unknown exception");
+        return ORCA_ERROR_LOAD_MODEL;
+    }
+#else
+    set_last_error(engine, "STEP import requires the OCCT-backed Android STEP importer; rebuild with ORCA_ANDROID_REAL_STEP.");
+    return ORCA_ERROR_LOAD_MODEL;
+#endif
 }
 
 extern "C" int orca_split_model_mesh_to_stls(OrcaEngine* engine, const char* input_path, const char* output_directory, int split_mode)
@@ -445,6 +593,14 @@ extern "C" int orca_load_project_3mf(OrcaEngine* engine, const char* path, const
         }
 
         engine->impl.model = std::move(model);
+        engine->impl.imported_project_config = config;
+        engine->impl.imported_project_plate_data.clear();
+        engine->impl.imported_project_plate_data.reserve(plate_data_list.size());
+        for (const Slic3r::PlateData* plate_data : plate_data_list) {
+            if (plate_data != nullptr) {
+                engine->impl.imported_project_plate_data.push_back(*plate_data);
+            }
+        }
         ++engine->impl.model_generation;
         rebuild_paint_bindings_unlocked(engine, mobile_object_ids, count);
         invalidate_paint_session_unlocked(engine);
@@ -588,6 +744,8 @@ extern "C" int orca_load_plate_models(OrcaEngine* engine, const char* const* pat
         }
 
         engine->impl.model = std::move(combined_model);
+        engine->impl.imported_project_plate_data.clear();
+        engine->impl.imported_project_config.reset();
         ++engine->impl.model_generation;
         engine->impl.paint_object_bindings.clear();
         invalidate_paint_session_unlocked(engine);

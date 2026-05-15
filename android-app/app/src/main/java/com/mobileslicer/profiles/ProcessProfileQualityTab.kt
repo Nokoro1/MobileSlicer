@@ -82,8 +82,6 @@ internal fun ProcessQualityTabContent(
     onSliceClosingRadiusChange: (String) -> Unit,
     applyTopSurfaceCompensation: Boolean,
     onApplyTopSurfaceCompensationChange: (Boolean) -> Unit,
-    adaptiveLayerHeight: Boolean,
-    onAdaptiveLayerHeightChange: (Boolean) -> Unit,
     resolution: String,
     onResolutionChange: (String) -> Unit,
     enableArcFitting: Boolean,
@@ -271,6 +269,12 @@ internal fun ProcessQualityTabContent(
             ProfileTextField(seamScarfSteps, onSeamScarfStepsChange, "Scarf steps", KeyboardType.Number)
             ProfileTextField(scarfJointFlowRatio, onScarfJointFlowRatioChange, "Scarf joint flow ratio", KeyboardType.Decimal)
             ProfileDropdownField(
+                label = "Scarf joint seam",
+                selectedLabel = if (hasScarfJointSeam) "Enabled" else "Disabled",
+                options = boolEnabledDisabledOptions,
+                onSelected = onHasScarfJointSeamChange
+            )
+            ProfileDropdownField(
                 label = "Scarf joint for inner walls",
                 selectedLabel = if (seamScarfInnerWalls) "Enabled" else "Disabled",
                 options = boolEnabledDisabledOptions,
@@ -326,6 +330,12 @@ internal fun ProcessQualityTabContent(
                 selectedLabel = if (preciseZHeight) "Enabled" else "Disabled",
                 options = boolEnabledDisabledOptions,
                 onSelected = onPreciseZHeightChange
+            )
+            ProfileDropdownField(
+                label = "Top surface compensation",
+                selectedLabel = if (applyTopSurfaceCompensation) "Enabled" else "Disabled",
+                options = boolEnabledDisabledOptions,
+                onSelected = onApplyTopSurfaceCompensationChange
             )
             ProfileDropdownField(
                 label = "Convert holes to polyholes",

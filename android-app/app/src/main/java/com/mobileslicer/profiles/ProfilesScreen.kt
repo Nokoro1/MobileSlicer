@@ -164,8 +164,25 @@ internal fun ProfilesScreen(
     onBrowsePrinterConnectionGroups: suspend (PrinterProfile) -> PrinterConnectionChoicesResult,
     onSimplyPrintLogin: suspend (PrinterProfile) -> SimplyPrintOAuthResult,
     onOpenPrinterUi: (PrinterProfile) -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    workspaceProcessMode: Boolean = false,
+    workspaceProcess: ProcessProfile? = null,
+    workspaceHasProcessOverrides: Boolean = false,
+    objectProcessMode: Boolean = false,
+    objectProcessLabel: String? = null,
+    objectProcessScopeLabel: String = "Object",
+    objectProcess: ProcessProfile? = null,
+    objectHasProcessOverrides: Boolean = false,
+    objectHasProcessState: Boolean = false,
+    onWorkspaceProcessSelected: ((ProcessProfile) -> Unit)? = null,
+    onWorkspaceProcessTransferred: ((ProcessProfile) -> Unit)? = null,
+    onWorkspaceProcessApplied: ((ProcessProfile) -> Unit)? = null,
+    onWorkspaceProcessSaved: ((ProcessProfile) -> Unit)? = null,
+    onObjectProcessSelected: ((ProcessProfile) -> Unit)? = null,
+    onObjectProcessApplied: ((ProcessProfile) -> Unit)? = null,
+    onObjectProcessSaved: ((ProcessProfile) -> Unit)? = null,
+    onObjectProcessReset: (() -> Unit)? = null,
+    onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val titleColor = appTitleColor()
@@ -197,7 +214,10 @@ internal fun ProfilesScreen(
         return printer to processes
     }
 
-    var selectedTab by rememberSaveable { mutableIntStateOf(ProfileTab.Printer.ordinal) }
+    val scopedProcessMode = workspaceProcessMode || objectProcessMode
+    var selectedTab by rememberSaveable(scopedProcessMode) {
+        mutableIntStateOf(if (scopedProcessMode) ProfileTab.Process.ordinal else ProfileTab.Printer.ordinal)
+    }
     var editorRequest by remember { mutableStateOf<ProfileEditorRequest?>(null) }
     var deleteRequest by remember { mutableStateOf<ProfileDeleteRequest?>(null) }
     var showingPrinterSelection by rememberSaveable { mutableStateOf(false) }
@@ -581,14 +601,42 @@ internal fun ProfilesScreen(
                 initial = request.profile,
                 isNew = request.isNew,
                 showAdvancedProfileSettings = showAdvancedProfileSettings,
+                editorContextLabel = request.objectLabel?.let { label ->
+                    "${request.processScopeLabel ?: "Object"}: $label"
+                },
+                saveLabelOverride = when {
+                    request.objectProcessMode -> "Apply to ${(request.processScopeLabel ?: "Object").lowercase()}"
+                    request.workspaceProcessMode -> "Apply to plate"
+                    else -> null
+                },
+                secondarySaveLabel = if (request.workspaceProcessMode || request.objectProcessMode) "Save preset" else null,
                 onDismiss = { editorRequest = null },
                 onSave = { saved ->
-                    updateStore {
-                        val nextProfiles = it.processes.upsert(saved)
-                        it.copy(processes = nextProfiles, selectedProcessId = saved.id)
-                            .withSelectedProcessForCurrentPrinter(saved.id)
+                    if (request.objectProcessMode && onObjectProcessApplied != null) {
+                        onObjectProcessApplied(saved)
+                    } else if (request.workspaceProcessMode && onWorkspaceProcessApplied != null) {
+                        onWorkspaceProcessApplied(saved)
+                    } else {
+                        updateStore {
+                            val nextProfiles = it.processes.upsert(saved)
+                            it.copy(processes = nextProfiles, selectedProcessId = saved.id)
+                                .withSelectedProcessForCurrentPrinter(saved.id)
+                        }
                     }
                     editorRequest = null
+                },
+                onSecondarySave = if (request.objectProcessMode && onObjectProcessSaved != null) {
+                    { saved ->
+                        onObjectProcessSaved(saved)
+                        editorRequest = null
+                    }
+                } else if (request.workspaceProcessMode && onWorkspaceProcessSaved != null) {
+                    { saved ->
+                        onWorkspaceProcessSaved(saved)
+                        editorRequest = null
+                    }
+                } else {
+                    null
                 }
             )
             return
@@ -816,7 +864,20 @@ internal fun ProfilesScreen(
                 onShowFilamentSelection = { showingFilamentSelection = true },
                 onShowProcessSelection = { showingProcessSelection = true },
                 onEditorRequest = { editorRequest = it },
-                onDeleteRequest = { deleteRequest = it }
+                onDeleteRequest = { deleteRequest = it },
+                workspaceProcessMode = workspaceProcessMode,
+                workspaceProcess = workspaceProcess,
+                workspaceHasProcessOverrides = workspaceHasProcessOverrides,
+                objectProcessMode = objectProcessMode,
+                objectProcessLabel = objectProcessLabel,
+                objectProcessScopeLabel = objectProcessScopeLabel,
+                objectProcess = objectProcess,
+                objectHasProcessOverrides = objectHasProcessOverrides,
+                objectHasProcessState = objectHasProcessState,
+                onWorkspaceProcessSelected = onWorkspaceProcessSelected,
+                onWorkspaceProcessTransferred = onWorkspaceProcessTransferred,
+                onObjectProcessSelected = onObjectProcessSelected,
+                onObjectProcessReset = onObjectProcessReset
             )
         }
     }

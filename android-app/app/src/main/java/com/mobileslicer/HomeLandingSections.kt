@@ -266,17 +266,18 @@ internal fun TopBarSettingsButton(
 internal fun HeroImportCard(
     importedModel: String,
     importInProgress: Boolean,
-    onSelectModel: () -> Unit
+    onSelectModel: () -> Unit,
+    onFindAndImportModel: () -> Unit,
+    onScannerClick: () -> Unit
 ) {
     LandingIsland(
-        title = "Import an STL or 3MF",
+        title = "Import an STL, 3MF, STEP, or STP",
         body = "Choose a model from your device, then prepare it on the bed before slicing.",
-        footer = "Current model: $importedModel",
         compact = true
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SoftPill(label = "File Manager")
-            SoftPill(label = "STL / 3MF")
+            SoftPill(label = "STL / 3MF / STEP")
         }
         Button(
             onClick = onSelectModel,
@@ -293,6 +294,26 @@ internal fun HeroImportCard(
                     else -> "Open model"
                 }
             )
+        }
+        FilledTonalButton(
+            onClick = onFindAndImportModel,
+            enabled = !importInProgress,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Text("Find and import model")
+        }
+        FilledTonalButton(
+            onClick = onScannerClick,
+            enabled = !importInProgress,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Text("Open Model Scanner")
         }
     }
 }
@@ -498,7 +519,7 @@ internal fun SavedProjectThumbnail(project: SavedProject) {
 internal fun LandingIsland(
     title: String,
     body: String,
-    footer: String,
+    footer: String? = null,
     compact: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -540,11 +561,13 @@ internal fun LandingIsland(
                     color = bodyColor
                 )
                 content()
-                Text(
-                    text = footer,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = bodyColor
-                )
+                if (!footer.isNullOrBlank()) {
+                    Text(
+                        text = footer,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = bodyColor
+                    )
+                }
             })
         }
     }

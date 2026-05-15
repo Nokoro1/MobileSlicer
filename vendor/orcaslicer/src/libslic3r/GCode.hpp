@@ -381,7 +381,8 @@ private:
     void check_placeholder_parser_failed();
     size_t get_extruder_id(unsigned int filament_id) const;
 
-    void            set_last_pos(const Point &pos) { m_last_pos = pos; m_last_pos_defined = true; }
+    void            set_last_pos(const Point &pos);
+    void            clear_last_pos() { m_last_pos_defined = false; }
     bool            last_pos_defined() const { return m_last_pos_defined; }
     void            set_extruders(const std::vector<unsigned int> &extruder_ids);
     std::string     preamble();

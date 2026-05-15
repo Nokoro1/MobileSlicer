@@ -116,7 +116,7 @@ internal fun rememberWorkspaceSceneState(
     fun plateObjectFilamentColor(objectOnPlate: PlateObject): Int? =
         filamentSlotsByIndex[objectOnPlate.filamentSlotIndex]?.colorHex
             ?.let { slotColor(it).toArgb() }
-    val viewerPlateObjects = visiblePlateObjects.mapNotNull { objectOnPlate ->
+    val modelViewerObjects = visiblePlateObjects.mapNotNull { objectOnPlate ->
         objectOnPlate.mesh?.let { mesh ->
             ViewerPlateObject(
                 id = objectOnPlate.id,
@@ -132,7 +132,27 @@ internal fun rememberWorkspaceSceneState(
                 movable = canDragSelectedPlateObject && objectOnPlate.id == selectedPlateObject?.id
             )
         }
-    } + listOfNotNull(primeTowerViewerState.viewerObject)
+    }
+    val modifierViewerObjects = if (paintModeActive) {
+        emptyList()
+    } else {
+        visiblePlateObjects.flatMap { objectOnPlate ->
+            objectOnPlate.modifiers.mapNotNull { modifier ->
+                val mesh = modifier.mesh ?: return@mapNotNull null
+                if (!modifier.enabled) return@mapNotNull null
+                ViewerPlateObject(
+                    id = modifierViewerObjectId(objectOnPlate.id, modifier.id),
+                    label = modifier.label,
+                    mesh = mesh,
+                    transform = modifier.transform,
+                    colorInt = 0xFF7DB7FF.toInt(),
+                    selected = !primeTowerSelected && objectOnPlate.id == selectedPlateObject?.id,
+                    movable = canDragSelectedPlateObject && objectOnPlate.id == selectedPlateObject?.id
+                )
+            }
+        }
+    }
+    val viewerPlateObjects = modelViewerObjects + modifierViewerObjects + listOfNotNull(primeTowerViewerState.viewerObject)
     val viewerState = when {
         modelFormat == ImportedModelFormat.ThreeMf -> WorkspaceViewerState.Unsupported
         !modelLoaded || modelFilePath == null -> WorkspaceViewerState.Empty
@@ -143,7 +163,11 @@ internal fun rememberWorkspaceSceneState(
         selectedPlateObject?.mesh != null -> WorkspaceViewerState.Loaded(selectedPlateObject.mesh)
         preparedMesh != null -> WorkspaceViewerState.Loaded(preparedMesh)
         !viewerPreparationError.isNullOrBlank() -> WorkspaceViewerState.Error(
-            title = "STL parse failed",
+            title = if (viewerPreparationError.contains("exact workspace preview", ignoreCase = true)) {
+                "Exact STL preview skipped"
+            } else {
+                "STL parse failed"
+            },
             message = viewerPreparationError
         )
         else -> WorkspaceViewerState.Preparing

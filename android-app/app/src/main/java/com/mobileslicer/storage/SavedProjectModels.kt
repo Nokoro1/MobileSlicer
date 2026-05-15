@@ -4,12 +4,20 @@ import android.content.SharedPreferences
 import com.mobileslicer.profiles.ProfileStore
 import com.mobileslicer.profiles.toJsonObject
 import com.mobileslicer.profiles.toProfileStoreOrDefault
+import com.mobileslicer.profiles.toJson
+import com.mobileslicer.profiles.toProcessProfile
 import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateFlushVolumes
+import com.mobileslicer.workspace.PlateProfileState
 import com.mobileslicer.workspace.PaintMode
 import com.mobileslicer.workspace.ImportedModelFormat
 import com.mobileslicer.workspace.PlateObjectPaint
 import com.mobileslicer.workspace.PlateObjectGeometrySource
+import com.mobileslicer.workspace.PlateObjectModifierMesh
+import com.mobileslicer.workspace.PlateObjectProcessOverride
+import com.mobileslicer.workspace.ThreeMfObjectFilamentAssignment
+import com.mobileslicer.workspace.ThreeMfProjectMetadata
+import com.mobileslicer.workspace.WorkspaceModelAttribution
 import com.mobileslicer.workspace.defaultWorkspacePlateLabel
 import com.mobileslicer.workspace.SerializedPaintLayer
 import com.mobileslicer.workspace.SerializedPaintTriangle
@@ -36,7 +44,8 @@ internal data class SavedProject(
 
 internal data class SavedProjectPlate(
     val label: String,
-    val plateObjects: List<SavedProjectPlateObject>
+    val plateObjects: List<SavedProjectPlateObject>,
+    val profileState: PlateProfileState = PlateProfileState()
 )
 
 internal data class SavedProjectPlateObject(
@@ -48,7 +57,10 @@ internal data class SavedProjectPlateObject(
     val bounds: MeshBounds?,
     val transform: ViewerModelTransform,
     val paint: PlateObjectPaint = PlateObjectPaint(),
-    val geometrySource: PlateObjectGeometrySource = PlateObjectGeometrySource.StagedFile
+    val geometrySource: PlateObjectGeometrySource = PlateObjectGeometrySource.StagedFile,
+    val processOverride: PlateObjectProcessOverride? = null,
+    val modifiers: List<PlateObjectModifierMesh> = emptyList(),
+    val attribution: WorkspaceModelAttribution? = null
 )
 
 internal object SavedProjectRepository {
@@ -109,6 +121,11 @@ private fun SavedProject.savedProjectPlates(): List<SavedProjectPlate> =
 
 private fun SavedProjectPlate.toJson(): JSONObject = JSONObject()
     .put("label", label)
+    .also { json ->
+        if (profileState != PlateProfileState()) {
+            json.put("profileState", profileState.toJson())
+        }
+    }
     .put("plateObjects", JSONArray().apply {
         plateObjects.forEach { put(it.toJson()) }
     })
@@ -125,6 +142,13 @@ private fun SavedProjectPlateObject.toJson(): JSONObject = JSONObject()
             json.put("paint", paint.toJson())
         }
         json.put("geometrySource", geometrySource.toJson())
+        processOverride?.let { json.put("processOverride", it.toJson()) }
+        if (modifiers.isNotEmpty()) {
+            json.put("modifiers", JSONArray().apply {
+                modifiers.forEach { put(it.toJson()) }
+            })
+        }
+        attribution?.let { json.put("attribution", it.toJson()) }
     }
     .also { json ->
         bounds?.let { json.put("bounds", it.toJson()) }
@@ -155,8 +179,21 @@ private fun JSONObject.toSavedProjectPlate(): SavedProjectPlate = SavedProjectPl
     label = optString("label", defaultWorkspacePlateLabel(1)),
     plateObjects = optJSONArray("plateObjects")?.let { array ->
         List(array.length()) { index -> array.getJSONObject(index).toSavedProjectPlateObject() }
-    }.orEmpty()
+    }.orEmpty(),
+    profileState = optJSONObject("profileState")?.toPlateProfileState() ?: PlateProfileState()
 )
+
+private fun PlateProfileState.toJson(): JSONObject = JSONObject()
+    .also { json ->
+        selectedProcessId?.takeIf { it.isNotBlank() }?.let { json.put("selectedProcessId", it) }
+        editedProcessProfile?.let { json.put("editedProcessProfile", it.toJson()) }
+    }
+
+private fun JSONObject.toPlateProfileState(): PlateProfileState =
+    PlateProfileState(
+        selectedProcessId = optString("selectedProcessId", "").takeIf { it.isNotBlank() },
+        editedProcessProfile = optJSONObject("editedProcessProfile")?.toProcessProfile()
+    )
 
 private fun JSONObject.toSavedProjectPlateObject(): SavedProjectPlateObject = SavedProjectPlateObject(
     label = optString("label", "Model"),
@@ -171,8 +208,77 @@ private fun JSONObject.toSavedProjectPlateObject(): SavedProjectPlateObject = Sa
         ?: ViewerModelTransform(centerXmm = 0f, centerYmm = 0f),
     paint = optJSONObject("paint")?.toPlateObjectPaint() ?: PlateObjectPaint(),
     geometrySource = optJSONObject("geometrySource")?.toPlateObjectGeometrySource()
-        ?: PlateObjectGeometrySource.StagedFile
+        ?: PlateObjectGeometrySource.StagedFile,
+    processOverride = optJSONObject("processOverride")?.toPlateObjectProcessOverride(),
+    modifiers = optJSONArray("modifiers")?.let { array ->
+        List(array.length()) { index -> array.getJSONObject(index).toPlateObjectModifierMesh() }
+    }.orEmpty(),
+    attribution = optJSONObject("attribution")?.toWorkspaceModelAttribution()
 )
+
+private fun PlateObjectModifierMesh.toJson(): JSONObject = JSONObject()
+    .put("id", id)
+    .put("label", label)
+    .put("filePath", filePath)
+    .put("transform", transform.toJson())
+    .put("enabled", enabled)
+    .put("processOverride", processOverride.toJson())
+    .also { json ->
+        bounds?.let { json.put("bounds", it.toJson()) }
+    }
+
+private fun JSONObject.toPlateObjectModifierMesh(): PlateObjectModifierMesh =
+    PlateObjectModifierMesh(
+        id = optLong("id", 0L),
+        label = optString("label", "Modifier"),
+        filePath = optString("filePath", ""),
+        bounds = optJSONObject("bounds")?.toMeshBounds(),
+        transform = optJSONObject("transform")?.toViewerModelTransform()
+            ?: ViewerModelTransform(centerXmm = 0f, centerYmm = 0f),
+        processOverride = optJSONObject("processOverride")?.toPlateObjectProcessOverride()
+            ?: PlateObjectProcessOverride(),
+        enabled = optBoolean("enabled", true)
+    )
+
+private fun PlateObjectProcessOverride.toJson(): JSONObject = JSONObject()
+    .also { json ->
+        selectedProcessId?.takeIf { it.isNotBlank() }?.let { json.put("selectedProcessId", it) }
+        editedProcessProfile?.let { json.put("editedProcessProfile", it.toJson()) }
+    }
+
+private fun JSONObject.toPlateObjectProcessOverride(): PlateObjectProcessOverride? {
+    val selectedProcessId = optString("selectedProcessId", "").takeIf { it.isNotBlank() }
+    val editedProcess = optJSONObject("editedProcessProfile")?.toProcessProfile()
+    if (selectedProcessId == null && editedProcess == null) return null
+    return PlateObjectProcessOverride(
+        selectedProcessId = selectedProcessId,
+        editedProcessProfile = editedProcess
+    )
+}
+
+private fun WorkspaceModelAttribution.toJson(): JSONObject = JSONObject()
+    .also { json ->
+        title?.let { json.put("title", it) }
+        author?.let { json.put("author", it) }
+        sourceUrl?.let { json.put("sourceUrl", it) }
+        licenseName?.let { json.put("licenseName", it) }
+        licenseUrl?.let { json.put("licenseUrl", it) }
+        changes?.let { json.put("changes", it) }
+        json.put("rightsBasis", rightsBasis)
+        json.put("policyRevision", policyRevision)
+    }
+
+private fun JSONObject.toWorkspaceModelAttribution(): WorkspaceModelAttribution =
+    WorkspaceModelAttribution(
+        title = optString("title", "").takeIf { it.isNotBlank() },
+        author = optString("author", "").takeIf { it.isNotBlank() },
+        sourceUrl = optString("sourceUrl", "").takeIf { it.isNotBlank() },
+        licenseName = optString("licenseName", "").takeIf { it.isNotBlank() },
+        licenseUrl = optString("licenseUrl", "").takeIf { it.isNotBlank() },
+        changes = optString("changes", "").takeIf { it.isNotBlank() },
+        rightsBasis = optString("rightsBasis", "UNKNOWN"),
+        policyRevision = optString("policyRevision", "unknown")
+    )
 
 private fun PlateObjectGeometrySource.toJson(): JSONObject = when (this) {
     PlateObjectGeometrySource.StagedFile -> JSONObject().put("type", "stagedFile")
@@ -180,6 +286,15 @@ private fun PlateObjectGeometrySource.toJson(): JSONObject = when (this) {
         .put("type", "threeMfMeshExtract")
         .put("originalPath", originalPath)
         .put("extractedStlPath", extractedStlPath)
+        .also { json ->
+            projectMetadata?.let { json.put("projectMetadata", it.toJson()) }
+        }
+    is PlateObjectGeometrySource.StepMeshConvert -> JSONObject()
+        .put("type", "stepMeshConvert")
+        .put("originalPath", originalPath)
+        .put("convertedStlPath", convertedStlPath)
+        .put("linearDeflection", linearDeflection)
+        .put("angleDeflection", angleDeflection)
     is PlateObjectGeometrySource.NativeCutResult -> JSONObject()
         .put("type", "nativeCutResult")
         .put("cutGroupId", cutGroupId)
@@ -192,7 +307,14 @@ private fun JSONObject.toPlateObjectGeometrySource(): PlateObjectGeometrySource 
     when (optString("type")) {
         "threeMfMeshExtract" -> PlateObjectGeometrySource.ThreeMfMeshExtract(
             originalPath = optString("originalPath"),
-            extractedStlPath = optString("extractedStlPath")
+            extractedStlPath = optString("extractedStlPath"),
+            projectMetadata = optJSONObject("projectMetadata")?.toThreeMfProjectMetadata()
+        )
+        "stepMeshConvert" -> PlateObjectGeometrySource.StepMeshConvert(
+            originalPath = optString("originalPath"),
+            convertedStlPath = optString("convertedStlPath"),
+            linearDeflection = optDouble("linearDeflection", 0.003),
+            angleDeflection = optDouble("angleDeflection", 0.5)
         )
         "nativeCutResult" -> PlateObjectGeometrySource.NativeCutResult(
             cutGroupId = optString("cutGroupId"),
@@ -201,6 +323,65 @@ private fun JSONObject.toPlateObjectGeometrySource(): PlateObjectGeometrySource 
             resultJson = optString("resultJson")
         )
         else -> PlateObjectGeometrySource.StagedFile
+    }
+
+private fun ThreeMfProjectMetadata.toJson(): JSONObject = JSONObject()
+    .put("sourcePath", sourcePath)
+    .also { json ->
+        nativeProjectFilePath?.takeIf { it.isNotBlank() }?.let { json.put("nativeProjectFilePath", it) }
+        plateCount?.let { json.put("plateCount", it) }
+        objectCount?.let { json.put("objectCount", it) }
+        filamentCount?.let { json.put("filamentCount", it) }
+    }
+    .put("plateNames", JSONArray().apply { plateNames.forEach { put(it) } })
+    .put("objectNames", JSONArray().apply { objectNames.forEach { put(it) } })
+    .put("objectFilamentAssignments", JSONArray().apply {
+        objectFilamentAssignments.forEach { assignment ->
+            put(
+                JSONObject()
+                    .put("objectName", assignment.objectName)
+                    .put("filamentIndex", assignment.filamentIndex)
+            )
+        }
+    })
+    .put("thumbnailEntries", JSONArray().apply { thumbnailEntries.forEach { put(it) } })
+    .put("configEntries", JSONArray().apply { configEntries.forEach { put(it) } })
+    .put("preservedFeatures", JSONArray().apply { preservedFeatures.forEach { put(it) } })
+    .put("unsupportedFeatures", JSONArray().apply { unsupportedFeatures.forEach { put(it) } })
+
+private fun JSONObject.toThreeMfProjectMetadata(): ThreeMfProjectMetadata =
+    ThreeMfProjectMetadata(
+        sourcePath = optString("sourcePath"),
+        nativeProjectFilePath = optString("nativeProjectFilePath", "").takeIf { it.isNotBlank() },
+        plateCount = optInt("plateCount", -1).takeIf { it >= 0 },
+        objectCount = optInt("objectCount", -1).takeIf { it >= 0 },
+        plateNames = optJSONArray("plateNames").toStringList(),
+        objectNames = optJSONArray("objectNames").toStringList(),
+        objectFilamentAssignments = optJSONArray("objectFilamentAssignments").toThreeMfObjectFilamentAssignments(),
+        filamentCount = optInt("filamentCount", -1).takeIf { it >= 0 },
+        thumbnailEntries = optJSONArray("thumbnailEntries").toStringList(),
+        configEntries = optJSONArray("configEntries").toStringList(),
+        preservedFeatures = optJSONArray("preservedFeatures").toStringList(),
+        unsupportedFeatures = optJSONArray("unsupportedFeatures").toStringList()
+    )
+
+private fun JSONArray?.toStringList(): List<String> =
+    if (this == null) {
+        emptyList()
+    } else {
+        List(length()) { index -> optString(index) }.filter { it.isNotBlank() }
+    }
+
+private fun JSONArray?.toThreeMfObjectFilamentAssignments(): List<ThreeMfObjectFilamentAssignment> =
+    if (this == null) {
+        emptyList()
+    } else {
+        List(length()) { index -> optJSONObject(index) }
+            .mapNotNull { json ->
+                val objectName = json?.optString("objectName", "")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val filamentIndex = json.optInt("filamentIndex", -1).takeIf { it > 0 } ?: return@mapNotNull null
+                ThreeMfObjectFilamentAssignment(objectName = objectName, filamentIndex = filamentIndex)
+            }
     }
 
 private fun PlateObjectPaint.toJson(): JSONObject = JSONObject()
@@ -366,6 +547,7 @@ private fun JSONObject.toMeshBounds(): MeshBounds = MeshBounds(
 private fun ViewerModelTransform.toJson(): JSONObject = JSONObject()
     .put("centerXmm", centerXmm)
     .put("centerYmm", centerYmm)
+    .put("zOffsetMm", zOffsetMm)
     .put("rotationXDegrees", rotationXDegrees)
     .put("rotationYDegrees", rotationYDegrees)
     .put("rotationZDegrees", rotationZDegrees)
@@ -381,6 +563,7 @@ private fun ViewerModelTransform.toJson(): JSONObject = JSONObject()
 private fun JSONObject.toViewerModelTransform(): ViewerModelTransform = ViewerModelTransform(
     centerXmm = optDouble("centerXmm", 0.0).toFloat(),
     centerYmm = optDouble("centerYmm", 0.0).toFloat(),
+    zOffsetMm = optDouble("zOffsetMm", 0.0).toFloat(),
     rotationXDegrees = optDouble("rotationXDegrees", 0.0).toFloat(),
     rotationYDegrees = optDouble("rotationYDegrees", 0.0).toFloat(),
     rotationZDegrees = optDouble("rotationZDegrees", 0.0).toFloat(),

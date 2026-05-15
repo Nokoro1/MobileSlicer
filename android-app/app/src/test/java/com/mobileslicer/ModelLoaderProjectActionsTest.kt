@@ -11,6 +11,8 @@ import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.ViewerModelTransform
 import com.mobileslicer.workspace.ImportedModelFormat
 import com.mobileslicer.workspace.PlateFilamentSlot
+import com.mobileslicer.workspace.PlateProfileState
+import com.mobileslicer.workspace.WorkspacePlate
 import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
@@ -237,6 +239,74 @@ class ModelLoaderProjectActionsTest {
             firstFile.delete()
             secondFile.delete()
         }
+    }
+
+    @Test
+    fun openSavedProjectStateLoadsStoredWorkspaceProcessState() {
+        val firstFile = File.createTempFile("mobileslicer-project-profile-first-", ".stl")
+        val secondFile = File.createTempFile("mobileslicer-project-profile-second-", ".stl")
+        try {
+            firstFile.writeText(minimalStl())
+            secondFile.writeText(minimalStl())
+            val store = defaultStore()
+            val editedProcess = store.processes.first().withValues(
+                "name" to "Fixture Process - workspace edit",
+                "layerHeightMm" to 0.12f,
+                "orcaProcessOverridesJson" to """{"layer_height":0.12}"""
+            )
+            val firstState = PlateProfileState(
+                selectedProcessId = editedProcess.id,
+                editedProcessProfile = editedProcess
+            )
+            val secondState = PlateProfileState(selectedProcessId = store.processes.first().id)
+            val project = savedProject(
+                profileStore = store,
+                plates = listOf(
+                    SavedProjectPlate(
+                        label = "Fine plate",
+                        plateObjects = listOf(savedPlateObject(filePath = firstFile.absolutePath)),
+                        profileState = firstState
+                    ),
+                    SavedProjectPlate(
+                        label = "Standard plate",
+                        plateObjects = listOf(savedPlateObject(filePath = secondFile.absolutePath)),
+                        profileState = secondState
+                    )
+                )
+            )
+
+            val opened = openSavedProjectState(project)
+
+            assertNotNull(opened)
+            checkNotNull(opened)
+            assertEquals(firstState, opened.plates[0].profileState)
+            assertEquals(secondState, opened.plates[1].profileState)
+            assertEquals(0.12f, opened.plates[0].profileState.editedProcessProfile?.layerHeightMm ?: 0f, 0.0001f)
+        } finally {
+            firstFile.delete()
+            secondFile.delete()
+        }
+    }
+
+    @Test
+    fun synchronizeWorkspaceProcessStateAppliesRestoredStateToEveryPlate() {
+        val store = defaultStore()
+        val restoredState = PlateProfileState(
+            selectedProcessId = store.processes.first().id,
+            editedProcessProfile = store.processes.first().withValues(
+                "name" to "Fixture Process - workspace edit",
+                "layerHeightMm" to 0.12f
+            )
+        )
+        val staleState = PlateProfileState(selectedProcessId = "stale_process")
+        val plates = listOf(
+            WorkspacePlate(id = 1L, label = "Plate 1", profileState = restoredState),
+            WorkspacePlate(id = 2L, label = "Plate 2", profileState = staleState)
+        )
+
+        val synchronized = synchronizeWorkspaceProcessState(plates, restoredState)
+
+        assertEquals(listOf(restoredState, restoredState), synchronized.map { it.profileState })
     }
 
     private fun savedProject(

@@ -3,12 +3,10 @@ package com.mobileslicer.workspace
 internal data class WorkspacePerformanceSnapshot(
     val prepareDurationMs: Long?,
     val sliceDurationMs: Long?,
-    val displayLodSummary: String,
     val warnings: List<String>
 ) {
     fun compactSummary(): String = buildList {
         prepareDurationMs?.let { add("Prepare: ${formatDurationSecondsTenths(it)}") }
-        if (displayLodSummary.isNotBlank()) add(displayLodSummary)
         sliceDurationMs?.let { add("Slice: ${formatDurationSecondsTenths(it)}") }
         warnings.forEach { add(it) }
     }.joinToString(" • ")
@@ -40,7 +38,12 @@ internal fun workspaceResponsivenessLogLine(
             add("workspaceMeshCacheHit=${it.cacheHit}")
             it.sourceTriangleCount?.let { triangleCount -> add("sourceTriangles=$triangleCount") }
             it.displayTriangleCount?.let { triangleCount -> add("displayTriangles=$triangleCount") }
-            add("displayReduced=${it.reducedForDisplay}")
+            if (it.sourceTriangleCount != null && it.displayTriangleCount != null) {
+                add("displayExact=${it.sourceTriangleCount == it.displayTriangleCount}")
+            }
+            it.renderArrayBytes?.let { bytes -> add("renderArrayBytes=$bytes") }
+            it.cacheRetainedBytes?.let { bytes -> add("meshCacheRetainedBytes=$bytes") }
+            it.exactPreviewBudgetBytes?.let { bytes -> add("exactPreviewBudgetBytes=$bytes") }
         }
         firstVisibleWorkspaceFrameMs?.let { add("firstWorkspaceFrameMs=$it") }
         firstVisiblePreviewFrameMs?.let { add("firstPreviewFrameMs=$it") }
@@ -79,15 +82,10 @@ internal fun workspacePerformanceSnapshot(
         }
         totalMs.takeIf { hasTiming }
     }
-    val displayLodSummary = workspacePreparationTiming
-        ?.takeIf { it.reducedForDisplay && it.sourceTriangleCount != null && it.displayTriangleCount != null }
-        ?.let { "Display LOD: ${it.displayTriangleCount}/${it.sourceTriangleCount} tris" }
-        .orEmpty()
     val sliceDurationMs = sliceTiming?.totalMs
     return WorkspacePerformanceSnapshot(
         prepareDurationMs = prepareDurationMs,
         sliceDurationMs = sliceDurationMs,
-        displayLodSummary = displayLodSummary,
         warnings = workspacePerformanceWarnings(
             prepareDurationMs = prepareDurationMs,
             sliceDurationMs = sliceDurationMs

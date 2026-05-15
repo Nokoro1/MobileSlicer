@@ -1,6 +1,7 @@
 package com.mobileslicer.workspace
 
 import com.mobileslicer.activePlateFilamentSlots
+import com.mobileslicer.actuallyUsedPlateFilamentSlotIndexes
 import com.mobileslicer.profiles.ActiveSlicerConfiguration
 import com.mobileslicer.profiles.NativeConfigKeys
 import com.mobileslicer.viewer.MeshBounds
@@ -41,7 +42,8 @@ internal fun primeTowerPlacementForWorkspace(
 ): PrimeTowerPlacement? {
     if (!configuration.process.enablePrimeTower) return null
     val activeSlots = activePlateFilamentSlots(filamentSlots, plateObjects)
-    if (activeSlots.size <= 1) return null
+    val actuallyUsedSlots = actuallyUsedPlateFilamentSlotIndexes(activeSlots, plateObjects)
+    if (actuallyUsedSlots.size <= 1) return null
     if (plateObjects.isEmpty()) return null
 
     val process = configuration.process
@@ -56,7 +58,7 @@ internal fun primeTowerPlacementForWorkspace(
         towerWidthMm = width,
         primeVolumeMm3 = process.primeVolumeMm3,
         layerHeightMm = process.layerHeightMm.coerceAtLeast(0.01f),
-        filamentCount = activeSlots.size,
+        filamentCount = actuallyUsedSlots.size,
         maxHeightMm = height,
         infillGapPercent = process.primeTowerInfillGapPercent
     )

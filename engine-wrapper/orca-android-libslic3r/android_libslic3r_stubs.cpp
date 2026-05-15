@@ -48,7 +48,11 @@ void MedialAxis::build(Polylines * /* polylines */) {}
 
 std::string header_slic3r_generated()
 {
-    return "MobileSlicer (android-experimental)";
+    // Moonraker forks used by printer vendors often gate thumbnail extraction
+    // on known slicer aliases. Keep MobileSlicer visible while presenting an
+    // OrcaSlicer-compatible generator marker so Fluidd/QIDI metadata parsers
+    // index embedded PNG thumbnails instead of falling back to a generic file.
+    return "OrcaSlicer 2.3.0-compatible MobileSlicer (android-experimental)";
 }
 
 bool is_gcode_file(const std::string &path)
@@ -80,15 +84,23 @@ static bool parse_thumbnail_format(const std::string& raw, GCodeThumbnailsFormat
         format = GCodeThumbnailsFormat::PNG;
         return true;
     }
+    if (upper == "JPG" || upper == "JPEG") {
+        format = GCodeThumbnailsFormat::JPG;
+        return true;
+    }
+    if (upper == "BTT" || upper == "BTT_TFT" || upper == "BIQU") {
+        format = GCodeThumbnailsFormat::BTT_TFT;
+        return true;
+    }
+    if (upper == "QOI") {
+        format = GCodeThumbnailsFormat::QOI;
+        return true;
+    }
     if (upper == "COLPIC") {
         format = GCodeThumbnailsFormat::ColPic;
         return true;
     }
-    // The Android thumbnail subset currently emits PNG data only. Preserve
-    // printer-requested dimensions, but normalize unsupported formats to PNG so
-    // export does not take a non-PNG writer path with PNG bytes.
-    format = GCodeThumbnailsFormat::PNG;
-    return true;
+    return false;
 }
 
 static std::string normalize_thumbnail_item(std::string item)

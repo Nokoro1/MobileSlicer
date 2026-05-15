@@ -31,8 +31,17 @@ Runs the Android release confidence gate:
   1. local verification
   2. device slice lifecycle
   3. device slice regression
-  4. heavy performance gate with repeat count defaulting to 2
-  5. final git status capture
+  4. object-scoped process override regression
+  5. Orca import smoke for STL, 3MF, and STEP
+  6. offscreen EGL thumbnail renderer smoke
+  7. full desktop-Orca thumbnail reference matrix
+  8. G-code visible metadata parity audit
+  9. printer thumbnail compatibility claim audit
+  10. sliced 3MF metadata/package parity smoke
+  11. Orca 3MF project round-trip preservation gate
+  12. Fluidd/Moonraker thumbnail metadata gate
+  13. heavy performance gate with repeat count defaulting to 2
+  14. final git status capture
 
 Reports are written under artifacts/release-gates/<timestamp>/.
 
@@ -40,6 +49,73 @@ Environment:
   ANDROID_SERIAL                     Default device serial fallback.
   MOBILE_SLICER_PERF_REPEAT_COUNT    Defaults to 2 for this release gate.
   MOBILE_SLICER_PERF_BASELINE        Passed through to verify_android.sh.
+  MOBILE_SLICER_METADATA_PNG_THUMBNAIL_MAX_MS
+                                     Plain G-code PNG thumbnail threshold.
+  MOBILE_SLICER_METADATA_PNG_SMALL_THUMBNAIL_MAX_MS
+                                     Small plain G-code PNG thumbnail threshold.
+  MOBILE_SLICER_METADATA_QOI_THUMBNAIL_MAX_MS
+                                     Plain G-code QOI thumbnail threshold.
+  MOBILE_SLICER_METADATA_FLUIDD_THUMBNAIL_MAX_MS
+                                     Fluidd/Moonraker two-thumbnail G-code
+                                     threshold.
+  MOBILE_SLICER_MOONRAKER_URL        Optional live Moonraker host for the
+                                     Fluidd thumbnail round-trip gate. When
+                                     set, the gate uploads the generated
+                                     G-code and requires Moonraker metadata to
+                                     report 48x48 and 300x300 thumbnails.
+  MOBILE_SLICER_MOONRAKER_API_KEY    Optional Moonraker X-Api-Key header.
+  MOBILE_SLICER_MOONRAKER_DELETE_AFTER
+                                     Defaults to 1. Set to 0 to keep the
+                                     uploaded verification G-code on the host.
+  MOBILE_SLICER_FAIL_ORCA_METADATA_DRIFT
+                                     Defaults to 0. Keep this disabled until
+                                     desktop Orca and MobileSlicer reference
+                                     fixtures are generated from exactly
+                                     matched profile bundles.
+  MOBILE_SLICER_METADATA_3MF_THUMBNAIL_MAX_MS
+                                     Sliced 3MF package thumbnail threshold.
+  MOBILE_SLICER_METADATA_3MF_WRITE_MAX_MS
+                                     Sliced 3MF write threshold.
+  MOBILE_SLICER_EGL_THUMBNAIL_TOTAL_MAX_MS
+                                     Offscreen EGL smoke total threshold.
+  MOBILE_SLICER_EGL_THUMBNAIL_RENDER_MAX_MS
+                                     Offscreen EGL smoke draw threshold.
+  MOBILE_SLICER_EGL_THUMBNAIL_READ_MAX_MS
+                                     Offscreen EGL smoke readback threshold.
+  MOBILE_SLICER_EGL_SLICE_THUMBNAIL_TOTAL_MAX_MS
+                                     Offscreen EGL slice-thumbnail total threshold.
+  MOBILE_SLICER_EGL_SLICE_THUMBNAIL_UPLOAD_MAX_MS
+                                     Offscreen EGL slice-thumbnail upload threshold.
+  MOBILE_SLICER_EGL_SLICE_THUMBNAIL_DRAW_MAX_MS
+                                     Offscreen EGL slice-thumbnail draw threshold.
+  MOBILE_SLICER_EGL_SLICE_THUMBNAIL_READ_MAX_MS
+                                     Offscreen EGL slice-thumbnail readback threshold.
+  MOBILE_SLICER_EGL_SLICE_THUMBNAIL_MIN_VISIBLE_PIXELS
+                                     Offscreen EGL slice-thumbnail visible-pixel floor.
+  MOBILE_SLICER_EGL_SLICE_THUMBNAIL_MIN_BBOX_PX
+                                     Offscreen EGL slice-thumbnail bbox size floor.
+  MOBILE_SLICER_EGL_COMPARE_TOTAL_MAX_MS
+                                     EGL fixture comparison total threshold.
+  MOBILE_SLICER_EGL_COMPARE_DRAW_MAX_MS
+                                     EGL fixture comparison draw threshold.
+  MOBILE_SLICER_EGL_COMPARE_READ_MAX_MS
+                                     EGL fixture comparison readback threshold.
+  MOBILE_SLICER_EGL_COMPARE_MIN_VISIBLE_PIXELS
+                                     EGL fixture comparison visible-pixel floor.
+  MOBILE_SLICER_EGL_COMPARE_MIN_BBOX_PX
+                                     EGL fixture comparison bbox size floor.
+  MOBILE_SLICER_EGL_COMPARE_MIN_DISTINCT_ROLES
+                                     EGL fixture comparison role distinctness floor.
+  MOBILE_SLICER_ORCA_VISUAL_MAX_LUMA_DELTA
+                                     Desktop-Orca visual diff luminance delta.
+  MOBILE_SLICER_ORCA_VISUAL_MAX_ALPHA_COVERAGE_DELTA
+                                     Desktop-Orca visual diff coverage delta.
+  MOBILE_SLICER_ORCA_VISUAL_MAX_BBOX_DELTA_PX
+                                     Desktop-Orca visual diff normalized bbox delta.
+  MOBILE_SLICER_ORCA_VISUAL_MIN_COVERAGE_RATIO
+                                     Desktop-Orca visual diff minimum coverage ratio.
+  MOBILE_SLICER_ORCA_VISUAL_MAX_COVERAGE_RATIO
+                                     Desktop-Orca visual diff maximum coverage ratio.
   MOBILE_SLICER_RELEASE_MIN_IDLE_CPU Defaults to 650, measured from top's
                                      aggregate idle value on an 8-core device.
   MOBILE_SLICER_RELEASE_IDLE_WAIT_SECONDS
@@ -201,6 +277,19 @@ log "Writing artifacts to $RUN_DIR"
 run_step "local" "$VERIFY_SCRIPT" local
 run_step "slice-lifecycle" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" slice-lifecycle "$SERIAL"
 run_step "slice-regression" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" slice-regression "$SERIAL"
+run_step "object-process" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" object-process "$SERIAL"
+run_step "orca-object-label-parity" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" orca-object-label-parity "$SERIAL"
+run_step "orca-import-smoke" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" orca-import-smoke "$SERIAL"
+run_step "egl-thumbnail-smoke" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" egl-thumbnail-smoke "$SERIAL"
+run_step "egl-slice-thumbnail-smoke" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" egl-slice-thumbnail-smoke "$SERIAL"
+run_step "orca-thumbnail-reference-fixtures" "$VERIFY_SCRIPT" orca-thumbnail-reference-fixtures
+run_step "orca-thumbnail-reference-matrix" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$ROOT_DIR/scripts/run_orca_thumbnail_reference_matrix.sh" "$SERIAL"
+run_step "orca-gcode-metadata-parity" "$VERIFY_SCRIPT" orca-gcode-metadata-parity
+run_step "printer-thumbnail-compatibility" "$VERIFY_SCRIPT" printer-thumbnail-compatibility
+run_step "sliced-3mf-metadata" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" sliced-3mf-metadata "$SERIAL"
+run_step "multi-plate-sliced-3mf-metadata" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" multi-plate-sliced-3mf-metadata "$SERIAL"
+run_step "orca-3mf-roundtrip-device" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" orca-3mf-roundtrip-device "$SERIAL"
+run_step "fluidd-thumbnail-metadata" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" fluidd-thumbnail-metadata "$SERIAL"
 run_step "device-idle-preflight" wait_for_device_idle
 run_step "perf-heavy" env \
   MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 \

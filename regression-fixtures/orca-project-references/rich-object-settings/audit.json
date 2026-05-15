@@ -1,0 +1,106 @@
+{
+  "failures": [],
+  "metadata": {
+    "config_entries": [
+      "Metadata/model_settings.config",
+      "Metadata/project_settings.config",
+      "Metadata/slice_info.config"
+    ],
+    "entries": [
+      "[Content_Types].xml",
+      "Metadata/plate_1.png",
+      "Metadata/plate_1_small.png",
+      "Metadata/plate_2.png",
+      "Metadata/plate_2_small.png",
+      "Metadata/plate_no_light_1.png",
+      "Metadata/plate_no_light_2.png",
+      "Metadata/top_1.png",
+      "Metadata/pick_1.png",
+      "Metadata/top_2.png",
+      "Metadata/pick_2.png",
+      "Metadata/plate_1.json",
+      "Metadata/plate_2.json",
+      "3D/3dmodel.model",
+      "3D/_rels/3dmodel.model.rels",
+      "3D/Objects/left_cube_1_1.model",
+      "3D/Objects/right_cube_1_2.model",
+      "3D/Objects/left_cube_1_3.model",
+      "Metadata/project_settings.config",
+      "Metadata/plate_1.gcode.md5",
+      "Metadata/plate_2.gcode.md5",
+      "Metadata/plate_2.gcode",
+      "Metadata/plate_1.gcode",
+      "Metadata/_rels/model_settings.config.rels",
+      "Metadata/model_settings.config",
+      "Metadata/slice_info.config",
+      "_rels/.rels"
+    ],
+    "entry_count": 27,
+    "filament_count": 2,
+    "modifier_evidence": [],
+    "object_count": 3,
+    "object_filament_assignments": [
+      {
+        "filament_index": 1,
+        "object_name": "left_cube_1"
+      },
+      {
+        "filament_index": 1,
+        "object_name": "left_cube_1"
+      },
+      {
+        "filament_index": 2,
+        "object_name": "right_cube_1"
+      }
+    ],
+    "object_names": [
+      "left_cube_1",
+      "left_cube_1",
+      "right_cube_1"
+    ],
+    "object_setting_evidence": [
+      {
+        "key": "sparse_infill_density",
+        "object_name": "right_cube_1",
+        "value": "35%"
+      },
+      {
+        "key": "wall_loops",
+        "object_name": "right_cube_1",
+        "value": "4"
+      }
+    ],
+    "path": "/home/peanut/Development/MobileSlicer/artifacts/orca-project-fixtures/rich-object-settings-20260515-121137/output/rich-object-settings.gcode.3mf",
+    "plate_count": 2,
+    "plate_names": [
+      "Object settings plate",
+      "Second plate"
+    ],
+    "preserved_features": [
+      "mesh_geometry",
+      "object_names",
+      "object_filament_assignments",
+      "object_settings",
+      "plate_metadata",
+      "filament_metadata",
+      "project_thumbnails",
+      "project_settings",
+      "model_settings",
+      "slice_info",
+      "sliced_plate_gcode_entries"
+    ],
+    "thumbnail_entries": [
+      "Metadata/pick_1.png",
+      "Metadata/pick_2.png",
+      "Metadata/plate_1.png",
+      "Metadata/plate_1_small.png",
+      "Metadata/plate_2.png",
+      "Metadata/plate_2_small.png",
+      "Metadata/plate_no_light_1.png",
+      "Metadata/plate_no_light_2.png",
+      "Metadata/top_1.png",
+      "Metadata/top_2.png"
+    ]
+  },
+  "ok": true
+}

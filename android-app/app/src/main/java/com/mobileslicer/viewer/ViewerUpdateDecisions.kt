@@ -138,8 +138,10 @@ internal object ViewerUpdateDecisions {
         var result = mix64(FnvOffsetBasis, System.identityHashCode(this).toLong())
         result = mix64(result, System.identityHashCode(vertices).toLong())
         result = mix64(result, System.identityHashCode(normals).toLong())
+        result = mix64(result, System.identityHashCode(indices).toLong())
         result = mix64(result, vertices.size.toLong())
         result = mix64(result, normals.size.toLong())
+        result = mix64(result, indices?.size?.toLong() ?: 0L)
         result = mix64(result, triangleCount.toLong())
         result = mix64(result, bounds.hashCode().toLong())
         return result

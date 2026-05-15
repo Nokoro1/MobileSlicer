@@ -211,6 +211,16 @@ internal fun ProcessProfile.toJson(): JSONObject = JSONObject()
     .put("treeSupportBranchAngleDegrees", treeSupportBranchAngleDegrees.toDouble())
     .put("treeSupportBranchDiameterMm", treeSupportBranchDiameterMm.toDouble())
     .put("treeSupportWallCount", treeSupportWallCount)
+    .put("treeSupportTipDiameterMm", treeSupportTipDiameterMm.toDouble())
+    .put("treeSupportBranchDistanceMm", treeSupportBranchDistanceMm.toDouble())
+    .put("treeSupportBranchDistanceOrganicMm", treeSupportBranchDistanceOrganicMm.toDouble())
+    .put("treeSupportTopRatePercent", treeSupportTopRatePercent)
+    .put("treeSupportBranchDiameterOrganicMm", treeSupportBranchDiameterOrganicMm.toDouble())
+    .put("treeSupportBranchDiameterAngleDegrees", treeSupportBranchDiameterAngleDegrees.toDouble())
+    .put("treeSupportBranchAngleOrganicDegrees", treeSupportBranchAngleOrganicDegrees.toDouble())
+    .put("treeSupportPreferredBranchAngleDegrees", treeSupportPreferredBranchAngleDegrees.toDouble())
+    .put("treeSupportAutoBrim", treeSupportAutoBrim)
+    .put("treeSupportBrimWidthMm", treeSupportBrimWidthMm.toDouble())
     .put("enablePrimeTower", enablePrimeTower)
     .put("primeTowerWidthMm", primeTowerWidthMm.toDouble())
     .put("wipeTowerXmm", wipeTowerXmm.toDouble())
@@ -335,7 +345,7 @@ internal fun ProcessProfile.toJson(): JSONObject = JSONObject()
 
 internal fun JSONObject.toProcessProfile(): ProcessProfile {
     val legacyPrintSpeedMmPerSec = optInt("printSpeedMmPerSec", 60)
-    return newProcessProfileUnchecked(
+    val legacyProfile = newProcessProfileUnchecked(
         0 to getString("id"),
         1 to getString("name"),
         2 to optString("subtitle", ""),
@@ -459,5 +469,144 @@ internal fun JSONObject.toProcessProfile(): ProcessProfile {
             gcodeLabelObjects = optBoolean("gcodeLabelObjects", false),
             excludeObject = optBoolean("excludeObject", false)
         )
-	    )
-	}
+    ).withValues(
+        "seamGap" to normalizedProcessSeamGap(optString("seamGap", DEFAULT_SEAM_GAP))
+    )
+    return restoreSavedProcessProfileFields(legacyProfile)
+}
+
+private fun JSONObject.restoreSavedProcessProfileFields(profile: ProcessProfile): ProcessProfile {
+    val overrides = mutableListOf<Pair<String, Any?>>()
+    processProfileFieldDefaultSnapshot().forEach { (key, defaultValue) ->
+        if (!has(key) || isNull(key)) return@forEach
+        val value = when (defaultValue) {
+            is Boolean -> optBoolean(key, defaultValue)
+            is Float -> optDouble(key, defaultValue.toDouble()).toFloat()
+            is Int -> optInt(key, defaultValue)
+            is String -> optString(key, defaultValue).let { value ->
+                if (key == "seamGap") normalizedProcessSeamGap(value) else value
+            }
+            is List<*> -> optJSONArray(key)?.let { array ->
+                List(array.length()) { index -> array.optString(index) }
+            } ?: defaultValue
+            else -> null
+        }
+        if (value != null) overrides += key to value
+    }
+
+    overrides += listOf(
+        "seamPosition" to ProcessSeamPosition.fromConfigValue(optionalString("seamPosition", profile.seamPosition.configValue)),
+        "topSurfacePattern" to TopSurfacePattern.fromConfigValue(optionalString("topSurfacePattern", profile.topSurfacePattern.configValue)),
+        "bottomSurfacePattern" to BottomSurfacePattern.fromConfigValue(optionalString("bottomSurfacePattern", profile.bottomSurfacePattern.configValue)),
+        "internalSolidInfillPattern" to InternalSolidInfillPattern.fromConfigValue(optionalString("internalSolidInfillPattern", profile.internalSolidInfillPattern.configValue)),
+        "dontFilterInternalBridges" to InternalBridgeFilterMode.fromConfigValue(optionalString("dontFilterInternalBridges", profile.dontFilterInternalBridges.configValue)),
+        "ensureVerticalShellThickness" to EnsureVerticalShellThicknessMode.fromConfigValue(optionalString("ensureVerticalShellThickness", profile.ensureVerticalShellThickness.configValue)),
+        "wallGenerator" to WallGenerator.fromConfigValue(optionalString("wallGenerator", profile.wallGenerator.configValue)),
+        "wallInfillOrder" to WallInfillOrder.fromConfigValue(optionalString("wallInfillOrder", profile.wallInfillOrder.configValue)),
+        "wallSequence" to WallSequence.fromConfigValue(optionalString("wallSequence", profile.wallSequence.configValue)),
+        "sparseInfillPattern" to SparseInfillPattern.fromConfigValue(optionalString("sparseInfillPattern", profile.sparseInfillPattern.configValue)),
+        "supportType" to SupportType.fromConfigValue(optionalString("supportType", profile.supportType.configValue)),
+        "supportStyle" to SupportStyle.fromConfigValue(optionalString("supportStyle", profile.supportStyle.configValue)),
+        "supportInterfacePattern" to SupportInterfacePattern.fromConfigValue(optionalString("supportInterfacePattern", profile.supportInterfacePattern.configValue)),
+        "supportBasePattern" to SupportBasePattern.fromConfigValue(optionalString("supportBasePattern", profile.supportBasePattern.configValue)),
+        "supportIroningPattern" to IroningPattern.fromConfigValue(optionalString("supportIroningPattern", profile.supportIroningPattern.configValue)),
+        "wipeTowerWallType" to WipeTowerWallType.fromConfigValue(optionalString("wipeTowerWallType", profile.wipeTowerWallType.configValue)),
+        "fuzzySkin" to FuzzySkinType.fromConfigValue(optionalString("fuzzySkin", profile.fuzzySkin.configValue)),
+        "fuzzySkinMode" to FuzzySkinMode.fromConfigValue(optionalString("fuzzySkinMode", profile.fuzzySkinMode.configValue)),
+        "fuzzySkinNoiseType" to FuzzySkinNoiseType.fromConfigValue(optionalString("fuzzySkinNoiseType", profile.fuzzySkinNoiseType.configValue)),
+        "ironingType" to ProcessIroningType.fromConfigValue(optionalString("ironingType", profile.ironingType.configValue)),
+        "ironingPattern" to IroningPattern.fromConfigValue(optionalString("ironingPattern", profile.ironingPattern.configValue)),
+        "seamScarfType" to SeamScarfType.fromConfigValue(optionalString("seamScarfType", profile.seamScarfType.configValue)),
+        "counterboreHoleBridging" to CounterboreHoleBridging.fromConfigValue(optionalString("counterboreHoleBridging", profile.counterboreHoleBridging.configValue)),
+        "skirtType" to SkirtType.fromConfigValue(optionalString("skirtType", profile.skirtType.configValue)),
+        "draftShield" to DraftShield.fromConfigValue(optionalString("draftShield", profile.draftShield.configValue)),
+        "brimType" to BrimType.fromConfigValue(optionalString("brimType", profile.brimType.configValue)),
+        "slicingMode" to SlicingMode.fromConfigValue(optionalString("slicingMode", profile.slicingMode.configValue)),
+        "printSequence" to PrintSequence.fromConfigValue(optionalString("printSequence", profile.printSequence.configValue)),
+        "printOrder" to PrintOrder.fromConfigValue(optionalString("printOrder", profile.printOrder.configValue)),
+        "filamentMapMode" to FilamentMapMode.fromConfigValue(optionalString("filamentMapMode", profile.filamentMapMode.configValue))
+    )
+
+    overrides += "qualitySurfaceDetails" to ProcessQualitySurfaceDetails(
+        thickInternalBridges = optionalBoolean("thickInternalBridges", profile.thickInternalBridges),
+        extraBridgeLayer = ExtraBridgeLayerMode.fromConfigValue(optionalString("extraBridgeLayer", profile.extraBridgeLayer.configValue)),
+        preciseZHeight = optionalBoolean("preciseZHeight", profile.preciseZHeight),
+        onlyOneWallFirstLayer = optionalBoolean("onlyOneWallFirstLayer", profile.onlyOneWallFirstLayer),
+        printInfillFirst = optionalBoolean("printInfillFirst", profile.printInfillFirst),
+        wallDirection = WallDirection.fromConfigValue(optionalString("wallDirection", profile.wallDirection.configValue)),
+        printFlowRatio = optionalFloat("printFlowRatio", profile.printFlowRatio),
+        elefantFootCompensationLayers = optionalInt("elefantFootCompensationLayers", profile.elefantFootCompensationLayers),
+        internalSolidInfillFlowRatio = optionalFloat("internalSolidInfillFlowRatio", profile.internalSolidInfillFlowRatio),
+        setOtherFlowRatios = optionalBoolean("setOtherFlowRatios", profile.setOtherFlowRatios),
+        smallAreaInfillFlowCompensation = optionalBoolean("smallAreaInfillFlowCompensation", profile.smallAreaInfillFlowCompensation),
+        makeOverhangPrintable = optionalBoolean("makeOverhangPrintable", profile.makeOverhangPrintable),
+        makeOverhangPrintableAngleDegrees = optionalFloat("makeOverhangPrintableAngleDegrees", profile.makeOverhangPrintableAngleDegrees),
+        makeOverhangPrintableHoleSizeMm2 = optionalFloat("makeOverhangPrintableHoleSizeMm2", profile.makeOverhangPrintableHoleSizeMm2),
+        overhangReverse = optionalBoolean("overhangReverse", profile.overhangReverse),
+        overhangReverseInternalOnly = optionalBoolean("overhangReverseInternalOnly", profile.overhangReverseInternalOnly),
+        overhangReverseThreshold = optionalString("overhangReverseThreshold", profile.overhangReverseThreshold)
+    )
+
+    overrides += "strengthInfillDetails" to ProcessStrengthInfillDetails(
+        skinInfillDensity = optionalInt("skinInfillDensity", profile.skinInfillDensity),
+        skeletonInfillDensity = optionalInt("skeletonInfillDensity", profile.skeletonInfillDensity),
+        infillLockDepthMm = optionalFloat("infillLockDepthMm", profile.infillLockDepthMm),
+        skinInfillDepthMm = optionalFloat("skinInfillDepthMm", profile.skinInfillDepthMm),
+        skinInfillLineWidth = optionalString("skinInfillLineWidth", profile.skinInfillLineWidth),
+        skeletonInfillLineWidth = optionalString("skeletonInfillLineWidth", profile.skeletonInfillLineWidth),
+        symmetricInfillYAxis = optionalBoolean("symmetricInfillYAxis", profile.symmetricInfillYAxis),
+        infillShiftStepMm = optionalFloat("infillShiftStepMm", profile.infillShiftStepMm),
+        infillOverhangAngleDegrees = optionalFloat("infillOverhangAngleDegrees", profile.infillOverhangAngleDegrees),
+        gapFillTarget = optionalString("gapFillTarget", profile.gapFillTarget),
+        filterOutGapFillMm = optionalFloat("filterOutGapFillMm", profile.filterOutGapFillMm)
+    )
+
+    overrides += "primeTowerDetails" to ProcessPrimeTowerDetails(
+        wipeTowerXmm = optionalFloat("wipeTowerXmm", profile.wipeTowerXmm),
+        wipeTowerYmm = optionalFloat("wipeTowerYmm", profile.wipeTowerYmm),
+        primeTowerSkipPoints = optionalBoolean("primeTowerSkipPoints", profile.primeTowerSkipPoints),
+        primeVolumeMm3 = optionalFloat("primeVolumeMm3", profile.primeVolumeMm3),
+        primeTowerBrimWidthMm = optionalFloat("primeTowerBrimWidthMm", profile.primeTowerBrimWidthMm),
+        primeTowerInfillGapPercent = optionalInt("primeTowerInfillGapPercent", profile.primeTowerInfillGapPercent),
+        wipeTowerRotationAngleDegrees = optionalFloat("wipeTowerRotationAngleDegrees", profile.wipeTowerRotationAngleDegrees),
+        wipeTowerBridgingMm = optionalFloat("wipeTowerBridgingMm", profile.wipeTowerBridgingMm),
+        wipeTowerExtraSpacingPercent = optionalInt("wipeTowerExtraSpacingPercent", profile.wipeTowerExtraSpacingPercent),
+        wipeTowerExtraFlowPercent = optionalInt("wipeTowerExtraFlowPercent", profile.wipeTowerExtraFlowPercent),
+        wipeTowerMaxPurgeSpeedMmPerSec = optionalFloat("wipeTowerMaxPurgeSpeedMmPerSec", profile.wipeTowerMaxPurgeSpeedMmPerSec),
+        wipeTowerWallType = WipeTowerWallType.fromConfigValue(optionalString("wipeTowerWallType", profile.wipeTowerWallType.configValue)),
+        wipeTowerConeAngleDegrees = optionalFloat("wipeTowerConeAngleDegrees", profile.wipeTowerConeAngleDegrees),
+        wipeTowerExtraRibLengthMm = optionalFloat("wipeTowerExtraRibLengthMm", profile.wipeTowerExtraRibLengthMm),
+        wipeTowerRibWidthMm = optionalFloat("wipeTowerRibWidthMm", profile.wipeTowerRibWidthMm),
+        wipeTowerFilletWall = optionalBoolean("wipeTowerFilletWall", profile.wipeTowerFilletWall)
+    )
+
+    overrides += "specialModeDetails" to ProcessSpecialModeDetails(
+        spiralModeSmooth = optionalBoolean("spiralModeSmooth", profile.spiralModeSmooth),
+        spiralModeMaxXySmoothing = optionalString("spiralModeMaxXySmoothing", profile.spiralModeMaxXySmoothing),
+        spiralStartingFlowRatio = optionalFloat("spiralStartingFlowRatio", profile.spiralStartingFlowRatio),
+        spiralFinishingFlowRatio = optionalFloat("spiralFinishingFlowRatio", profile.spiralFinishingFlowRatio),
+        timelapseType = TimelapseType.fromConfigValue(optionalString("timelapseType", profile.timelapseType.configValue)),
+        enableWrappingDetection = optionalBoolean("enableWrappingDetection", profile.enableWrappingDetection)
+    )
+
+    overrides += "gcodeOutputDetails" to ProcessGcodeOutputDetails(
+        gcodeAddLineNumber = optionalBoolean("gcodeAddLineNumber", profile.gcodeAddLineNumber),
+        gcodeComments = optionalBoolean("gcodeComments", profile.gcodeComments),
+        gcodeLabelObjects = optionalBoolean("gcodeLabelObjects", profile.gcodeLabelObjects),
+        excludeObject = optionalBoolean("excludeObject", profile.excludeObject)
+    )
+
+    return profile.withValues(*overrides.toTypedArray())
+}
+
+private fun JSONObject.optionalString(key: String, fallback: String): String =
+    if (has(key) && !isNull(key)) optString(key, fallback) else fallback
+
+private fun JSONObject.optionalBoolean(key: String, fallback: Boolean): Boolean =
+    if (has(key) && !isNull(key)) optBoolean(key, fallback) else fallback
+
+private fun JSONObject.optionalInt(key: String, fallback: Int): Int =
+    if (has(key) && !isNull(key)) optInt(key, fallback) else fallback
+
+private fun JSONObject.optionalFloat(key: String, fallback: Float): Float =
+    if (has(key) && !isNull(key)) optDouble(key, fallback.toDouble()).toFloat() else fallback

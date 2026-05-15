@@ -37,6 +37,7 @@ import com.mobileslicer.profiles.toNativeSliceConfigJson
 import com.mobileslicer.printerconnection.PrinterConnectionChoicesResult
 import com.mobileslicer.printerconnection.PrinterConnectionResult
 import com.mobileslicer.printerconnection.PrinterUploadAction
+import com.mobileslicer.printerconnection.isLocalPrinterHost
 import com.mobileslicer.printerconnection.requireAllowedPrinterNetworkUrl
 import com.mobileslicer.printerconnection.SimplyPrintOAuthResult
 import com.mobileslicer.calibration.CalibrationJob
@@ -510,24 +511,6 @@ private fun isLocalPrinterUrl(url: String): Boolean {
     val scheme = uri.scheme?.lowercase(Locale.US)
     return scheme == "http" && isLocalPrinterHost(uri.host) ||
         scheme == "https" && isLocalPrinterHost(uri.host)
-}
-
-private fun isLocalPrinterHost(host: String?): Boolean {
-    val normalized = host?.trim()?.trim('[', ']')?.lowercase(Locale.US).orEmpty()
-    if (normalized.isBlank()) return false
-    if (normalized == "localhost" || normalized.endsWith(".local") || "." !in normalized && ":" !in normalized) return true
-    val octets = normalized.split('.').mapNotNull { it.toIntOrNull() }
-    if (octets.size == 4 && octets.all { it in 0..255 }) {
-        return octets[0] == 10 ||
-            octets[0] == 127 ||
-            octets[0] == 192 && octets[1] == 168 ||
-            octets[0] == 172 && octets[1] in 16..31 ||
-            octets[0] == 169 && octets[1] == 254
-    }
-    return normalized == "::1" ||
-        normalized.startsWith("fe80:") ||
-        normalized.startsWith("fc") ||
-        normalized.startsWith("fd")
 }
 
 private fun safePrinterDisplayUrl(url: String): String =

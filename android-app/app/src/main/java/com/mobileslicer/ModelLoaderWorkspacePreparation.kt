@@ -36,7 +36,7 @@ internal fun workspaceMeshPreparingStatus(
         append(
             modelLoadStatusMessage(
                 loaded = true,
-                fileName = File(modelFilePath).name,
+                fileName = displayNameForModelFile(File(modelFilePath)),
                 timing = importTiming
             )
         )
@@ -53,7 +53,7 @@ internal fun workspaceMeshPreparedStatus(
         append(
             modelLoadStatusMessage(
                 loaded = true,
-                fileName = File(modelFilePath).name,
+                fileName = displayNameForModelFile(File(modelFilePath)),
                 timing = importTiming
             )
         )
@@ -61,13 +61,6 @@ internal fun workspaceMeshPreparedStatus(
             append('\n')
             append(if (it.cacheHit) "Preview loaded from cache: " else "Preview prepared: ")
             append(formatDurationMs(it.viewerMeshPrepMs))
-            if (it.reducedForDisplay && it.sourceTriangleCount != null && it.displayTriangleCount != null) {
-                append(" • display LOD ")
-                append(it.displayTriangleCount)
-                append("/")
-                append(it.sourceTriangleCount)
-                append(" triangles")
-            }
         }
         if (!result.viewerPreparationError.isNullOrBlank()) {
             append('\n')

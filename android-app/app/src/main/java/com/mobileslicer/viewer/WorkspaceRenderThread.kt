@@ -1527,10 +1527,7 @@ internal class WorkspaceRenderThread(
         }
 
         require(mesh.triangleCount > 0) { "Mesh has no triangles." }
-        modelUpload = uploadTriangleData(
-            vertices = mesh.vertices,
-            normals = mesh.normals
-        )
+        modelUpload = uploadTriangleMesh(mesh)
     }
 
     private fun updateModelPlacement(mesh: StlMesh?) {
@@ -1568,7 +1565,7 @@ internal class WorkspaceRenderThread(
         )
         modelPlacementX = transform.centerXmm - activeBed.widthMm * 0.5f - rotatedCenter.xMm
         modelPlacementY = transform.centerYmm - activeBed.depthMm * 0.5f - rotatedCenter.yMm
-        modelPlacementZ = -rotatedBounds.minZ
+        modelPlacementZ = transform.zOffsetMm - rotatedBounds.minZ
         modelRotationXDegrees = transform.rotationXDegrees
         modelRotationYDegrees = transform.rotationYDegrees
         modelRotationZDegrees = transform.rotationZDegrees

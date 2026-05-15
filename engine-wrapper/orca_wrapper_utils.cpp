@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <regex>
 #include <sstream>
 #include <unordered_map>
@@ -149,6 +150,7 @@ std::string unescape_json_string(std::string_view value)
 struct JsonScalarIndex {
     const std::string* source{nullptr};
     size_t source_size{0};
+    size_t source_hash{0};
     std::unordered_map<std::string, std::string_view> values;
 };
 
@@ -228,13 +230,15 @@ static bool skip_json_value(const std::string& json, size_t& cursor)
 static JsonScalarIndex& json_scalar_index(const std::string& json)
 {
     JsonScalarIndex& index = g_json_scalar_index;
-    if (index.source == &json && index.source_size == json.size()) {
+    const size_t content_hash = std::hash<std::string_view>{}(std::string_view(json));
+    if (index.source == &json && index.source_size == json.size() && index.source_hash == content_hash) {
         return index;
     }
 
     index = JsonScalarIndex{};
     index.source = &json;
     index.source_size = json.size();
+    index.source_hash = content_hash;
 
     size_t cursor = 0;
     skip_json_whitespace(json, cursor);

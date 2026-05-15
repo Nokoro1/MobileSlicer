@@ -7,6 +7,7 @@ import com.mobileslicer.calibration.CalibrationJob
 import com.mobileslicer.profiles.ActiveSlicerConfiguration
 import com.mobileslicer.profiles.FilamentProfile
 import com.mobileslicer.profiles.PrinterProfile
+import com.mobileslicer.profiles.ProcessProfile
 import com.mobileslicer.profiles.jsonObjectLengthOrZero
 import com.mobileslicer.profiles.repairNativeSliceConfigWithOrcaFilamentAssetsResult
 import com.mobileslicer.profiles.toNativeSliceConfigBuildResult
@@ -17,10 +18,15 @@ import com.mobileslicer.viewer.ViewerModelTransform
 import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateFlushVolumes
 import com.mobileslicer.workspace.PlateObject
+import com.mobileslicer.workspace.PlateObjectModifierMesh
+import com.mobileslicer.workspace.PlateObjectProcessOverride
 import com.mobileslicer.workspace.PrimeTowerPlacementOverride
 import com.mobileslicer.workspace.SliceResult
 import com.mobileslicer.workspace.applyToNativeConfig
+import com.mobileslicer.workspace.defaultNativeModelTransform
 import com.mobileslicer.workspace.primeTowerPlacementForWorkspace
+import org.json.JSONArray
+import org.json.JSONObject
 
 private const val VerboseSliceConfigTimingLogs = false
 
@@ -39,6 +45,7 @@ internal suspend fun prepareNativeConfigForPlatePlanning(
     context: Context,
     configuration: ActiveSlicerConfiguration,
     plateObjects: List<PlateObject>,
+    processProfiles: List<ProcessProfile>,
     profileFilaments: List<FilamentProfile>,
     activePlateSlots: List<PlateFilamentSlot>,
     flushVolumes: PlateFlushVolumes?,
@@ -72,12 +79,19 @@ internal suspend fun prepareNativeConfigForPlatePlanning(
         printerBed = printer.toBedSpec(),
         override = primeTowerPlacementOverride
     )
-    return repairNativeSliceConfigWithOrcaFilamentAssetsResult(
+    val repairedJson = repairNativeSliceConfigWithOrcaFilamentAssetsResult(
         context = context.applicationContext,
         printer = printer,
         filamentOverridesJson = repairFilamentOverridesJson,
         configJson = placement?.applyToNativeConfig(plateSliceConfigResult.json) ?: plateSliceConfigResult.json
     ).json
+    return applyObjectProcessOverridesToNativeConfig(
+        configJson = repairedJson,
+        plateObjects = plateObjects,
+        defaultProcess = configuration.process,
+        availableProcesses = processProfiles,
+        printerBed = printer.toBedSpec()
+    )
 }
 
 internal suspend fun runModelLoaderSlice(
@@ -85,6 +99,7 @@ internal suspend fun runModelLoaderSlice(
     configuration: ActiveSlicerConfiguration,
     calibrationJob: CalibrationJob?,
     plateObjects: List<PlateObject>,
+    processProfiles: List<ProcessProfile>,
     profileFilaments: List<FilamentProfile>,
     activePlateSlots: List<PlateFilamentSlot>,
     flushVolumes: PlateFlushVolumes?,
@@ -138,6 +153,13 @@ internal suspend fun runModelLoaderSlice(
     val finalConfigJson = calibrationJob
         ?.applyTemporaryOverrides(repairResult.json)
         ?: repairResult.json
+    val objectScopedConfigJson = applyObjectProcessOverridesToNativeConfig(
+        configJson = finalConfigJson,
+        plateObjects = plateObjects,
+        defaultProcess = configuration.process,
+        availableProcesses = processProfiles,
+        printerBed = printer.toBedSpec()
+    )
     val calibrationMs = SystemClock.elapsedRealtime() - calibrationStartedAtMs
     if (VerboseSliceConfigTimingLogs) {
         Log.i(
@@ -165,7 +187,7 @@ internal suspend fun runModelLoaderSlice(
         )
     }
     val result = onSliceRequested(
-        finalConfigJson,
+        objectScopedConfigJson,
         plateObjects,
         modelFilePath,
         preparedMesh,
@@ -191,4 +213,116 @@ internal suspend fun runModelLoaderSlice(
             }
         }
     )
+}
+
+internal fun applyObjectProcessOverridesToNativeConfig(
+    configJson: String,
+    plateObjects: List<PlateObject>,
+    defaultProcess: ProcessProfile? = null,
+    availableProcesses: List<ProcessProfile> = emptyList(),
+    printerBed: PrinterBedSpec? = null
+): String {
+    val objectEntries = JSONArray()
+    val modifierEntries = JSONArray()
+    plateObjects.forEachIndexed { index, objectOnPlate ->
+        val override = objectOnPlate.processOverride ?: return@forEachIndexed
+        val effectiveProcess = objectProcessForNativeOverrides(
+            override = override,
+            defaultProcess = defaultProcess,
+            availableProcesses = availableProcesses
+        ) ?: return@forEachIndexed
+        val nativeOverrides = runCatching { JSONObject(effectiveProcess.orcaProcessOverridesJson.takeIf { it.isNotBlank() } ?: "{}") }.getOrNull()
+            ?: return@forEachIndexed
+        if (nativeOverrides.length() == 0) return@forEachIndexed
+        objectEntries.put(
+            JSONObject()
+                .put("mobileObjectId", objectOnPlate.id)
+                .put("plateObjectIndex", index)
+                .put("selectedProcessId", override.selectedProcessId ?: effectiveProcess.id)
+                .put("config", nativeOverrides)
+        )
+    }
+    plateObjects.forEachIndexed { objectIndex, objectOnPlate ->
+        objectOnPlate.modifiers.forEach { modifier ->
+            val entry = modifier.toNativeModifierProcessEntry(
+                plateObjectIndex = objectIndex,
+                mobileObjectId = objectOnPlate.id,
+                defaultProcess = defaultProcess,
+                availableProcesses = availableProcesses,
+                printerBed = printerBed
+            ) ?: return@forEach
+            modifierEntries.put(entry)
+        }
+    }
+    if (objectEntries.length() == 0 && modifierEntries.length() == 0) return configJson
+    return runCatching {
+        val root = JSONObject(configJson)
+        if (objectEntries.length() > 0) {
+            root.put("mobile_slicer_object_process_overrides", objectEntries)
+        }
+        if (modifierEntries.length() > 0) {
+            root.put("mobile_slicer_modifier_process_overrides", modifierEntries)
+        }
+        root.toString()
+    }.getOrDefault(configJson)
+}
+
+private fun PlateObjectModifierMesh.toNativeModifierProcessEntry(
+    plateObjectIndex: Int,
+    mobileObjectId: Long,
+    defaultProcess: ProcessProfile?,
+    availableProcesses: List<ProcessProfile>,
+    printerBed: PrinterBedSpec?
+): JSONObject? {
+    if (!enabled || filePath.isBlank()) return null
+    val effectiveProcess = objectProcessForNativeOverrides(
+        override = processOverride,
+        defaultProcess = defaultProcess,
+        availableProcesses = availableProcesses
+    ) ?: return null
+    val nativeOverrides = runCatching { JSONObject(effectiveProcess.orcaProcessOverridesJson.takeIf { it.isNotBlank() } ?: "{}") }.getOrNull()
+        ?: return null
+    if (nativeOverrides.length() == 0) return null
+    return JSONObject()
+        .put("mobileObjectId", mobileObjectId)
+        .put("modifierId", id)
+        .put("plateObjectIndex", plateObjectIndex)
+        .put("label", label)
+        .put("path", filePath)
+        .put("selectedProcessId", processOverride.selectedProcessId ?: effectiveProcess.id)
+        .put("config", nativeOverrides)
+        .also { entry ->
+            val modifierBounds = this.bounds
+            if (modifierBounds != null && printerBed != null) {
+                val nativeTransform = defaultNativeModelTransform(modifierBounds, printerBed, transform)
+                entry.put(
+                    "transform",
+                    JSONObject()
+                        .put("xMm", nativeTransform.xMm)
+                        .put("yMm", nativeTransform.yMm)
+                        .put("zMm", nativeTransform.zMm)
+                        .put("rotationXRadians", nativeTransform.rotationXRadians)
+                        .put("rotationYRadians", nativeTransform.rotationYRadians)
+                        .put("rotationZRadians", nativeTransform.rotationZRadians)
+                        .put("uniformScale", nativeTransform.uniformScale)
+                        .also { transformJson ->
+                            nativeTransform.orientationMatrix?.let { matrix ->
+                                transformJson.put("orientationMatrix", JSONArray(matrix))
+                            }
+                        }
+                )
+            }
+        }
+}
+
+private fun objectProcessForNativeOverrides(
+    override: PlateObjectProcessOverride,
+    defaultProcess: ProcessProfile?,
+    availableProcesses: List<ProcessProfile>
+): ProcessProfile? {
+    override.editedProcessProfile?.let { return it }
+    val defaultId = defaultProcess?.id.orEmpty()
+    val selectedId = override.selectedProcessId?.takeIf { it.isNotBlank() } ?: return null
+    if (selectedId == defaultId) return null
+    return availableProcesses.firstOrNull { it.id == selectedId }
 }

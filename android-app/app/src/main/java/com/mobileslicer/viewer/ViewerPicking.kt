@@ -149,19 +149,18 @@ private fun pickObjectsWithProjectedBounds(
 }
 
 private fun pickObjectTriangles(ray: PickRay, objectUpload: ModelObjectUpload): ViewerPickHit? {
-    val vertices = objectUpload.mesh.vertices
+    val mesh = objectUpload.mesh
+    val vertices = mesh.vertices
     var bestHit: ViewerPickHit? = null
-    var triangleIndex = 0
-    var vertexIndex = 0
     val worldA = FloatArray(3)
     val worldB = FloatArray(3)
     val worldC = FloatArray(3)
     val worldNormal = FloatArray(3)
 
-    while (vertexIndex + 8 < vertices.size) {
-        transformPosition(objectUpload.modelMatrix, vertices, vertexIndex, worldA)
-        transformPosition(objectUpload.modelMatrix, vertices, vertexIndex + 3, worldB)
-        transformPosition(objectUpload.modelMatrix, vertices, vertexIndex + 6, worldC)
+    mesh.forEachTriangleVertexOffsets { triangleIndex, a, b, c ->
+        transformPosition(objectUpload.modelMatrix, vertices, a, worldA)
+        transformPosition(objectUpload.modelMatrix, vertices, b, worldB)
+        transformPosition(objectUpload.modelMatrix, vertices, c, worldC)
         val hit = intersectTriangle(ray, worldA, worldB, worldC)
         if (hit != null && (bestHit == null || hit.distance < bestHit.distance)) {
             val w = 1f - hit.u - hit.v
@@ -182,8 +181,6 @@ private fun pickObjectTriangles(ray: PickRay, objectUpload: ModelObjectUpload): 
                 distance = hit.distance
             )
         }
-        triangleIndex++
-        vertexIndex += 9
     }
     return bestHit
 }

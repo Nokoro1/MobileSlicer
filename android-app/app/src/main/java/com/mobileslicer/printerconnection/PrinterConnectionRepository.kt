@@ -244,6 +244,7 @@ internal class PrinterConnectionRepository {
     private val octoKlipperClient = OctoKlipperConnectionClient(
         requestText = { url, method, headers -> requestText(url, method, headers) },
         requestTextBody = { url, method, headers -> requestTextBody(url, method, headers) },
+        sendRawBody = { url, method, headers, body -> sendRawBody(url, method, headers, body) },
         uploadMultipart = { url, headers, fields, file, fileFieldName, remoteFileName, onProgress ->
             uploadMultipart(
                 url = url,
@@ -557,7 +558,7 @@ internal class PrinterConnectionRepository {
         val uploadContext = currentCoroutineContext()
         return runNetwork {
             val boundary = "MobileSlicerBoundary${System.currentTimeMillis()}"
-            val connection = openConnection(url, "POST", headers, connectTimeoutMs = 7_000, readTimeoutMs = 120_000).apply {
+            val connection = openConnection(url, "POST", headers, connectTimeoutMs = 7_000, readTimeoutMs = 600_000).apply {
                 doOutput = true
                 setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
             }
@@ -773,7 +774,9 @@ internal class PrinterConnectionRepository {
         return runNetwork {
             val connection = openConnection(url, method, headers, connectTimeoutMs = 5_000, readTimeoutMs = 15_000).apply {
                 doOutput = true
-                setRequestProperty("Content-Type", "text/plain")
+                if (headers.keys.none { it.equals("Content-Type", ignoreCase = true) }) {
+                    setRequestProperty("Content-Type", "text/plain")
+                }
             }
             connection.outputStream.use { output ->
                 output.write(body.toByteArray(StandardCharsets.UTF_8))

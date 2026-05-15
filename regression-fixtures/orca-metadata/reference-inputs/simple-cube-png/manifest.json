@@ -1,0 +1,34 @@
+{
+  "baselineConfig": "/home/peanut/Development/MobileSlicer/regression-fixtures/orca-metadata/mobile-baseline-config.json",
+  "baselineConfigSha256": "c64f8f534f34bbd2adafc3da52a18262f99887828da6a5dbb3fc1f4e03a08321",
+  "case": "simple-cube-png",
+  "generated": {
+    "filament": {
+      "path": "/home/peanut/Development/MobileSlicer/regression-fixtures/orca-metadata/reference-inputs/simple-cube-png/filament.json",
+      "sha256": "a5c56a8f34702642e0ab4c1fe4f345c409a8d5b5c219ad48ccee18855c51053a"
+    },
+    "machine": {
+      "path": "/home/peanut/Development/MobileSlicer/regression-fixtures/orca-metadata/reference-inputs/simple-cube-png/machine.json",
+      "sha256": "fb3ceb56ce77da94fbe13d1dae74adccef3cdfbb42974557dc8c58bc5e1af796"
+    },
+    "process": {
+      "path": "/home/peanut/Development/MobileSlicer/regression-fixtures/orca-metadata/reference-inputs/simple-cube-png/process.json",
+      "sha256": "8f41c2075e8dae6139db5683736df7249e086943c99f273d9ea62097c914adaf"
+    }
+  },
+  "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+  "modelSha256": "73491a0d0ca28a15073da4a55f2704d81219b708462200521dd57e3b9c2f9701",
+  "sources": {
+    "filament": "/home/peanut/Development/MobileSlicer/vendor/orcaslicer/resources/profiles/Qidi/filament/Q2/Generic PLA @Qidi Q2 0.4 nozzle.json",
+    "filamentSha256": "081384566b26113062192d5d47a7c42c677b8fadd403e79bc78bc04a8f322d6e",
+    "machine": "/home/peanut/Development/MobileSlicer/vendor/orcaslicer/resources/profiles/Qidi/machine/Qidi Q2 0.4 nozzle.json",
+    "machineSha256": "363abcb15feefb3c508b7c3ceff5f934c5788f8d13692c74301ab2e9d5fa17ce",
+    "process": "/home/peanut/Development/MobileSlicer/vendor/orcaslicer/resources/profiles/Qidi/process/0.20mm Standard @Qidi Q2.json",
+    "processSha256": "8ca2c259d81d9a3aac4c6be02975cce0e4850d1c70cd3dc305035e2e8fe038cc"
+  },
+  "thumbnail": {
+    "legacy_thumbnail_size": false,
+    "thumbnails": "128x128/PNG",
+    "thumbnails_format": "PNG"
+  }
+}

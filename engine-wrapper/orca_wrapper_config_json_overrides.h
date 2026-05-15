@@ -9,6 +9,103 @@ static void apply_android_runtime_gcode_baseline(Slic3r::DynamicPrintConfig& con
     (void)config;
 }
 
+static void set_config_points_if_present_or_clear(
+    const std::string& json,
+    Slic3r::DynamicPrintConfig& config,
+    const char* key,
+    bool clear_when_absent = false
+) {
+    if (const auto value = extract_config_scalar_or_list_string(json, key)) {
+        if (!value->empty()) {
+            config.set_deserialize_strict(key, *value);
+            return;
+        }
+    }
+    if (clear_when_absent || indexed_json_value(json, key).has_value()) {
+        config.set_key_value(key, new Slic3r::ConfigOptionPoints());
+    }
+}
+
+static std::string normalized_nonnegative_scalar_string(
+    const std::string& json,
+    const char* key,
+    const char* fallback = "0"
+) {
+    if (const auto number = extract_number(json, key)) {
+        if (std::isfinite(*number) && *number >= 0.0) {
+            return std::to_string(*number);
+        }
+        return fallback;
+    }
+    if (const auto value = extract_string(json, key)) {
+        const std::string trimmed = trim_copy(*value);
+        if (trimmed.empty()) {
+            return fallback;
+        }
+        char* end = nullptr;
+        const double parsed = std::strtod(trimmed.c_str(), &end);
+        if (end != trimmed.c_str() && *end == '\0' && std::isfinite(parsed) && parsed >= 0.0) {
+            return trimmed;
+        }
+    }
+    return fallback;
+}
+
+static std::string uppercase_ascii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    return value;
+}
+
+static std::string normalize_thumbnail_dimensions_with_format(std::string raw_thumbnails, std::string default_format)
+{
+    default_format = uppercase_ascii(trim_copy(default_format));
+    if (default_format.empty()) {
+        default_format = "PNG";
+    }
+    raw_thumbnails.erase(std::remove(raw_thumbnails.begin(), raw_thumbnails.end(), '['), raw_thumbnails.end());
+    raw_thumbnails.erase(std::remove(raw_thumbnails.begin(), raw_thumbnails.end(), ']'), raw_thumbnails.end());
+    raw_thumbnails.erase(std::remove(raw_thumbnails.begin(), raw_thumbnails.end(), '"'), raw_thumbnails.end());
+
+    std::string normalized;
+    size_t begin = 0;
+    while (begin <= raw_thumbnails.size()) {
+        const size_t comma = raw_thumbnails.find(',', begin);
+        std::string item = trim_copy(raw_thumbnails.substr(begin, comma == std::string::npos ? std::string::npos : comma - begin));
+        if (!item.empty()) {
+            if (!normalized.empty()) {
+                normalized += ", ";
+            }
+            normalized += item;
+            if (item.find('/') == std::string::npos) {
+                normalized += "/";
+                normalized += default_format;
+            }
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        begin = comma + 1;
+    }
+    return normalized;
+}
+
+static void set_normalized_thumbnail_config_if_present(const std::string& json, Slic3r::DynamicPrintConfig& config)
+{
+    auto raw_thumbnails = extract_config_scalar_or_list_string(json, "thumbnails");
+    if (!raw_thumbnails || trim_copy(*raw_thumbnails).empty()) {
+        raw_thumbnails = extract_config_scalar_or_list_string(json, "thumbnail_size");
+    }
+    if (!raw_thumbnails || trim_copy(*raw_thumbnails).empty()) {
+        return;
+    }
+    const std::string format = extract_string(json, "thumbnails_format").value_or("PNG");
+    config.set_deserialize_strict("thumbnails", normalize_thumbnail_dimensions_with_format(*raw_thumbnails, format));
+    config.set_deserialize_strict("thumbnails_format", uppercase_ascii(trim_copy(format.empty() ? std::string("PNG") : format)));
+}
+
 static void apply_json_overrides(const std::string& json, Slic3r::DynamicPrintConfig& config)
 {
     if (json.empty()) {
@@ -31,15 +128,11 @@ static void apply_json_overrides(const std::string& json, Slic3r::DynamicPrintCo
     if (const auto value = extract_number(json, "bottom_shell_layers")) {
         config.set_deserialize_strict("bottom_shell_layers", std::to_string(static_cast<int>(*value)));
     }
-    if (const auto value = extract_string(json, "top_shell_thickness")) {
-        config.set_deserialize_strict("top_shell_thickness", *value);
-    } else if (const auto value = extract_number(json, "top_shell_thickness")) {
-        config.set_deserialize_strict("top_shell_thickness", std::to_string(*value));
+    if (indexed_json_value(json, "top_shell_thickness").has_value()) {
+        config.set_deserialize_strict("top_shell_thickness", normalized_nonnegative_scalar_string(json, "top_shell_thickness"));
     }
-    if (const auto value = extract_string(json, "bottom_shell_thickness")) {
-        config.set_deserialize_strict("bottom_shell_thickness", *value);
-    } else if (const auto value = extract_number(json, "bottom_shell_thickness")) {
-        config.set_deserialize_strict("bottom_shell_thickness", std::to_string(*value));
+    if (indexed_json_value(json, "bottom_shell_thickness").has_value()) {
+        config.set_deserialize_strict("bottom_shell_thickness", normalized_nonnegative_scalar_string(json, "bottom_shell_thickness"));
     }
     if (const auto value = extract_string(json, "printer_settings_id")) {
         config.set_deserialize_strict("printer_settings_id", *value);
@@ -64,8 +157,6 @@ static void apply_json_overrides(const std::string& json, Slic3r::DynamicPrintCo
         "infill_jerk",
         "print_compatible_printers",
         "printhost_authorization_type",
-        "thumbnails",
-        "thumbnails_format",
         "top_surface_jerk",
         "travel_acceleration",
         "upward_compatible_machine",
@@ -74,6 +165,7 @@ static void apply_json_overrides(const std::string& json, Slic3r::DynamicPrintCo
     }) {
         set_config_string_if_present(json, config, key);
     }
+    set_normalized_thumbnail_config_if_present(json, config);
     for (const char* key : {
         "combine_brims",
         "exclude_object",
@@ -83,6 +175,7 @@ static void apply_json_overrides(const std::string& json, Slic3r::DynamicPrintCo
     }) {
         set_config_bool_if_present(json, config, key);
     }
+
     if (const auto value = extract_string(json, "seam_position")) {
         config.set_deserialize_strict("seam_position", *value);
     }
@@ -99,21 +192,9 @@ static void apply_json_overrides(const std::string& json, Slic3r::DynamicPrintCo
     if (bed_width && bed_depth && max_height) {
         apply_printable_volume_override(*bed_width, *bed_depth, *max_height, config);
     }
-    if (const auto value = extract_string(json, "bed_exclude_area")) {
-        if (!value->empty()) {
-            config.set_deserialize_strict("bed_exclude_area", *value);
-        }
-    }
-    if (const auto value = extract_string(json, "wrapping_exclude_area")) {
-        if (!value->empty()) {
-            config.set_deserialize_strict("wrapping_exclude_area", *value);
-        }
-    }
-    if (const auto value = extract_string(json, "head_wrap_detect_zone")) {
-        if (!value->empty()) {
-            config.set_deserialize_strict("head_wrap_detect_zone", *value);
-        }
-    }
+    set_config_points_if_present_or_clear(json, config, "bed_exclude_area", true);
+    set_config_points_if_present_or_clear(json, config, "wrapping_exclude_area");
+    set_config_points_if_present_or_clear(json, config, "head_wrap_detect_zone");
     if (const auto value = extract_bool(json, "support_multi_bed_types")) {
         config.set_deserialize_strict("support_multi_bed_types", *value ? "1" : "0");
     }
@@ -1381,6 +1462,9 @@ static void apply_json_overrides(const std::string& json, Slic3r::DynamicPrintCo
     if (const auto value = extract_bool(json, "only_one_wall_top")) {
         config.set_deserialize_strict("only_one_wall_top", *value ? "1" : "0");
     }
+    if (const auto value = extract_bool(json, "only_one_wall_first_layer")) {
+        config.set_deserialize_strict("only_one_wall_first_layer", *value ? "1" : "0");
+    }
     if (const auto value = extract_string(json, "top_surface_pattern")) {
         config.set_deserialize_strict("top_surface_pattern", *value);
     }
@@ -1533,7 +1617,6 @@ static void apply_json_overrides(const std::string& json, Slic3r::DynamicPrintCo
     if (const auto value = extract_string(json, "start_gcode")) {
         config.set_deserialize_strict("start_gcode", *value);
     }
-
     // Multi-material plate overlays arrive from Android as JSON arrays. The
     // scalar helpers intentionally read the first array item for legacy
     // single-material flows, so reapply Orca vector-valued keys through the

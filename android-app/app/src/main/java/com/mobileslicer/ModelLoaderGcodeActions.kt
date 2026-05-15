@@ -4,6 +4,8 @@ import com.mobileslicer.calibration.CalibrationJob
 import com.mobileslicer.printerconnection.BambuLanPrintOptions
 import com.mobileslicer.printerconnection.PrinterUploadAction
 import com.mobileslicer.profiles.PrinterProfile
+import com.mobileslicer.profiles.FilamentProfile
+import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.workspace.SliceResultSummary
 
@@ -42,6 +44,27 @@ internal fun effectiveGcodeFileNameForFile(
         filamentMaterial = filamentMaterial,
         fallbackName = fallbackName
     )
+}
+
+internal fun activeExportFilamentMaterial(
+    plateObjects: List<PlateObject>,
+    plateFilamentSlots: List<PlateFilamentSlot>,
+    fallbackFilament: FilamentProfile
+): String {
+    val activeSlots = activePlateFilamentSlots(plateFilamentSlots, plateObjects).ifEmpty {
+        return fallbackFilament.materialType
+    }
+    val usedIndexes = actuallyUsedPlateFilamentSlotIndexes(activeSlots, plateObjects)
+    val usedSlots = if (usedIndexes.isEmpty()) {
+        activeSlots.take(1)
+    } else {
+        activeSlots.filter { it.index in usedIndexes }.ifEmpty { activeSlots.take(1) }
+    }
+    return usedSlots
+        .mapNotNull { slot -> slot.materialType.ifBlank { slot.label }.takeIf { it.isNotBlank() } }
+        .distinctBy { it.uppercase() }
+        .joinToString("_")
+        .ifBlank { fallbackFilament.materialType }
 }
 
 internal data class ModelLoaderGcodeFileAction(

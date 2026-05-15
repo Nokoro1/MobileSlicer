@@ -50,6 +50,34 @@ mkdir -p "$DEPS_BUILD" "$DEPS_INSTALL"
 
 NPROC=$(nproc 2>/dev/null || echo 4)
 
+download_extract() {
+    local url="$1"
+    local dest="$2"
+    local strip_components="${3:-1}"
+
+    if [ ! -d "$dest" ]; then
+        mkdir -p "$dest"
+        cd "$dest"
+        curl -fsSL "$url" | tar xz --strip-components="$strip_components"
+    fi
+}
+
+apply_occt_android_fixes() {
+    local src_dir="$1"
+    local freetype_file="$src_dir/src/Font/Font_FTFont.cxx"
+    local brep_font_file="$src_dir/src/StdPrs/StdPrs_BRepFont.cxx"
+
+    if [ -f "$freetype_file" ] \
+            && ! awk 'prev ~ /#ifdef HAVE_FREETYPE/ && /FT_LOAD_TARGET_LIGHT/ { found = 1 } { prev = $0 } END { exit found ? 0 : 1 }' "$freetype_file"; then
+        perl -0pi -e 's/(  setLoadFlag \(FT_LOAD_TARGET_LIGHT,   \(theParams\.FontHinting & Font_Hinting_Light\) != 0\);\n  setLoadFlag \(FT_LOAD_NO_HINTING,     \(theParams\.FontHinting & Font_Hinting_Normal\) == 0\n                                    && \(theParams\.FontHinting & Font_Hinting_Light\)  == 0\);\n)/#ifdef HAVE_FREETYPE\n$1#endif\n/' "$freetype_file"
+        perl -0pi -e 's/(  setLoadFlag \(FT_LOAD_FORCE_AUTOHINT, \(theParams\.FontHinting & Font_Hinting_ForceAutohint\) != 0\);\n  setLoadFlag \(FT_LOAD_NO_AUTOHINT,    \(theParams\.FontHinting & Font_Hinting_NoAutohint\) != 0\);\n)/#ifdef HAVE_FREETYPE\n$1#endif\n/' "$freetype_file"
+    fi
+
+    if [ -f "$brep_font_file" ]; then
+        perl -0pi -e 's/const char\* aTags      = &anOutline->tags\[aStartIndex\];/const auto* aTags      = \&anOutline->tags[aStartIndex];/' "$brep_font_file"
+    fi
+}
+
 # ========== GMP ==========
 build_gmp() {
     echo "=== Building GMP ==="
@@ -163,7 +191,10 @@ build_boost() {
     local headers_dir="$DEPS_INSTALL/${ABI_SUFFIX}-boost-headers/include"
     local staged_src_dir="$DEPS_SRC_ROOT/boost-1.84.0"
 
-    if [ -f "$install_dir/lib/libboost_filesystem.a" ]; then
+    if [ -f "$install_dir/lib/libboost_filesystem.a" ] \
+            && [ -f "$install_dir/lib/libboost_thread.a" ] \
+            && [ -f "$install_dir/lib/libboost_chrono.a" ] \
+            && [ -f "$install_dir/lib/libboost_atomic.a" ]; then
         echo "Boost already built, skipping"
         return
     fi
@@ -293,6 +324,40 @@ build_nlopt() {
     echo "NLopt done: $install_dir"
 }
 
+# ========== libjpeg-turbo ==========
+build_jpeg() {
+    echo "=== Building libjpeg-turbo ==="
+    local src_dir="$DEPS_BUILD/jpeg-src"
+    local build_dir="$DEPS_BUILD/jpeg-build"
+    local install_dir="$DEPS_INSTALL/${ABI_SUFFIX}-jpeg"
+
+    if [ -f "$install_dir/lib/libjpeg.a" ] && [ -f "$install_dir/include/jpeglib.h" ]; then
+        echo "libjpeg-turbo already built, skipping"
+        return
+    fi
+
+    download_extract "https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/3.0.1.tar.gz" "$src_dir"
+
+    rm -rf "$build_dir"
+    mkdir -p "$build_dir"
+    cd "$build_dir"
+
+    cmake "$src_dir" \
+        -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+        -DANDROID_ABI=$ABI \
+        -DANDROID_PLATFORM=android-$API_LEVEL \
+        -DCMAKE_INSTALL_PREFIX="$install_dir" \
+        -DENABLE_SHARED=OFF \
+        -DENABLE_STATIC=ON \
+        -DWITH_JPEG8=ON \
+        -DWITH_SIMD=OFF \
+        -DWITH_TURBOJPEG=OFF
+
+    cmake --build . -j"$NPROC"
+    cmake --install .
+    echo "libjpeg-turbo done: $install_dir"
+}
+
 # ========== CGAL (header-only) ==========
 build_cgal() {
     echo "=== Building CGAL (header-only) ==="
@@ -327,6 +392,73 @@ build_cgal() {
     echo "CGAL done: $install_dir"
 }
 
+# ========== OCCT / Open CASCADE (STEP import) ==========
+build_occt() {
+    echo "=== Building OCCT (STEP import) ==="
+    local src_dir="$DEPS_BUILD/occt-src"
+    local build_dir="$DEPS_BUILD/occt-build"
+    local install_dir="$DEPS_INSTALL/${ABI_SUFFIX}-occt"
+    local patch_file="$PROJECT_ROOT/vendor/orcaslicer/deps/OCCT/0001-OCCT-fix.patch"
+
+    if [ -f "$install_dir/lib/cmake/occt/OpenCASCADEConfig.cmake" ] \
+            && [ -f "$install_dir/lib/occt/libTKXDESTEP.a" ]; then
+        echo "OCCT already built, skipping"
+        return
+    fi
+
+    download_extract "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V7_6_0.tar.gz" "$src_dir"
+
+    if [ -f "$patch_file" ] && [ ! -f "$src_dir/.mobileslicer-orca-occt-patch-applied" ]; then
+        cd "$src_dir"
+        git apply --verbose --ignore-space-change --whitespace=fix "$patch_file"
+        touch "$src_dir/.mobileslicer-orca-occt-patch-applied"
+    fi
+    apply_occt_android_fixes "$src_dir"
+
+    rm -rf "$build_dir"
+    mkdir -p "$build_dir"
+    cd "$build_dir"
+
+    cmake "$src_dir" \
+        -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+        -DANDROID_ABI="$ABI" \
+        -DANDROID_PLATFORM="android-$API_LEVEL" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DCMAKE_INSTALL_PREFIX="$install_dir" \
+        -DINSTALL_DIR_LAYOUT=Unix \
+        -DINSTALL_DIR_BIN=bin/occt \
+        -DINSTALL_DIR_LIB=lib/occt \
+        -DINSTALL_DIR_INCLUDE=include/occt \
+        -DINSTALL_DIR_CMAKE=lib/cmake/occt \
+        -DBUILD_LIBRARY_TYPE=Static \
+        -DBUILD_DOC_Overview=OFF \
+        -DBUILD_MODULE_ApplicationFramework=OFF \
+        -DBUILD_MODULE_Draw=OFF \
+        -DBUILD_MODULE_FoundationClasses=OFF \
+        -DBUILD_MODULE_ModelingAlgorithms=OFF \
+        -DBUILD_MODULE_ModelingData=OFF \
+        -DBUILD_MODULE_Visualization=OFF \
+        -DUSE_FFMPEG=OFF \
+        -DUSE_FREEIMAGE=OFF \
+        -DUSE_FREETYPE=OFF \
+        -DUSE_OPENGL=OFF \
+        -DUSE_RAPIDJSON=OFF \
+        -DUSE_TBB=OFF \
+        -DUSE_TCL=OFF \
+        -DUSE_TK=OFF \
+        -DUSE_VTK=OFF
+
+    cmake --build . -j"$NPROC"
+    cmake --install .
+
+    mkdir -p "$install_dir/share/licenses/occt"
+    cp "$src_dir/LICENSE_LGPL_21.txt" "$install_dir/share/licenses/occt/" 2>/dev/null || true
+    cp "$src_dir/OCCT_LGPL_EXCEPTION.txt" "$install_dir/share/licenses/occt/" 2>/dev/null || true
+
+    echo "OCCT done: $install_dir"
+}
+
 echo "Building Android dependencies..."
 echo "NDK: $NDK_ROOT"
 echo "ABI: $ABI ($ABI_SUFFIX)"
@@ -341,7 +473,9 @@ build_openssl
 build_boost
 build_tbb
 build_nlopt
+build_jpeg
 build_cgal
+build_occt
 
 echo ""
 echo "=== All dependencies built ==="
@@ -351,5 +485,7 @@ echo "OpenSSL: $DEPS_INSTALL/${ABI_SUFFIX}-openssl"
 echo "Boost:   $DEPS_INSTALL/${ABI_SUFFIX}-boost-cgal (headers: $DEPS_INSTALL/${ABI_SUFFIX}-boost-headers/include)"
 echo "TBB:     $DEPS_INSTALL/${ABI_SUFFIX}-tbb-static2"
 echo "NLopt:   $DEPS_INSTALL/${ABI_SUFFIX}-nlopt"
+echo "JPEG:    $DEPS_INSTALL/${ABI_SUFFIX}-jpeg"
 echo "CGAL:    $DEPS_INSTALL/${ABI_SUFFIX}-cgal"
+echo "OCCT:    $DEPS_INSTALL/${ABI_SUFFIX}-occt"
 echo "Boost source: $DEPS_SRC_ROOT/boost-1.84.0"

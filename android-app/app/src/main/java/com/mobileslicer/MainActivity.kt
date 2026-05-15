@@ -127,6 +127,8 @@ import com.mobileslicer.storage.PreparedViewerMeshCache
 import com.mobileslicer.storage.PrinterCredentialStore
 import com.mobileslicer.storage.SavedProject
 import com.mobileslicer.storage.SavedProjectRepository
+import com.mobileslicer.modelsearch.importflow.ModelImportIntentResolver
+import com.mobileslicer.modelsearch.thingiverse.thingiverseOAuthRedirectFrom
 import com.mobileslicer.viewer.StlMesh
 import com.mobileslicer.viewer.StlMeshParser
 import com.mobileslicer.nativebridge.NativeEngineBridge
@@ -185,6 +187,8 @@ class MainActivity : ComponentActivity() {
     internal val simplyPrintOAuthClient = SimplyPrintOAuthClient()
     internal lateinit var appPreferenceStore: AppPreferenceStore
     internal lateinit var printerCredentialStore: PrinterCredentialStore
+    internal val pendingExternalModelImportUri = mutableStateOf<Uri?>(null)
+    internal val pendingThingiverseOAuthRedirectUri = mutableStateOf<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -194,11 +198,19 @@ class MainActivity : ComponentActivity() {
         stagedModelFile = workspaceSessionViewModel.currentModelFilePath.value
             ?.let(::File)
             ?.takeIf { it.exists() }
-        currentModelName = stagedModelFile?.nameWithoutExtension?.removePrefix("selected-model-")
+        currentModelName = stagedModelFile?.let(::displayStemForModelFile)
         cleanupCacheArtifacts()
 
         if (maybeRunAutomation(intent)) {
             return
+        }
+        pendingThingiverseOAuthRedirectUri.value = thingiverseOAuthRedirectFrom(
+            intent = intent,
+            expectedScheme = Uri.parse(BuildConfig.THINGIVERSE_REDIRECT_URI).scheme.orEmpty(),
+            expectedHost = Uri.parse(BuildConfig.THINGIVERSE_REDIRECT_URI).host.orEmpty()
+        )
+        if (pendingThingiverseOAuthRedirectUri.value == null) {
+            pendingExternalModelImportUri.value = ModelImportIntentResolver.resolve(intent)
         }
 
         setContent {
@@ -273,9 +285,37 @@ class MainActivity : ComponentActivity() {
                         onProfileStoreChanged = { store -> storeProfileStore(store) },
                         onSavedProjectsChanged = { projects -> storeSavedProjects(projects) },
                         workspaceSession = workspaceSessionViewModel,
+                        externalModelImportUri = pendingExternalModelImportUri.value,
+                        thingiverseOAuthRedirectUri = pendingThingiverseOAuthRedirectUri.value,
+                        onExternalModelImportUriConsumed = {
+                            pendingExternalModelImportUri.value = null
+                            intent?.let { currentIntent ->
+                                val consumedIntent = Intent(currentIntent)
+                                    .setAction(Intent.ACTION_MAIN)
+                                    .setData(null)
+                                consumedIntent.removeExtra(Intent.EXTRA_STREAM)
+                                setIntent(consumedIntent)
+                            }
+                        },
+                        onThingiverseOAuthRedirectConsumed = {
+                            pendingThingiverseOAuthRedirectUri.value = null
+                            intent?.let { currentIntent ->
+                                val consumedIntent = Intent(currentIntent)
+                                    .setAction(Intent.ACTION_MAIN)
+                                    .setData(null)
+                                setIntent(consumedIntent)
+                            }
+                        },
+                        onFreshWorkspaceStarted = {
+                            clearFreshWorkspaceRuntimeArtifacts()
+                        },
                         onModelSelected = { uri ->
                             ensureEngineForUi()
                             loadModelFromUri(uri)
+                        },
+                        onScannerWorkspaceModelSelected = { modelFile ->
+                            ensureEngineForUi()
+                            loadScannerWorkspaceModelFromFile(modelFile)
                         },
                         onWorkspaceMeshPreparationRequested = { modelFilePath ->
                             prepareWorkspaceMesh(modelFilePath)
@@ -300,6 +340,10 @@ class MainActivity : ComponentActivity() {
                         onNativeAutoOrientRequested = { configJson, plateObjects, selectedPlateObjectId, printerBed ->
                             ensureEngineForUi()
                             planNativeAutoOrientation(configJson, plateObjects, selectedPlateObjectId, printerBed)
+                        },
+                        onNativePlatePlanningPrewarmRequested = { plateObjects, printerBed ->
+                            ensureEngineForUi()
+                            prewarmNativePlatePlanningModels(plateObjects, printerBed)
                         },
                         onNativePlatePlanningCancelRequested = {
                             cancelNativePlatePlanning()
@@ -366,6 +410,25 @@ class MainActivity : ComponentActivity() {
             preparedViewerMeshCache.clear()
             NativeEngineCalls.trimMemory()
             Runtime.getRuntime().gc()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (maybeRunAutomation(intent)) {
+            return
+        }
+        val thingiverseRedirect = thingiverseOAuthRedirectFrom(
+            intent = intent,
+            expectedScheme = Uri.parse(BuildConfig.THINGIVERSE_REDIRECT_URI).scheme.orEmpty(),
+            expectedHost = Uri.parse(BuildConfig.THINGIVERSE_REDIRECT_URI).host.orEmpty()
+        )
+        if (thingiverseRedirect != null) {
+            pendingThingiverseOAuthRedirectUri.value = thingiverseRedirect
+            pendingExternalModelImportUri.value = null
+        } else {
+            pendingExternalModelImportUri.value = ModelImportIntentResolver.resolve(intent)
         }
     }
 

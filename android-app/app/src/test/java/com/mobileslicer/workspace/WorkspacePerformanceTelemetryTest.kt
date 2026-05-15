@@ -6,14 +6,13 @@ import org.junit.Test
 
 class WorkspacePerformanceTelemetryTest {
     @Test
-    fun summarizesPrepareSliceAndDisplayLod() {
+    fun summarizesPrepareAndSliceWithExactDisplayCounts() {
         val snapshot = workspacePerformanceSnapshot(
             importTiming = ModelImportTiming(stagingMs = 100L, nativeLoadMs = 200L),
             workspacePreparationTiming = WorkspacePreparationTiming(
                 viewerMeshPrepMs = 300L,
                 sourceTriangleCount = 1000,
-                displayTriangleCount = 250,
-                reducedForDisplay = true
+                displayTriangleCount = 1000
             ),
             firstVisibleWorkspaceFrameMs = null,
             sliceTiming = SlicePipelineTiming(
@@ -28,8 +27,7 @@ class WorkspacePerformanceTelemetryTest {
 
         assertEquals(600L, snapshot.prepareDurationMs)
         assertEquals(100L, snapshot.sliceDurationMs)
-        assertEquals("Display LOD: 250/1000 tris", snapshot.displayLodSummary)
-        assertEquals("Prepare: 0.6 seconds • Display LOD: 250/1000 tris • Slice: 0.1 seconds", snapshot.compactSummary())
+        assertEquals("Prepare: 0.6 seconds • Slice: 0.1 seconds", snapshot.compactSummary())
     }
 
     @Test
@@ -74,8 +72,10 @@ class WorkspacePerformanceTelemetryTest {
                 viewerMeshPrepMs = 300L,
                 cacheHit = true,
                 sourceTriangleCount = 1000,
-                displayTriangleCount = 250,
-                reducedForDisplay = true
+                displayTriangleCount = 1000,
+                renderArrayBytes = 72_000L,
+                cacheRetainedBytes = 72_000L,
+                exactPreviewBudgetBytes = 96L * 1024L * 1024L
             ),
             firstVisibleWorkspaceFrameMs = 700L,
             firstVisiblePreviewFrameMs = 50L,
@@ -93,6 +93,10 @@ class WorkspacePerformanceTelemetryTest {
         assertTrue(line.contains("event=workspace_first_visible_frame"))
         assertTrue(line.contains("importTotalMs=300"))
         assertTrue(line.contains("workspaceMeshCacheHit=true"))
+        assertTrue(line.contains("displayExact=true"))
+        assertTrue(line.contains("renderArrayBytes=72000"))
+        assertTrue(line.contains("meshCacheRetainedBytes=72000"))
+        assertTrue(line.contains("exactPreviewBudgetBytes=100663296"))
         assertTrue(line.contains("firstWorkspaceFrameMs=700"))
         assertTrue(line.contains("firstPreviewFrameMs=50"))
         assertTrue(line.contains("sliceTotalMs=15"))

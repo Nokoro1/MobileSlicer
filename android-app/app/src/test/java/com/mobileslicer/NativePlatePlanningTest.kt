@@ -107,6 +107,109 @@ class NativePlatePlanningTest {
     }
 
     @Test
+    fun nativeArrangeOutputCanCarryOrcaBedIndexAfterMatrixTransform() {
+        val bed = PrinterBedSpec(widthMm = 270f, depthMm = 270f, maxHeightMm = 256f)
+        val objectOnPlate = plateObject(
+            id = 1L,
+            bounds = MeshBounds(0f, 0f, 0f, 20f, 20f, 20f),
+            transform = ViewerModelTransform(centerXmm = 135f, centerYmm = 135f)
+        )
+        val values = DoubleArray(NativeModelTransformOutputStride + 1)
+        defaultNativeModelTransform(
+            bounds = objectOnPlate.bounds!!,
+            printerBed = bed,
+            modelTransform = ViewerModelTransform(centerXmm = 180f, centerYmm = 105f)
+        ).writeTo(values, stride = NativeModelTransformOutputStride + 1)
+        values[NativeModelTransformOutputStride] = 2.0
+
+        val plannedObjects = applyNativePlatePlan(
+            plateObjects = listOf(objectOnPlate),
+            bed = bed,
+            nativeTransforms = values,
+            requireAllOnBed = false
+        )
+
+        checkNotNull(plannedObjects)
+        assertEquals(180f, plannedObjects.single().transform.centerXmm, 0.0001f)
+        assertEquals(listOf(2), nativeArrangementBedIndices(values, objectCount = 1))
+    }
+
+    @Test
+    fun nativeOrientCanPreserveCurrentPlateCenter() {
+        val bed = PrinterBedSpec(widthMm = 270f, depthMm = 270f, maxHeightMm = 256f)
+        val objectOnPlate = plateObject(
+            id = 1L,
+            bounds = MeshBounds(100f, 0f, 0f, 140f, 20f, 20f),
+            transform = ViewerModelTransform(centerXmm = 135f, centerYmm = 135f)
+        )
+        val values = DoubleArray(NativeModelTransformOutputStride)
+        val nativeOffsetThatWouldMoveTheCenter = defaultNativeModelTransform(
+            bounds = objectOnPlate.bounds!!,
+            printerBed = bed,
+            modelTransform = ViewerModelTransform(centerXmm = 135f, centerYmm = 135f)
+        )
+        values[0] = nativeOffsetThatWouldMoveTheCenter.xMm
+        values[1] = nativeOffsetThatWouldMoveTheCenter.yMm
+        values[2] = nativeOffsetThatWouldMoveTheCenter.zMm
+        values[3] = 0.0
+        values[4] = -1.0
+        values[5] = 0.0
+        values[6] = 1.0
+        values[7] = 0.0
+        values[8] = 0.0
+        values[9] = 0.0
+        values[10] = 0.0
+        values[11] = 1.0
+        values[12] = 1.0
+        values[13] = 0.0
+        values[14] = 0.0
+        values[15] = Math.toRadians(90.0)
+
+        val plannedObjects = applyNativePlatePlan(
+            plateObjects = listOf(objectOnPlate),
+            bed = bed,
+            nativeTransforms = values,
+            preservePlateCenters = true
+        )
+
+        checkNotNull(plannedObjects)
+        val plannedTransform = plannedObjects.single().transform
+        assertEquals(135f, plannedTransform.centerXmm, 0.0001f)
+        assertEquals(135f, plannedTransform.centerYmm, 0.0001f)
+        assertEquals(
+            listOf(0f, -1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f),
+            plannedTransform.orientationMatrix
+        )
+    }
+
+    @Test
+    fun nativeOrientFallsBackToNativeCenterWhenPreservedCenterDoesNotFit() {
+        val bed = PrinterBedSpec(widthMm = 100f, depthMm = 100f, maxHeightMm = 100f)
+        val objectOnPlate = plateObject(
+            id = 1L,
+            bounds = MeshBounds(0f, 0f, 0f, 20f, 20f, 20f),
+            transform = ViewerModelTransform(centerXmm = 5f, centerYmm = 50f)
+        )
+        val plannedNative = defaultNativeModelTransform(
+            bounds = objectOnPlate.bounds!!,
+            printerBed = bed,
+            modelTransform = ViewerModelTransform(centerXmm = 50f, centerYmm = 50f)
+        )
+        val values = DoubleArray(7).also { plannedNative.writeTo(it) }
+
+        val plannedObjects = applyNativePlatePlan(
+            plateObjects = listOf(objectOnPlate),
+            bed = bed,
+            nativeTransforms = values,
+            preservePlateCenters = true
+        )
+
+        checkNotNull(plannedObjects)
+        assertEquals(50f, plannedObjects.single().transform.centerXmm, 0.0001f)
+        assertEquals(50f, plannedObjects.single().transform.centerYmm, 0.0001f)
+    }
+
+    @Test
     fun invalidNativePlanIsRejectedBeforeMutatingPlateState() {
         val bed = PrinterBedSpec(widthMm = 100f, depthMm = 100f, maxHeightMm = 100f)
         val objectOnPlate = plateObject(
@@ -209,6 +312,84 @@ class NativePlatePlanningTest {
         )
 
         assertEquals(1, nativePlanChangedCount(before, changed))
+    }
+
+    @Test
+    fun singleObjectArrangeFastPathCentersObjectWhenItFits() {
+        val bed = PrinterBedSpec(widthMm = 200f, depthMm = 180f, maxHeightMm = 100f)
+        val objectOnPlate = plateObject(
+            id = 1L,
+            bounds = MeshBounds(0f, 0f, 0f, 20f, 20f, 20f),
+            transform = ViewerModelTransform(centerXmm = 20f, centerYmm = 30f)
+        )
+
+        val plannedObjects = singleObjectAutoArrangeFastPath(listOf(objectOnPlate), bed)
+
+        checkNotNull(plannedObjects)
+        assertEquals(100f, plannedObjects.single().transform.centerXmm, 0.0001f)
+        assertEquals(90f, plannedObjects.single().transform.centerYmm, 0.0001f)
+    }
+
+    @Test
+    fun singleObjectArrangeFastPathRejectsObjectThatDoesNotFit() {
+        val bed = PrinterBedSpec(widthMm = 30f, depthMm = 30f, maxHeightMm = 100f)
+        val objectOnPlate = plateObject(
+            id = 1L,
+            bounds = MeshBounds(0f, 0f, 0f, 40f, 20f, 20f),
+            transform = ViewerModelTransform(centerXmm = 15f, centerYmm = 15f)
+        )
+
+        assertNull(singleObjectAutoArrangeFastPath(listOf(objectOnPlate), bed))
+    }
+
+    @Test
+    fun printableVolumePreflightUsesNativeConfigGeneratedClearance() {
+        val bed = PrinterBedSpec(widthMm = 100f, depthMm = 100f, maxHeightMm = 100f)
+        val objectOnPlate = plateObject(
+            id = 1L,
+            bounds = MeshBounds(0f, 0f, 0f, 20f, 20f, 20f),
+            transform = ViewerModelTransform(centerXmm = 10f, centerYmm = 10f)
+        )
+        val clearance = generatedFootprintClearanceMm(
+            """{"brim_type":"outer_only","brim_width":6.0,"skirt_loops":0,"skirt_distance":0.0}"""
+        )
+
+        val failure = printableVolumePreflightFailure(
+            plateObjects = listOf(objectOnPlate),
+            fallbackBounds = null,
+            fallbackTransform = null,
+            fallbackModelPath = null,
+            bed = bed,
+            clearance = clearance,
+            defaultTransform = ViewerModelTransform(centerXmm = 50f, centerYmm = 50f)
+        )
+
+        assertTrue(failure.orEmpty().contains("Printable volume exceeded"))
+    }
+
+    @Test
+    fun printableVolumePreflightAcceptsSameObjectWhenGeneratedClearanceDisabled() {
+        val bed = PrinterBedSpec(widthMm = 100f, depthMm = 100f, maxHeightMm = 100f)
+        val objectOnPlate = plateObject(
+            id = 1L,
+            bounds = MeshBounds(0f, 0f, 0f, 20f, 20f, 20f),
+            transform = ViewerModelTransform(centerXmm = 10f, centerYmm = 10f)
+        )
+        val clearance = generatedFootprintClearanceMm(
+            """{"brim_type":"no_brim","brim_width":0.0,"skirt_loops":0,"skirt_distance":0.0}"""
+        )
+
+        val failure = printableVolumePreflightFailure(
+            plateObjects = listOf(objectOnPlate),
+            fallbackBounds = null,
+            fallbackTransform = null,
+            fallbackModelPath = null,
+            bed = bed,
+            clearance = clearance,
+            defaultTransform = ViewerModelTransform(centerXmm = 50f, centerYmm = 50f)
+        )
+
+        assertNull(failure)
     }
 
     private fun plateObject(

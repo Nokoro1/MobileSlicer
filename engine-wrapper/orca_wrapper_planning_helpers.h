@@ -15,6 +15,136 @@ struct NativePlateTransform {
     bool has_orientation_matrix { false };
 };
 
+static std::optional<std::string> planning_model_cache_key(const char* path)
+{
+    if (path == nullptr || path[0] == '\0') {
+        return std::nullopt;
+    }
+    std::error_code error;
+    const std::filesystem::path file_path(path);
+    if (!std::filesystem::exists(file_path, error) || error) {
+        return std::nullopt;
+    }
+    const auto size = std::filesystem::file_size(file_path, error);
+    if (error) {
+        return std::nullopt;
+    }
+    const auto last_write = std::filesystem::last_write_time(file_path, error);
+    if (error) {
+        return std::nullopt;
+    }
+    const auto mtime = static_cast<long long>(last_write.time_since_epoch().count());
+    return std::string(path) + "|size=" + std::to_string(static_cast<unsigned long long>(size)) +
+        "|mtime=" + std::to_string(mtime);
+}
+
+static Slic3r::Model load_source_planning_model_from_file(const char* path)
+{
+    Slic3r::Model model;
+    if (has_stl_extension(path)) {
+        if (!Slic3r::load_stl(path, &model, nullptr, nullptr, 80)) {
+            throw std::runtime_error("stl load failed");
+        }
+        model.add_default_instances();
+        for (Slic3r::ModelObject* object : model.objects) {
+            if (object != nullptr) {
+                object->input_file = path;
+            }
+        }
+    } else {
+        model = Slic3r::Model::read_from_file(
+            path,
+            nullptr,
+            nullptr,
+            Slic3r::LoadStrategy::AddDefaultInstances | Slic3r::LoadStrategy::LoadModel);
+    }
+    for (Slic3r::ModelObject* object : model.objects) {
+        if (object != nullptr && object->instances.empty()) {
+            object->add_instance();
+        }
+    }
+    if (model.objects.empty()) {
+        throw std::runtime_error("loaded plate model contains no objects");
+    }
+    return model;
+}
+
+static const Slic3r::Model& cached_source_planning_model(OrcaEngine* engine, const char* path, bool* cache_hit = nullptr)
+{
+    if (engine == nullptr) {
+        throw std::runtime_error("native planning cache has no engine");
+    }
+    const std::optional<std::string> key = planning_model_cache_key(path);
+    if (!key) {
+        throw std::runtime_error("plate model path is unavailable for planning cache");
+    }
+
+    ++engine->impl.planning_cache_generation;
+    for (OrcaEngineImpl::PlanningModelCacheEntry& entry : engine->impl.planning_model_cache) {
+        if (entry.key == *key) {
+            entry.last_used_generation = engine->impl.planning_cache_generation;
+            if (cache_hit != nullptr) {
+                *cache_hit = true;
+            }
+            return entry.model;
+        }
+    }
+
+    OrcaEngineImpl::PlanningModelCacheEntry entry;
+    entry.key = *key;
+    entry.model = load_source_planning_model_from_file(path);
+    entry.last_used_generation = engine->impl.planning_cache_generation;
+    engine->impl.planning_model_cache.emplace_back(std::move(entry));
+    constexpr size_t max_planning_cache_entries = 6;
+    while (engine->impl.planning_model_cache.size() > max_planning_cache_entries) {
+        auto oldest = std::min_element(
+            engine->impl.planning_model_cache.begin(),
+            engine->impl.planning_model_cache.end(),
+            [](const auto& left, const auto& right) {
+                return left.last_used_generation < right.last_used_generation;
+            });
+        if (oldest == engine->impl.planning_model_cache.end()) {
+            break;
+        }
+        engine->impl.planning_model_cache.erase(oldest);
+    }
+    if (cache_hit != nullptr) {
+        *cache_hit = false;
+    }
+    return engine->impl.planning_model_cache.back().model;
+}
+
+static int prewarm_source_planning_models(OrcaEngine* engine, const char* const* paths, int count)
+{
+    if (engine == nullptr || paths == nullptr || count <= 0) {
+        return ORCA_ERROR_INVALID_ARGUMENT;
+    }
+    try {
+        int misses = 0;
+        for (int index = 0; index < count; ++index) {
+            bool cache_hit = false;
+            cached_source_planning_model(engine, paths[index], &cache_hit);
+            if (!cache_hit) {
+                ++misses;
+            }
+        }
+        std::ostringstream message;
+        message << "count=" << count
+                << " misses=" << misses
+                << " entries=" << engine->impl.planning_model_cache.size();
+        log_native_info("orca_prewarm_plate_planning_models", message.str());
+        return ORCA_SUCCESS;
+    } catch (const std::exception& exception) {
+        set_last_error(engine, exception.what());
+        log_native_error("orca_prewarm_plate_planning_models", exception.what());
+        return ORCA_ERROR_LOAD_MODEL;
+    } catch (...) {
+        set_last_error(engine, "unknown native planning prewarm failure");
+        log_native_error("orca_prewarm_plate_planning_models", "unknown exception");
+        return ORCA_ERROR_LOAD_MODEL;
+    }
+}
+
 static NativePlateTransform read_native_plate_transform(const double* transforms, int index, int transform_stride)
 {
     if (transform_stride != 7 && transform_stride != 16) {
@@ -76,6 +206,7 @@ static void apply_native_plate_transform(Slic3r::ModelInstance* instance, const 
 }
 
 static PlannedPlateModel load_transformed_plate_model_for_planning(
+    OrcaEngine* engine,
     const char* const* paths,
     const double* transforms,
     int transform_stride,
@@ -93,22 +224,11 @@ static PlannedPlateModel load_transformed_plate_model_for_planning(
         const std::string path_key(path);
         auto cached_model = model_cache.find(path_key);
         if (cached_model == model_cache.end()) {
-            Slic3r::Model model_for_cache;
-            if (has_stl_extension(path)) {
-                if (!Slic3r::load_stl(path, &model_for_cache, nullptr, nullptr, 80)) {
-                    throw std::runtime_error("stl load failed");
-                }
-                model_for_cache.add_default_instances();
-                for (Slic3r::ModelObject* object : model_for_cache.objects) {
-                    object->input_file = path;
-                }
-            } else {
-                model_for_cache = Slic3r::Model::read_from_file(
-                    path,
-                    nullptr,
-                    nullptr,
-                    Slic3r::LoadStrategy::AddDefaultInstances | Slic3r::LoadStrategy::LoadModel);
-            }
+            bool persistent_cache_hit = false;
+            Slic3r::Model model_for_cache = cached_source_planning_model(engine, path, &persistent_cache_hit);
+            log_native_info(
+                "orca_plan_model_cache",
+                std::string(persistent_cache_hit ? "hit " : "miss ") + path_key);
             cached_model = model_cache.emplace(path_key, std::move(model_for_cache)).first;
         }
         const Slic3r::Model& loaded_model = cached_model->second;
@@ -221,10 +341,10 @@ static bool arrange_polygons_overlap(const Slic3r::arrangement::ArrangePolygons&
 {
     for (size_t left_index = 0; left_index < items.size(); ++left_index) {
         const Slic3r::arrangement::ArrangePolygon& left = items[left_index];
-        if (!left.is_arranged() || left.bed_idx != 0) {
+        if (!left.is_arranged()) {
             if (reason != nullptr) {
                 std::ostringstream message;
-                message << "item " << left_index << " was not arranged on physical bed"
+                message << "item " << left_index << " was not arranged"
                         << " bed=" << left.bed_idx;
                 *reason = message.str();
             }
@@ -233,14 +353,17 @@ static bool arrange_polygons_overlap(const Slic3r::arrangement::ArrangePolygons&
         const auto left_bbox = left.transformed_poly().contour.bounding_box();
         for (size_t right_index = left_index + 1; right_index < items.size(); ++right_index) {
             const Slic3r::arrangement::ArrangePolygon& right = items[right_index];
-            if (!right.is_arranged() || right.bed_idx != 0) {
+            if (!right.is_arranged()) {
                 if (reason != nullptr) {
                     std::ostringstream message;
-                    message << "item " << right_index << " was not arranged on physical bed"
+                    message << "item " << right_index << " was not arranged"
                             << " bed=" << right.bed_idx;
                     *reason = message.str();
                 }
                 return true;
+            }
+            if (left.bed_idx != right.bed_idx) {
+                continue;
             }
             const auto right_bbox = right.transformed_poly().contour.bounding_box();
             const bool bounding_boxes_overlap =

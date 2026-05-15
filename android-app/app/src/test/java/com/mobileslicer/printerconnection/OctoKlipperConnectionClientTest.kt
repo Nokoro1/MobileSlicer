@@ -7,6 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.json.JSONObject
 
 class OctoKlipperConnectionClientTest {
     @Test
@@ -15,11 +16,13 @@ class OctoKlipperConnectionClientTest {
         val client = OctoKlipperConnectionClient(
             requestText = { url, _, _ ->
                 when {
+                    url.endsWith("/server/info") -> NetworkResult.Failure("not moonraker")
                     url.endsWith("/api/version") -> NetworkResult.Success
                     else -> NetworkResult.Failure("unexpected request")
                 }
             },
             requestTextBody = { _, _, _ -> TextNetworkResult.Failure("unused") },
+            sendRawBody = { _, _, _, _ -> NetworkResult.Failure("unused") },
             uploadMultipart = { url, headers, fields, _, fileFieldName, remoteFileName, _ ->
                 uploads += UploadCall(url, headers, fields, fileFieldName, remoteFileName)
                 NetworkResult.Success
@@ -56,12 +59,13 @@ class OctoKlipperConnectionClientTest {
         val client = OctoKlipperConnectionClient(
             requestText = { url, _, _ ->
                 when {
-                    url.endsWith("/api/version") -> NetworkResult.Failure("not octoprint")
                     url.endsWith("/server/info") -> NetworkResult.Success
+                    url.endsWith("/api/version") -> NetworkResult.Failure("should prefer moonraker")
                     else -> NetworkResult.Failure("unexpected request")
                 }
             },
             requestTextBody = { _, _, _ -> TextNetworkResult.Failure("unused") },
+            sendRawBody = { _, _, _, _ -> NetworkResult.Failure("unused") },
             uploadMultipart = { url, headers, fields, _, fileFieldName, remoteFileName, _ ->
                 uploads += UploadCall(url, headers, fields, fileFieldName, remoteFileName)
                 NetworkResult.Success
@@ -95,18 +99,29 @@ class OctoKlipperConnectionClientTest {
     @Test
     fun moonrakerUploadAndStartQuotesFilenameInStartCommand() = runBlocking {
         val requestUrls = mutableListOf<String>()
+        val rawBodies = mutableListOf<RawBodyCall>()
         val uploadedNames = mutableListOf<String>()
         val client = OctoKlipperConnectionClient(
             requestText = { url, _, _ ->
                 requestUrls += url
                 when {
-                    url.endsWith("/api/version") -> NetworkResult.Failure("not octoprint")
                     url.endsWith("/server/info") -> NetworkResult.Success
-                    "/printer/gcode/script?" in url -> NetworkResult.Success
+                    url.endsWith("/api/version") -> NetworkResult.Failure("should prefer moonraker")
+                    "/printer/print/start?" in url -> NetworkResult.Success
                     else -> NetworkResult.Failure("unexpected request")
                 }
             },
-            requestTextBody = { _, _, _ -> TextNetworkResult.Failure("unused") },
+            requestTextBody = { url, _, _ ->
+                requestUrls += url
+                when {
+                    "/server/files/metadata?" in url -> TextNetworkResult.Success("""{"result":{"estimated_time":42}}""")
+                    else -> TextNetworkResult.Failure("unexpected request")
+                }
+            },
+            sendRawBody = { url, method, headers, body ->
+                rawBodies += RawBodyCall(url, method, headers, body)
+                NetworkResult.Success
+            },
             uploadMultipart = { _, _, _, _, _, remoteFileName, _ ->
                 uploadedNames += remoteFileName
                 NetworkResult.Success
@@ -123,8 +138,177 @@ class OctoKlipperConnectionClientTest {
 
         assertTrue(result.success)
         assertEquals(listOf("3DBenchy test.gcode"), uploadedNames)
-        val startUrl = requestUrls.first { "/printer/gcode/script?" in it }
-        assertTrue(startUrl.contains("SDCARD_PRINT_FILE%20FILENAME%3D%223DBenchy%20test.gcode%22"))
+        assertTrue(requestUrls.any { "/server/files/metadata?filename=3DBenchy%20test.gcode" in it })
+        assertTrue(rawBodies.isEmpty())
+        val startUrl = requestUrls.first { "/printer/print/start?" in it }
+        assertTrue(startUrl.contains("filename=3DBenchy%20test.gcode"))
+    }
+
+    @Test
+    fun moonrakerUploadAndStartFallsBackToJsonGcodeScriptWhenPrintStartFails() = runBlocking {
+        val requestUrls = mutableListOf<String>()
+        val rawBodies = mutableListOf<RawBodyCall>()
+        val client = OctoKlipperConnectionClient(
+            requestText = { url, _, _ ->
+                requestUrls += url
+                when {
+                    url.endsWith("/server/info") -> NetworkResult.Success
+                    url.endsWith("/api/version") -> NetworkResult.Failure("should prefer moonraker")
+                    "/printer/print/start?" in url -> NetworkResult.Failure("HTTP 404 from $url")
+                    else -> NetworkResult.Failure("unexpected request")
+                }
+            },
+            requestTextBody = { url, _, _ ->
+                requestUrls += url
+                when {
+                    "/server/files/metadata?" in url -> TextNetworkResult.Success("""{"result":{"estimated_time":42}}""")
+                    else -> TextNetworkResult.Failure("unexpected request")
+                }
+            },
+            sendRawBody = { url, method, headers, body ->
+                rawBodies += RawBodyCall(url, method, headers, body)
+                NetworkResult.Success
+            },
+            uploadMultipart = { _, _, _, _, _, _, _ -> NetworkResult.Success }
+        )
+
+        val result = client.uploadGcode(
+            profile = ProfileStoreRepository.fallbackPrinterProfile(),
+            baseUrl = "http://192.168.1.42:7125",
+            file = tempGcodeFile(),
+            remoteFileName = "fallback.gcode",
+            action = PrinterUploadAction.UploadAndStart,
+            onProgress = {}
+        )
+
+        assertTrue(result.success)
+        val failedStartUrl = requestUrls.first { "/printer/print/start?" in it }
+        assertTrue(failedStartUrl.contains("filename=fallback.gcode"))
+        val fallback = rawBodies.single()
+        assertEquals("http://192.168.1.42:7125/printer/gcode/script", fallback.url)
+        assertEquals("POST", fallback.method)
+        assertEquals("application/json", fallback.headers["Content-Type"])
+        assertEquals(
+            "SDCARD_PRINT_FILE FILENAME=\"fallback.gcode\"",
+            JSONObject(fallback.body).getString("script")
+        )
+    }
+
+    @Test
+    fun moonrakerUploadAndStartFallsBackToQueryScriptWhenJsonScriptFails() = runBlocking {
+        val requestUrls = mutableListOf<String>()
+        val rawBodies = mutableListOf<RawBodyCall>()
+        val client = OctoKlipperConnectionClient(
+            requestText = { url, _, _ ->
+                requestUrls += url
+                when {
+                    url.endsWith("/server/info") -> NetworkResult.Success
+                    url.endsWith("/api/version") -> NetworkResult.Failure("should prefer moonraker")
+                    "/printer/print/start?" in url -> NetworkResult.Failure("HTTP 404 from $url")
+                    "/printer/gcode/script?" in url -> NetworkResult.Success
+                    else -> NetworkResult.Failure("unexpected request")
+                }
+            },
+            requestTextBody = { url, _, _ ->
+                requestUrls += url
+                when {
+                    "/server/files/metadata?" in url -> TextNetworkResult.Success("""{"result":{"estimated_time":42}}""")
+                    else -> TextNetworkResult.Failure("unexpected request")
+                }
+            },
+            sendRawBody = { url, method, headers, body ->
+                rawBodies += RawBodyCall(url, method, headers, body)
+                NetworkResult.Failure("HTTP 400 from $url")
+            },
+            uploadMultipart = { _, _, _, _, _, _, _ -> NetworkResult.Success }
+        )
+
+        val result = client.uploadGcode(
+            profile = ProfileStoreRepository.fallbackPrinterProfile(),
+            baseUrl = "http://192.168.1.42:7125",
+            file = tempGcodeFile(),
+            remoteFileName = "legacy fallback.gcode",
+            action = PrinterUploadAction.UploadAndStart,
+            onProgress = {}
+        )
+
+        assertTrue(result.success)
+        assertEquals("http://192.168.1.42:7125/printer/gcode/script", rawBodies.single().url)
+        val queryFallbackUrl = requestUrls.first { "/printer/gcode/script?" in it }
+        assertTrue(queryFallbackUrl.contains("SDCARD_PRINT_FILE%20FILENAME%3D%22legacy%20fallback.gcode%22"))
+    }
+
+    @Test
+    fun moonrakerCompatibleHostPrefersMoonrakerOverOctoPrintEndpoint() = runBlocking {
+        val uploads = mutableListOf<UploadCall>()
+        val client = OctoKlipperConnectionClient(
+            requestText = { url, _, _ ->
+                when {
+                    url.endsWith("/server/info") -> NetworkResult.Success
+                    url.endsWith("/api/version") -> NetworkResult.Success
+                    else -> NetworkResult.Failure("unexpected request")
+                }
+            },
+            requestTextBody = { _, _, _ -> TextNetworkResult.Failure("unused") },
+            sendRawBody = { _, _, _, _ -> NetworkResult.Failure("unused") },
+            uploadMultipart = { url, headers, fields, _, fileFieldName, remoteFileName, _ ->
+                uploads += UploadCall(url, headers, fields, fileFieldName, remoteFileName)
+                NetworkResult.Success
+            }
+        )
+
+        val result = client.uploadGcode(
+            profile = ProfileStoreRepository.fallbackPrinterProfile(),
+            baseUrl = "http://qidi.local",
+            file = tempGcodeFile(),
+            remoteFileName = "qidi-object.gcode",
+            action = PrinterUploadAction.UploadOnly,
+            onProgress = {}
+        )
+
+        assertTrue(result.success)
+        assertEquals(1, uploads.size)
+        assertEquals("http://qidi.local:10088/server/files/upload", uploads.single().url)
+        assertEquals(mapOf("root" to "gcodes", "print" to "false"), uploads.single().fields)
+    }
+
+    @Test
+    fun moonrakerUploadAndStartDoesNotStartUntilMetadataIsReady() = runBlocking {
+        val requestEvents = mutableListOf<String>()
+        val client = OctoKlipperConnectionClient(
+            requestText = { url, _, _ ->
+                requestEvents += url
+                when {
+                    url.endsWith("/server/info") -> NetworkResult.Success
+                    "/printer/print/start?" in url -> NetworkResult.Success
+                    else -> NetworkResult.Failure("unexpected request")
+                }
+            },
+            requestTextBody = { url, _, _ ->
+                requestEvents += url
+                TextNetworkResult.Success("""{"result":{"estimated_time":120}}""")
+            },
+            sendRawBody = { url, _, _, _ ->
+                requestEvents += url
+                NetworkResult.Success
+            },
+            uploadMultipart = { _, _, _, _, _, _, _ -> NetworkResult.Success }
+        )
+
+        val result = client.uploadGcode(
+            profile = ProfileStoreRepository.fallbackPrinterProfile(),
+            baseUrl = "http://192.168.1.42:7125",
+            file = tempGcodeFile(),
+            remoteFileName = "ready.gcode",
+            action = PrinterUploadAction.UploadAndStart,
+            onProgress = {}
+        )
+
+        assertTrue(result.success)
+        val metadataIndex = requestEvents.indexOfFirst { "/server/files/metadata?" in it }
+        val startIndex = requestEvents.indexOfFirst { "/printer/print/start?" in it }
+        assertTrue(metadataIndex >= 0)
+        assertTrue(startIndex > metadataIndex)
     }
 
     @Test
@@ -153,6 +337,7 @@ class OctoKlipperConnectionClientTest {
                     else -> TextNetworkResult.Failure("unexpected request")
                 }
             },
+            sendRawBody = { _, _, _, _ -> NetworkResult.Failure("unused") },
             uploadMultipart = { _, _, _, _, _, _, _ -> NetworkResult.Failure("unused") }
         )
 
@@ -195,6 +380,7 @@ class OctoKlipperConnectionClientTest {
                     else -> TextNetworkResult.Failure("unexpected request")
                 }
             },
+            sendRawBody = { _, _, _, _ -> NetworkResult.Failure("unused") },
             uploadMultipart = { _, _, _, _, _, _, _ -> NetworkResult.Failure("unused") }
         )
 
@@ -226,5 +412,12 @@ class OctoKlipperConnectionClientTest {
         val fields: Map<String, String>,
         val fileFieldName: String,
         val remoteFileName: String
+    )
+
+    private data class RawBodyCall(
+        val url: String,
+        val method: String,
+        val headers: Map<String, String>,
+        val body: String
     )
 }

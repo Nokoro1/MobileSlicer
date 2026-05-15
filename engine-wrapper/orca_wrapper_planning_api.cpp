@@ -1,21 +1,28 @@
 #include "orca_wrapper_module_context.h"
 
-extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const* paths, const double* transforms, int transform_stride, const int* extruder_ids, int count, const char* config_json, int allow_rotation, double* out_transforms)
+extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const* paths, const double* transforms, int transform_stride, const int* extruder_ids, int count, const char* config_json, int allow_rotation, double* out_transforms, int* out_bed_indices)
 {
-    if (engine == nullptr || paths == nullptr || transforms == nullptr || extruder_ids == nullptr || out_transforms == nullptr || count <= 0) {
+    if (engine == nullptr || paths == nullptr || transforms == nullptr || extruder_ids == nullptr || out_transforms == nullptr || out_bed_indices == nullptr || count <= 0) {
         return ORCA_ERROR_INVALID_ARGUMENT;
     }
     std::lock_guard<std::recursive_mutex> lock(engine->impl.mutex);
     clear_last_error(engine);
     const long planning_generation = ++engine->impl.planning_generation;
+    const auto total_started_at = std::chrono::steady_clock::now();
 
     try {
+        const auto config_started_at = std::chrono::steady_clock::now();
         Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
         apply_android_runtime_gcode_baseline(config);
         apply_json_overrides(config_json != nullptr ? std::string(config_json) : engine->impl.config_json, config);
+        const auto config_finished_at = std::chrono::steady_clock::now();
 
-        PlannedPlateModel planned = load_transformed_plate_model_for_planning(paths, transforms, transform_stride, extruder_ids, count);
+        const auto load_started_at = std::chrono::steady_clock::now();
+        PlannedPlateModel planned = load_transformed_plate_model_for_planning(engine, paths, transforms, transform_stride, extruder_ids, count);
+        const auto load_finished_at = std::chrono::steady_clock::now();
         Slic3r::Model& model = planned.model;
+
+        const auto item_build_started_at = std::chrono::steady_clock::now();
         Slic3r::arrangement::ArrangePolygons items;
         items.reserve(static_cast<size_t>(count));
         std::vector<std::vector<Slic3r::ModelInstance*>> grouped_instances(static_cast<size_t>(count));
@@ -73,7 +80,7 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
                     log_native_error("orca_plan_plate_arrangement", message.str().c_str());
                     return ORCA_ERROR_ARRANGE_NO_FIT;
                 }
-                {
+                if (kVerboseNativeTimingLogs) {
                     const auto ap_bbox = ap.poly.contour.bounding_box();
                     std::ostringstream message;
                     message << "input id=" << item_index
@@ -145,7 +152,7 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
                 log_native_error("orca_plan_plate_arrangement", message.str().c_str());
                 return ORCA_ERROR_ARRANGE_NO_FIT;
             }
-            {
+            if (kVerboseNativeTimingLogs) {
                 std::ostringstream message;
                 message << "arrange_item id=" << request_index
                         << " native_instances=" << grouped_instances[request_slot].size()
@@ -170,7 +177,9 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
             set_last_error(engine, "Native arrange could not produce one grouped arrange item per plate object.");
             return ORCA_ERROR_ARRANGE_NO_FIT;
         }
+        const auto item_build_finished_at = std::chrono::steady_clock::now();
 
+        const auto params_started_at = std::chrono::steady_clock::now();
         Slic3r::arrangement::ArrangePolygons excludes;
         if (auto tower = wipe_tower_arrange_exclusion(config)) {
             excludes.emplace_back(std::move(*tower));
@@ -180,15 +189,17 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
         params.min_obj_distance = 0;
         params.allow_rotations = allow_rotation != 0;
         params.allow_multi_materials_on_same_plate = true;
-        params.parallel = false;
+        params.parallel = true;
         params.stopcondition = [engine, planning_generation]() {
             return engine->impl.planning_generation.load() != planning_generation;
         };
         unsigned packed_item_count = 0;
         params.progressind = [&packed_item_count](unsigned packed_count, std::string name) {
             packed_item_count = std::max(packed_item_count, packed_count);
-            log_native_info("orca_plan_plate_arrangement",
-                "packed count=" + std::to_string(packed_count) + " name=" + name);
+            if (kVerboseNativeTimingLogs) {
+                log_native_info("orca_plan_plate_arrangement",
+                    "packed count=" + std::to_string(packed_count) + " name=" + name);
+            }
         };
         Slic3r::arrangement::update_arrange_params(params, &config, items);
         Slic3r::arrangement::update_selected_items_inflation(items, &config, params);
@@ -196,7 +207,7 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
 
         Slic3r::Points bed_points = Slic3r::arrangement::get_shrink_bedpts(&config, params);
 
-        {
+        if (kVerboseNativeTimingLogs) {
             std::ostringstream message;
             message << "items=" << items.size() << " excludes=" << excludes.size()
                     << " bed_points=" << bed_points.size()
@@ -215,7 +226,10 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
             message << "]";
             log_native_info("orca_plan_plate_arrangement", message.str());
         }
+        const auto params_finished_at = std::chrono::steady_clock::now();
+        const auto arrange_started_at = std::chrono::steady_clock::now();
         Slic3r::arrangement::arrange(items, excludes, bed_points, params);
+        const auto arrange_finished_at = std::chrono::steady_clock::now();
         if (engine->impl.planning_generation.load() != planning_generation) {
             set_last_error(engine, "Native arrange was superseded by a newer planning request.");
             return ORCA_ERROR_ARRANGE_NO_FIT;
@@ -228,7 +242,7 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
             log_native_error("orca_plan_plate_arrangement", message.str().c_str());
             return ORCA_ERROR_ARRANGE_NO_FIT;
         }
-        {
+        if (kVerboseNativeTimingLogs) {
             std::ostringstream message;
             message << "result";
             for (size_t index = 0; index < items.size(); ++index) {
@@ -247,6 +261,7 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
             }
             log_native_info("orca_plan_plate_arrangement", message.str());
         }
+        const auto result_started_at = std::chrono::steady_clock::now();
         std::string overlap_reason;
         if (arrange_polygons_overlap(items, &overlap_reason)) {
             std::string message = "Native Orca arrange returned invalid placement: " + overlap_reason;
@@ -256,7 +271,7 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
         }
         for (size_t index = 0; index < items.size(); ++index) {
             const auto& item = items[index];
-            if (!item.is_arranged() || item.bed_idx != 0) {
+            if (!item.is_arranged()) {
                 std::ostringstream message;
                 message << "Objects do not fit on the selected build plate.";
                 if (!item.name.empty()) {
@@ -298,6 +313,29 @@ extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const
                 }
             }
             write_planned_transform(out_transforms, result_index, instances.front());
+            out_bed_indices[result_index] = item.bed_idx;
+        }
+        const auto result_finished_at = std::chrono::steady_clock::now();
+        {
+            const auto total_finished_at = std::chrono::steady_clock::now();
+            std::ostringstream message;
+            message << "timing configMs="
+                    << std::chrono::duration_cast<std::chrono::milliseconds>(config_finished_at - config_started_at).count()
+                    << " loadMs="
+                    << std::chrono::duration_cast<std::chrono::milliseconds>(load_finished_at - load_started_at).count()
+                    << " itemBuildMs="
+                    << std::chrono::duration_cast<std::chrono::milliseconds>(item_build_finished_at - item_build_started_at).count()
+                    << " paramsMs="
+                    << std::chrono::duration_cast<std::chrono::milliseconds>(params_finished_at - params_started_at).count()
+                    << " arrangeMs="
+                    << std::chrono::duration_cast<std::chrono::milliseconds>(arrange_finished_at - arrange_started_at).count()
+                    << " resultMs="
+                    << std::chrono::duration_cast<std::chrono::milliseconds>(result_finished_at - result_started_at).count()
+                    << " totalMs="
+                    << std::chrono::duration_cast<std::chrono::milliseconds>(total_finished_at - total_started_at).count()
+                    << " count=" << count
+                    << " parallel=" << (params.parallel ? 1 : 0);
+            log_native_info("orca_plan_plate_arrangement", message.str());
         }
 
         return ORCA_SUCCESS;
@@ -320,14 +358,20 @@ extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const*
     std::lock_guard<std::recursive_mutex> lock(engine->impl.mutex);
     clear_last_error(engine);
     const long planning_generation = ++engine->impl.planning_generation;
+    const auto total_started_at = std::chrono::steady_clock::now();
 
     try {
+        const auto config_started_at = std::chrono::steady_clock::now();
         Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
         apply_android_runtime_gcode_baseline(config);
         apply_json_overrides(config_json != nullptr ? std::string(config_json) : engine->impl.config_json, config);
+        const auto config_finished_at = std::chrono::steady_clock::now();
 
-        PlannedPlateModel planned = load_transformed_plate_model_for_planning(paths, transforms, transform_stride, extruder_ids, count);
+        const auto load_started_at = std::chrono::steady_clock::now();
+        PlannedPlateModel planned = load_transformed_plate_model_for_planning(engine, paths, transforms, transform_stride, extruder_ids, count);
+        const auto load_finished_at = std::chrono::steady_clock::now();
         Slic3r::Model& model = planned.model;
+        const auto group_started_at = std::chrono::steady_clock::now();
         std::vector<std::vector<Slic3r::ModelObject*>> grouped_objects(static_cast<size_t>(count));
         for (size_t object_index = 0; object_index < model.objects.size(); ++object_index) {
             const int request_index = planned.request_index_by_object[object_index];
@@ -337,7 +381,11 @@ extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const*
             }
             grouped_objects[static_cast<size_t>(request_index)].push_back(model.objects[object_index]);
         }
+        const auto group_finished_at = std::chrono::steady_clock::now();
         size_t oriented_count = 0;
+        long long mesh_build_ms = 0;
+        long long orient_ms = 0;
+        long long apply_ms = 0;
         for (int request_index = 0; request_index < count; ++request_index) {
             const std::vector<Slic3r::ModelObject*>& objects = grouped_objects[static_cast<size_t>(request_index)];
             if (objects.empty() || objects.front() == nullptr || objects.front()->instances.empty()) {
@@ -345,6 +393,7 @@ extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const*
                 return ORCA_ERROR_LOAD_MODEL;
             }
 
+            const auto mesh_started_at = std::chrono::steady_clock::now();
             Slic3r::orientation::OrientMesh mesh;
             mesh.name = objects.front()->name;
             mesh.mesh = objects.front()->mesh();
@@ -358,7 +407,10 @@ extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const*
             } else if (config.has("support_threshold_angle")) {
                 mesh.overhang_angle = config.opt_int("support_threshold_angle");
             }
+            const auto mesh_finished_at = std::chrono::steady_clock::now();
+            mesh_build_ms += std::chrono::duration_cast<std::chrono::milliseconds>(mesh_finished_at - mesh_started_at).count();
             try {
+                const auto orient_started_at = std::chrono::steady_clock::now();
                 Slic3r::orientation::OrientMeshs orient_meshes;
                 orient_meshes.emplace_back(std::move(mesh));
                 Slic3r::orientation::OrientParams params;
@@ -372,10 +424,13 @@ extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const*
                 };
                 Slic3r::orientation::OrientMeshs excludes;
                 Slic3r::orientation::orient(orient_meshes, excludes, params);
+                const auto orient_finished_at = std::chrono::steady_clock::now();
+                orient_ms += std::chrono::duration_cast<std::chrono::milliseconds>(orient_finished_at - orient_started_at).count();
                 if (engine->impl.planning_generation.load() != planning_generation) {
                     set_last_error(engine, "Native auto-orient was superseded by a newer planning request.");
                     return ORCA_ERROR_LOAD_MODEL;
                 }
+                const auto apply_started_at = std::chrono::steady_clock::now();
                 for (Slic3r::ModelObject* object : objects) {
                     if (object == nullptr) {
                         continue;
@@ -388,7 +443,17 @@ extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const*
                     object->invalidate_bounding_box();
                     object->ensure_on_bed();
                 }
+                const auto apply_finished_at = std::chrono::steady_clock::now();
+                apply_ms += std::chrono::duration_cast<std::chrono::milliseconds>(apply_finished_at - apply_started_at).count();
                 ++oriented_count;
+                if (kVerboseNativeTimingLogs) {
+                    std::ostringstream message;
+                    message << "request=" << request_index
+                            << " orientMs="
+                            << std::chrono::duration_cast<std::chrono::milliseconds>(orient_finished_at - orient_started_at).count()
+                            << " groupedObjects=" << objects.size();
+                    log_native_info("orca_plan_auto_orientation", message.str());
+                }
             } catch (const std::exception& exception) {
                 std::ostringstream message;
                 message << "request=" << request_index << " skipped reason=" << exception.what();
@@ -402,9 +467,24 @@ extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const*
             write_planned_transform(out_transforms, static_cast<size_t>(request_index), objects.front()->instances.front());
         }
         {
+            const auto total_finished_at = std::chrono::steady_clock::now();
             std::ostringstream message;
             message << "requests=" << count << " native_objects=" << model.objects.size() << " oriented=" << oriented_count;
             log_native_info("orca_plan_auto_orientation", message.str());
+            std::ostringstream timing;
+            timing << "timing configMs="
+                   << std::chrono::duration_cast<std::chrono::milliseconds>(config_finished_at - config_started_at).count()
+                   << " loadMs="
+                   << std::chrono::duration_cast<std::chrono::milliseconds>(load_finished_at - load_started_at).count()
+                   << " groupMs="
+                   << std::chrono::duration_cast<std::chrono::milliseconds>(group_finished_at - group_started_at).count()
+                   << " meshMs=" << mesh_build_ms
+                   << " orientMs=" << orient_ms
+                   << " applyMs=" << apply_ms
+                   << " totalMs="
+                   << std::chrono::duration_cast<std::chrono::milliseconds>(total_finished_at - total_started_at).count()
+                   << " count=" << count;
+            log_native_info("orca_plan_auto_orientation", timing.str());
         }
         if (oriented_count != static_cast<size_t>(count)) {
             std::ostringstream message;
@@ -433,4 +513,14 @@ extern "C" int orca_cancel_planning(OrcaEngine* engine)
     }
     ++engine->impl.planning_generation;
     return ORCA_SUCCESS;
+}
+
+extern "C" int orca_prewarm_plate_planning_models(OrcaEngine* engine, const char* const* paths, int count)
+{
+    if (engine == nullptr || paths == nullptr || count <= 0) {
+        return ORCA_ERROR_INVALID_ARGUMENT;
+    }
+    std::lock_guard<std::recursive_mutex> lock(engine->impl.mutex);
+    clear_last_error(engine);
+    return prewarm_source_planning_models(engine, paths, count);
 }

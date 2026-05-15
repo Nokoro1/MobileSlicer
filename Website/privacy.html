@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="MobileSlicer privacy information covering GitHub release downloads, local slicing, printer connections, support contact, and diagnostics.">
+    <meta property="og:title" content="Privacy | MobileSlicer">
+    <meta property="og:description" content="How MobileSlicer handles website contact and app privacy.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://mobileslicer.com/privacy.html">
+    <meta property="og:image" content="https://mobileslicer.com/assets/app-home.jpg">
+    <link rel="canonical" href="https://mobileslicer.com/privacy.html">
+    <title>Privacy | MobileSlicer</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/script.js?v=20260507-github" defer></script>
+  </head>
+  <body>
+    <site-header active=""></site-header>
+
+    <main class="page-main">
+      <section class="section-panel page-hero">
+        <p class="eyebrow">Privacy</p>
+        <h1>Privacy and data.</h1>
+        <p class="lead">MobileSlicer slices locally on Android. Files leave the app only when you choose to export, share, or send them.</p>
+      </section>
+      <section class="section-panel prose-panel">
+        <h2>GitHub release downloads</h2>
+        <p>MobileSlicer beta builds are distributed through GitHub Releases. GitHub hosts release files, source snapshots, and download pages under GitHub's policies.</p>
+
+        <h2>Model files and G-code</h2>
+        <p>Model loading, slicing, preview, and saved plates are handled on your Android device. MobileSlicer does not upload model files or generated G-code to MobileSlicer servers.</p>
+        <p>Files can leave the device when you choose to export, share, or send a generated print file to a configured printer or print service.</p>
+
+        <h2>Thingiverse sign-in</h2>
+        <p>If you choose to sign in to Thingiverse from MobileSlicer, MobileSlicer uses a server-side OAuth bridge on mobileslicer.com to complete Thingiverse's browser authorization flow without putting the Thingiverse Client Secret inside the Android app.</p>
+        <p>The OAuth bridge exchanges the authorization code with Thingiverse, validates the returned token with Thingiverse, and redirects a short-lived one-time handoff code back to the app. The app redeems that code over HTTPS. The bridge does not persist Thingiverse access tokens beyond the short handoff window and does not persist model files, search queries, thumbnails, or model metadata.</p>
+        <p>The app stores the returned Thingiverse token locally on your device with Android Keystore-backed encryption so it can search Thingiverse and import files you select through the official API. Thingiverse receives the sign-in, search, file-list, and file-download requests needed for the actions you start.</p>
+
+        <h2>Printer connections</h2>
+        <p>If you configure printer sending, MobileSlicer contacts the printer or print service you choose. That can include printer status requests, connection credentials or tokens, generated G-code files, filenames, and print commands.</p>
+        <p>Local printer connections stay on the local network when the printer host is local. Cloud print services, including SimplyPrint, Obico, or PrusaConnect when configured, receive the data needed for the action you start.</p>
+
+        <h2>Printer credentials</h2>
+        <p>Printer API keys, usernames, passwords, and access tokens are stored locally. MobileSlicer encrypts stored printer secrets with Android Keystore-backed encryption and excludes app data from Android backup and device transfer.</p>
+
+        <h2>Local network discovery</h2>
+        <p>Printer discovery can use local network discovery, multicast/mDNS, and local subnet checks to find compatible printers on your network.</p>
+
+        <h2>Camera permission</h2>
+        <p>MobileSlicer may request camera permission when a printer web interface or camera feature shown inside the app asks for it. Camera access is used only after Android permission is granted.</p>
+
+        <h2>Support contact</h2>
+        <p>If you email MobileSlicer or join the Discord, the information you choose to send is used to answer questions, investigate bugs, and improve device and printer support.</p>
+
+        <h2>Telemetry and diagnostics</h2>
+        <p>The current MobileSlicer app does not include an automatic analytics or crash-reporting SDK. MobileSlicer does not automatically upload logs, model files, G-code, or diagnostics to MobileSlicer.</p>
+        <p>If diagnostics are added in a future build, this page will be updated before that build is distributed. If you choose to send support messages, screenshots, logs, or files, that information is used for support and compatibility work.</p>
+
+        <h2>Retention and removal</h2>
+        <p>Support messages are kept while they are useful for troubleshooting, compatibility work, or required record keeping.</p>
+        <h2>Contact</h2>
+        <p>Questions about privacy, licensing, or support can be sent to <a href="mailto:mobileslicerapp@gmail.com?subject=MobileSlicer%20privacy">mobileslicerapp@gmail.com</a>.</p>
+      </section>
+    </main>
+
+    <site-footer links="legal,faq,github,beta"></site-footer>
+  </body>
+</html>

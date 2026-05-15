@@ -1185,6 +1185,8 @@ extern "C" int orca_load_plate_models_v2(
         }
 
         engine->impl.model = std::move(combined_model);
+        engine->impl.imported_project_plate_data.clear();
+        engine->impl.imported_project_config.reset();
         engine->impl.paint_object_bindings = std::move(bindings);
         ++engine->impl.model_generation;
         invalidate_paint_session_unlocked(engine);

@@ -22,6 +22,8 @@ internal fun planModelLoaderBackNavigation(
 ): ModelLoaderBackNavigationPlan =
     when (currentScreen) {
         AppScreen.Home -> ModelLoaderBackNavigationPlan(AppScreen.Home, workspaceMode)
+        AppScreen.ModelSearch -> ModelLoaderBackNavigationPlan(AppScreen.Home, workspaceMode)
+        AppScreen.Scanner -> ModelLoaderBackNavigationPlan(AppScreen.Home, workspaceMode)
         AppScreen.Workspace -> {
             if (workspaceMode == WorkspaceMode.Preview) {
                 ModelLoaderBackNavigationPlan(AppScreen.Workspace, WorkspaceMode.Prepare)

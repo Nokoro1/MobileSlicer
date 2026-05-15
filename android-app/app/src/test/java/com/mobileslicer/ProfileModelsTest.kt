@@ -2,10 +2,12 @@ package com.mobileslicer
 
 import com.mobileslicer.profiles.EnsureVerticalShellThicknessMode
 import com.mobileslicer.profiles.DefaultBedType
+import com.mobileslicer.profiles.ExtraBridgeLayerMode
 import com.mobileslicer.profiles.FuzzySkinMode
 import com.mobileslicer.profiles.FuzzySkinNoiseType
 import com.mobileslicer.profiles.FuzzySkinType
 import com.mobileslicer.profiles.GeneratedOrcaSettingMetadata
+import com.mobileslicer.profiles.InternalBridgeFilterMode
 import com.mobileslicer.profiles.IroningPattern
 import com.mobileslicer.profiles.OrcaFilamentPreset
 import com.mobileslicer.profiles.OrcaPrinterImportBundle
@@ -20,7 +22,9 @@ import com.mobileslicer.profiles.PrintHostType
 import com.mobileslicer.profiles.ProcessIroningType
 import com.mobileslicer.profiles.ProcessGcodeOutputDetails
 import com.mobileslicer.profiles.ProcessPrimeTowerDetails
+import com.mobileslicer.profiles.ProcessQualitySurfaceDetails
 import com.mobileslicer.profiles.ProcessSpecialModeDetails
+import com.mobileslicer.profiles.ProcessStrengthInfillDetails
 import com.mobileslicer.profiles.encodeProfileSelection
 import com.mobileslicer.profiles.filamentEditorGroupLabelsForParityTest
 import com.mobileslicer.profiles.filamentEditorTabLabelsForParityTest
@@ -44,6 +48,9 @@ import com.mobileslicer.profiles.SupportInterfacePattern
 import com.mobileslicer.profiles.SupportStyle
 import com.mobileslicer.profiles.SupportType
 import com.mobileslicer.profiles.TimelapseType
+import com.mobileslicer.profiles.WallDirection
+import com.mobileslicer.profiles.WallInfillOrder
+import com.mobileslicer.profiles.WallSequence
 import com.mobileslicer.profiles.activeConfiguration
 import com.mobileslicer.profiles.assetImageCache
 import com.mobileslicer.profiles.buildOrcaFilamentPickerRows
@@ -53,8 +60,10 @@ import com.mobileslicer.profiles.filteredOrcaFilamentPickerRows
 import com.mobileslicer.profiles.isReplaceableOrcaGenericMaterialFor
 import com.mobileslicer.profiles.orcaFilamentCompatibleKeysCache
 import com.mobileslicer.profiles.resolveOrcaFilamentPresetForImport
+import com.mobileslicer.profiles.toFilamentProfile
 import com.mobileslicer.profiles.toJson
 import com.mobileslicer.profiles.toImportedPrinterProfile
+import com.mobileslicer.profiles.toProcessProfile
 import com.mobileslicer.profiles.toPrinterProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -91,6 +100,19 @@ class ProfileModelsTest {
             }
             assertTrue(orcaFilamentCompatibleKeysCache.size <= 512)
         }
+    }
+
+    @Test
+    fun filamentJsonRoundTripPreservesMinFanSpeed() {
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            minFanSpeedPercent = 42,
+            coolingPercent = 87
+        )
+
+        val restored = filament.toJson().toFilamentProfile()
+
+        assertEquals(42, restored.minFanSpeedPercent)
+        assertEquals(87, restored.coolingPercent)
     }
 
     @Test
@@ -1207,12 +1229,126 @@ class ProfileModelsTest {
         assertEquals(0.4f, process.supportObjectXyDistanceMm, 0.0001f)
     }
 
+    @Test
+    fun processProfileJsonNormalizesLegacyDefaultSeamGap() {
+        val process = processFixture()
+            .withValues("seamGap" to "10%")
+            .toJson()
+            .toProcessProfile()
+
+        assertEquals("0%", process.seamGap)
+    }
+
+    @Test
+    fun processProfileJsonRoundTripPreservesSavedProcessSettings() {
+        val process = processFixture().withValues(
+            "enableOverhangSpeed" to false,
+            "bridgeSpeedMmPerSec" to 33f,
+            "adaptiveLayerHeight" to true,
+            "dontFilterInternalBridges" to InternalBridgeFilterMode.NoFilter,
+            "wallInfillOrder" to WallInfillOrder.InfillOuterInner,
+            "wallSequence" to WallSequence.OuterInner,
+            "supportThresholdOverlap" to "35%",
+            "supportCriticalRegionsOnly" to true,
+            "supportInterfacePattern" to SupportInterfacePattern.Grid,
+            "treeSupportTipDiameterMm" to 1.1f,
+            "treeSupportBranchDistanceMm" to 6.5f,
+            "treeSupportBranchDistanceOrganicMm" to 1.8f,
+            "treeSupportTopRatePercent" to 44,
+            "treeSupportBranchDiameterOrganicMm" to 2.8f,
+            "treeSupportBranchDiameterAngleDegrees" to 7f,
+            "treeSupportBranchAngleOrganicDegrees" to 38f,
+            "treeSupportPreferredBranchAngleDegrees" to 31f,
+            "treeSupportAutoBrim" to false,
+            "treeSupportBrimWidthMm" to 4.5f,
+            "fuzzySkin" to FuzzySkinType.AllWalls,
+            "fuzzySkinMode" to FuzzySkinMode.Combined,
+            "fuzzySkinNoiseType" to FuzzySkinNoiseType.Perlin,
+            "ironingType" to ProcessIroningType.TopSurfaces,
+            "ironingPattern" to IroningPattern.Concentric,
+            "qualitySurfaceDetails" to ProcessQualitySurfaceDetails(
+                thickInternalBridges = false,
+                extraBridgeLayer = ExtraBridgeLayerMode.ApplyToAll,
+                preciseZHeight = true,
+                onlyOneWallFirstLayer = true,
+                printInfillFirst = true,
+                wallDirection = WallDirection.Clockwise,
+                printFlowRatio = 1.12f,
+                elefantFootCompensationLayers = 3,
+                internalSolidInfillFlowRatio = 0.87f,
+                setOtherFlowRatios = true,
+                smallAreaInfillFlowCompensation = true,
+                makeOverhangPrintable = true,
+                makeOverhangPrintableAngleDegrees = 62f,
+                makeOverhangPrintableHoleSizeMm2 = 4f,
+                overhangReverse = true,
+                overhangReverseInternalOnly = true,
+                overhangReverseThreshold = "60%"
+            ),
+            "strengthInfillDetails" to ProcessStrengthInfillDetails(
+                skinInfillDensity = 42,
+                skeletonInfillDensity = 17,
+                infillLockDepthMm = 1.4f,
+                skinInfillDepthMm = 2.6f,
+                skinInfillLineWidth = "105%",
+                skeletonInfillLineWidth = "96%",
+                symmetricInfillYAxis = true,
+                infillShiftStepMm = 0.8f,
+                infillOverhangAngleDegrees = 47f,
+                gapFillTarget = "everywhere",
+                filterOutGapFillMm = 0.35f
+            ),
+            "primeTowerDetails" to ProcessPrimeTowerDetails(
+                wipeTowerXmm = 18f,
+                wipeTowerYmm = 205f,
+                primeTowerSkipPoints = false,
+                primeVolumeMm3 = 52f,
+                primeTowerBrimWidthMm = 4f,
+                primeTowerInfillGapPercent = 130,
+                wipeTowerRotationAngleDegrees = 12f,
+                wipeTowerBridgingMm = 8f,
+                wipeTowerExtraSpacingPercent = 115,
+                wipeTowerExtraFlowPercent = 96,
+                wipeTowerMaxPurgeSpeedMmPerSec = 75f,
+                wipeTowerFilletWall = false
+            ),
+            "specialModeDetails" to ProcessSpecialModeDetails(
+                spiralModeSmooth = true,
+                spiralModeMaxXySmoothing = "150%",
+                spiralStartingFlowRatio = 0.2f,
+                spiralFinishingFlowRatio = 0.8f,
+                timelapseType = TimelapseType.Smooth,
+                enableWrappingDetection = true
+            ),
+            "gcodeOutputDetails" to ProcessGcodeOutputDetails(
+                gcodeAddLineNumber = true,
+                gcodeComments = true,
+                gcodeLabelObjects = true,
+                excludeObject = true
+            )
+        )
+        val savedJson = process.toJson()
+        val restoredJson = savedJson.toProcessProfile().toJson()
+        val keys = savedJson.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            assertEquals(
+                "Process profile JSON key must round-trip: $key",
+                jsonAssertValue(savedJson.opt(key)),
+                jsonAssertValue(restoredJson.opt(key))
+            )
+        }
+    }
+
     private fun processFixture() = newProcessProfileUnchecked(
         0 to "process_fixture",
         1 to "Fixture Process",
         3 to false,
         5 to 0.20f
     )
+
+    private fun jsonAssertValue(value: Any?): String =
+        if (value is Number) value.toDouble().toString() else value.toString()
 
     @Test
     fun importingSystemGenericFilamentResolvesToPrinterCompatibleGenericPreset() {

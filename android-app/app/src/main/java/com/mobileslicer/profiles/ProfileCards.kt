@@ -280,6 +280,8 @@ internal fun DomainProfileCard(
     thumbnailAssetPath: String = "",
     sourceLabel: String = if (builtIn) "Built-in" else "Custom",
     metadataPills: List<String> = emptyList(),
+    useLabel: String = "Use",
+    activeLabel: String = "Active",
     onUse: () -> Unit,
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
@@ -363,7 +365,7 @@ internal fun DomainProfileCard(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text(if (selected) "Active" else "Use")
+                    Text(if (selected) activeLabel else useLabel)
                 }
                 Button(
                     onClick = onEdit,

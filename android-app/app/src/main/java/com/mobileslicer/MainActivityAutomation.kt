@@ -104,6 +104,10 @@ import androidx.lifecycle.lifecycleScope
 import com.mobileslicer.automation.AutomationConfigResolver
 import com.mobileslicer.automation.AutomationSliceRequest
 import com.mobileslicer.automation.AutomationSliceRunner
+import com.mobileslicer.automation.OffscreenEglSmokeRequest
+import com.mobileslicer.automation.OffscreenEglSmokeRunner
+import com.mobileslicer.scanner.ScannerAutomationRequest
+import com.mobileslicer.scanner.ScannerAutomationRunner
 import com.mobileslicer.nativebridge.NativeEngineCallResult
 import com.mobileslicer.nativebridge.NativeEngineCalls
 import com.mobileslicer.nativebridge.NativeEngineErrorCode
@@ -168,6 +172,7 @@ import kotlinx.coroutines.withContext
 import com.mobileslicer.viewer.MeshBounds
 
 internal fun MainActivity.maybeRunAutomation(intent: Intent?): Boolean {
+    val activity = this
     if (!BuildConfig.AUTOMATION_ENABLED) {
         return false
     }
@@ -175,6 +180,28 @@ internal fun MainActivity.maybeRunAutomation(intent: Intent?): Boolean {
         return true
     }
     if (maybeRunPreviewInteractionAutomation(intent)) {
+        return true
+    }
+    val eglSmokeRequest = OffscreenEglSmokeRequest.fromIntent(intent)
+    if (eglSmokeRequest != null) {
+        lifecycleScope.launch {
+            val success = withContext(Dispatchers.Default) {
+                OffscreenEglSmokeRunner().run(eglSmokeRequest)
+            }
+            setResult(if (success) Activity.RESULT_OK else Activity.RESULT_CANCELED)
+            finish()
+        }
+        return true
+    }
+    val scannerAutomationRequest = ScannerAutomationRequest.fromIntent(this, intent)
+    if (scannerAutomationRequest != null) {
+        lifecycleScope.launch {
+            val success = withContext(Dispatchers.Default) {
+                ScannerAutomationRunner(activity).run(scannerAutomationRequest)
+            }
+            setResult(if (success) Activity.RESULT_OK else Activity.RESULT_CANCELED)
+            finish()
+        }
         return true
     }
     if (intent?.action != AutomationSliceRequest.ACTION_AUTOMATE_SLICE) {
@@ -198,7 +225,7 @@ internal fun MainActivity.maybeRunAutomation(intent: Intent?): Boolean {
         })::resolve,
         onModelLoaded = { stagedModel ->
             nativeLoadedModelPath = stagedModel.absolutePath
-            currentModelName = stagedModel.nameWithoutExtension.removePrefix("selected-model-")
+            currentModelName = displayStemForModelFile(stagedModel)
         },
         onModelLoadRejected = {
             nativeLoadedModelPath = null

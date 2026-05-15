@@ -6,6 +6,9 @@
 #include "libslic3r/Format/bbs_3mf.hpp"
 #include "libslic3r/Format/DRC.hpp"
 #include "libslic3r/Format/OBJ.hpp"
+#ifndef ORCA_ANDROID_REAL_STEP
+#include "libslic3r/Format/STEP.hpp"
+#endif
 #include "libslic3r/Format/svg.hpp"
 #include "libslic3r/I18N.hpp"
 #include "libslic3r/MeshBoolean.hpp"
@@ -125,6 +128,7 @@ const std::string &temporary_dir()
 void save_string_file(const boost::filesystem::path & /* p */, const std::string & /* str */) {}
 #endif
 
+#ifndef ORCA_ANDROID_REAL_STEP
 Step::Step(std::string /* path */, ImportStepProgressFn /* stepFn */, StepIsUtf8Fn /* isUtf8Fn */) {}
 
 Step::~Step() = default;
@@ -161,6 +165,7 @@ void Step::update_process(int /* load_stage */, int /* current */, int /* total 
 {
     cancel = false;
 }
+#endif
 
 void FaceDetector::detect_exterior_face() {}
 

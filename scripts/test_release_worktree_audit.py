@@ -18,6 +18,10 @@ class ReleaseWorktreeAuditTest(unittest.TestCase):
                 " M android-app/app/src/main/java/com/mobileslicer/workspace/WorkspaceScreen.kt",
                 " M android-app/app/src/main/java/com/mobileslicer/profiles/OrcaProfileTransfer.kt",
                 " M docs/LEGAL.md",
+                " M Website/lib/thingiverse-oauth.mjs",
+                " M README/plans/MODEL_SEARCH_IMPORT_PLAN.md",
+                " M android-app/app/src/main/AndroidManifest.xml",
+                " M android-app/gradle/libs.versions.toml",
                 " M vendor/orcaslicer/src/libslic3r/TriangleSelector.cpp",
                 "?? docs/RELEASE_STATUS.md",
             ]
@@ -34,6 +38,10 @@ class ReleaseWorktreeAuditTest(unittest.TestCase):
             groups["profiles-storage-printer"],
         )
         self.assertIn((" M", "docs/LEGAL.md"), groups["docs"])
+        self.assertIn((" M", "Website/lib/thingiverse-oauth.mjs"), groups["website-and-oauth-backend"])
+        self.assertIn((" M", "README/plans/MODEL_SEARCH_IMPORT_PLAN.md"), groups["project-plans"])
+        self.assertIn((" M", "android-app/app/src/main/AndroidManifest.xml"), groups["android-build-and-manifest"])
+        self.assertIn((" M", "android-app/gradle/libs.versions.toml"), groups["android-build-and-manifest"])
         self.assertIn(
             (" M", "vendor/orcaslicer/src/libslic3r/TriangleSelector.cpp"),
             groups["vendor-patches"],

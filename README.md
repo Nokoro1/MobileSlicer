@@ -4,7 +4,7 @@
 
 MobileSlicer is a local, touch-first 3D slicer for Android.
 
-It opens STL and 3MF files, prepares plates, slices on-device, previews G-code,
+It opens STL, 3MF, and STEP/STP files, prepares plates, slices on-device, previews G-code,
 and exports or sends print files from a phone or tablet. The app is built for
 Android with Kotlin, Jetpack Compose, and a native slicer engine derived from
 OrcaSlicer and related open-source slicer work.
@@ -21,7 +21,7 @@ only from the official releases page:
 
 Current focus:
 
-- STL and 3MF import from Android storage and share sheets
+- STL, 3MF, and STEP/STP import from Android storage and share sheets
 - Touch-first model workspace
 - Printer, filament, and process profile selection
 - Local slicing

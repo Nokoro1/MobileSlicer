@@ -6,6 +6,15 @@ import org.json.JSONObject
 private const val ORCA_MIN_IRONING_SPACING_MM = 0.1f
 private const val ORCA_DEFAULT_SUPPORT_IRONING_FLOW_PERCENT = 10f
 
+internal fun normalizedProcessSeamGap(value: String): String {
+    val trimmed = value.trim()
+    return when {
+        trimmed.isBlank() -> DEFAULT_SEAM_GAP
+        trimmed == "10%" -> DEFAULT_SEAM_GAP
+        else -> trimmed
+    }
+}
+
 internal fun JSONObject.putNativeProcessConfiguration(process: ProcessProfile): JSONObject = apply {
     put("layer_height", process.layerHeightMm.toDouble())
             .put("initial_layer_print_height", process.firstLayerHeightMm.toDouble())
@@ -76,7 +85,6 @@ internal fun JSONObject.putNativeProcessConfiguration(process: ProcessProfile): 
             .put("sparse_infill_speed", process.sparseInfillSpeedMmPerSec.toDouble())
             .put("internal_solid_infill_speed", process.internalSolidInfillSpeedMmPerSec.toDouble())
             .put("gap_infill_speed", process.gapInfillSpeedMmPerSec.toDouble())
-            .put("adaptive_layer_height", process.adaptiveLayerHeight)
             .put("top_shell_layers", process.topShellLayers)
             .put("bottom_shell_layers", process.bottomShellLayers)
             .put("top_shell_thickness", process.topShellThicknessMm.toDouble())
@@ -85,7 +93,7 @@ internal fun JSONObject.putNativeProcessConfiguration(process: ProcessProfile): 
             .put("bottom_surface_density", process.bottomSurfaceDensityPercent)
             .put("seam_position", process.seamPosition.configValue)
             .put("staggered_inner_seams", process.staggeredInnerSeams)
-            .put("seam_gap", process.seamGap.ifBlank { "10%" })
+            .put("seam_gap", normalizedProcessSeamGap(process.seamGap))
             .put("seam_slope_type", process.seamScarfType.configValue)
             .put("seam_slope_conditional", process.seamScarfConditional)
             .put("scarf_angle_threshold", process.scarfAngleThresholdDegrees)

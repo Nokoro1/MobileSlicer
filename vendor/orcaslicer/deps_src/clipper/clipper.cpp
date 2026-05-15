@@ -46,6 +46,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <ostream>
+#include <sstream>
 #include <functional>
 #include <assert.h>
 #include <libslic3r/Int128.hpp>
@@ -604,8 +605,12 @@ static inline void RangeTest(const IntPoint& Pt, bool& useFullRange)
 {
   if (useFullRange)
   {
-    if (Pt.x() > hiRange || Pt.y() > hiRange || -Pt.x() > hiRange || -Pt.y() > hiRange) 
-      throw clipperException("Coordinate outside allowed range");
+    if (Pt.x() > hiRange || Pt.y() > hiRange || -Pt.x() > hiRange || -Pt.y() > hiRange) {
+      std::ostringstream message;
+      message << "Coordinate outside allowed range x=" << Pt.x() << " y=" << Pt.y();
+      const std::string text = message.str();
+      throw clipperException(text.c_str());
+    }
   }
   else if (Pt.x() > loRange|| Pt.y() > loRange || -Pt.x() > loRange || -Pt.y() > loRange) 
   {

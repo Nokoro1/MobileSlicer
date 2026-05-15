@@ -31,6 +31,22 @@ internal fun sanitizeFileName(name: String): String {
     }
 }
 
+private val stagedModelDisplayPrefix = Regex("""^selected-model-\d+-""")
+
+internal fun displayNameForModelFile(file: File): String =
+    displayNameForModelFileName(file.name)
+
+internal fun displayNameForModelFileName(fileName: String): String {
+    val cleaned = fileName
+        .replace(stagedModelDisplayPrefix, "")
+        .removePrefix("selected-model-")
+        .trim()
+    return cleaned.ifBlank { "selected_model.stl" }
+}
+
+internal fun displayStemForModelFile(file: File): String =
+    displayNameForModelFile(file).substringBeforeLast('.', displayNameForModelFile(file))
+
 internal fun suggestGcodeFileName(modelName: String?, configJson: String? = null): String {
     calibrationGcodeFileName(configJson)?.let { return it }
     val baseName = sanitizeFileName(modelName ?: "mobile_slicer_output").removeSuffix(".stl")
@@ -154,6 +170,10 @@ internal fun cleanupStagedModelCache(cacheDir: File, retainedPaths: Set<String>)
 
 internal fun cleanupShareCache(cacheDir: File) {
     File(cacheDir, "shared").deleteRecursively()
+}
+
+internal fun cleanupThingiverseImportCache(cacheDir: File) {
+    File(cacheDir, "thingiverse-imports").deleteRecursively()
 }
 
 internal fun cleanupOrcaTempCache(

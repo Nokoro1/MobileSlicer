@@ -9,6 +9,7 @@ import com.mobileslicer.viewer.PrinterBedSpec
 import com.mobileslicer.viewer.StlMesh
 import com.mobileslicer.viewer.StlMeshParser
 import com.mobileslicer.viewer.ViewerModelTransform
+import com.mobileslicer.viewer.forEachTriangleVertexOffsets
 import com.mobileslicer.workspace.ImportedModelFormat
 import com.mobileslicer.workspace.PlateObject
 import java.io.File
@@ -107,26 +108,28 @@ private fun cropPreviewMeshZ(
 ): StlMesh {
     if (minZ >= maxZ || (minZ <= mesh.bounds.minZ && maxZ >= mesh.bounds.maxZ)) return mesh
     val keptTriangles = ArrayList<Int>(mesh.triangleCount)
-    var triangle = 0
-    while (triangle < mesh.triangleCount) {
-        val base = triangle * 9
-        val z0 = mesh.vertices[base + 2]
-        val z1 = mesh.vertices[base + 5]
-        val z2 = mesh.vertices[base + 8]
+    mesh.forEachTriangleVertexOffsets { triangle, a, b, c ->
+        val z0 = mesh.vertices[a + 2]
+        val z1 = mesh.vertices[b + 2]
+        val z2 = mesh.vertices[c + 2]
         if (z0 >= minZ && z0 <= maxZ && z1 >= minZ && z1 <= maxZ && z2 >= minZ && z2 <= maxZ) {
             keptTriangles.add(triangle)
         }
-        triangle++
     }
     if (keptTriangles.isEmpty()) return mesh
 
     val vertices = FloatArray(keptTriangles.size * 9)
     val normals = FloatArray(keptTriangles.size * 9)
     keptTriangles.forEachIndexed { index, sourceTriangle ->
-        val sourceBase = sourceTriangle * 9
         val targetBase = index * 9
-        mesh.vertices.copyInto(vertices, destinationOffset = targetBase, startIndex = sourceBase, endIndex = sourceBase + 9)
-        mesh.normals.copyInto(normals, destinationOffset = targetBase, startIndex = sourceBase, endIndex = sourceBase + 9)
+        for (corner in 0..2) {
+            val sourceBase = mesh.vertexOffsetForCalibrationCrop(sourceTriangle, corner)
+            val targetOffset = targetBase + corner * 3
+            mesh.vertices.copyInto(vertices, destinationOffset = targetOffset, startIndex = sourceBase, endIndex = sourceBase + 3)
+            normals[targetOffset] = mesh.normals.getOrElse(sourceBase) { 0f }
+            normals[targetOffset + 1] = mesh.normals.getOrElse(sourceBase + 1) { 0f }
+            normals[targetOffset + 2] = mesh.normals.getOrElse(sourceBase + 2) { 1f }
+        }
         if (shiftDownBy != 0f) {
             vertices[targetBase + 2] -= shiftDownBy
             vertices[targetBase + 5] -= shiftDownBy
@@ -139,6 +142,11 @@ private fun cropPreviewMeshZ(
         triangleCount = keptTriangles.size,
         bounds = boundsForVertices(vertices)
     )
+}
+
+private fun StlMesh.vertexOffsetForCalibrationCrop(triangleIndex: Int, cornerIndex: Int): Int {
+    val index = indices?.get(triangleIndex * 3 + cornerIndex) ?: (triangleIndex * 3 + cornerIndex)
+    return index * 3
 }
 
 private fun boundsForVertices(vertices: FloatArray): MeshBounds {

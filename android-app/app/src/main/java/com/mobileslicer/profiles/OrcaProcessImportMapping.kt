@@ -79,6 +79,7 @@ internal fun OrcaProcessPresetBundle.toImportedProcessProfile(printer: PrinterPr
         53 to resolved.processConfigFloat("bridge_flow", 1f),
         54 to resolved.processConfigBoolean("bridge_no_support", false),
         55 to ProcessQualitySurfaceDetails(
+            onlyOneWallFirstLayer = resolved.processConfigBoolean("only_one_wall_first_layer", false),
             wallDirection = WallDirection.fromConfigValue(resolved.processConfigString("wall_direction", WallDirection.Auto.configValue))
         ),
         56 to resolved.processConfigFloat("internal_bridge_angle", 0f),

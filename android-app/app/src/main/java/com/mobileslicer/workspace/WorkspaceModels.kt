@@ -1,6 +1,7 @@
 package com.mobileslicer.workspace
 
 import com.mobileslicer.profiles.ActiveSlicerConfiguration
+import com.mobileslicer.profiles.ProcessProfile
 import com.mobileslicer.viewer.StlMesh
 import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.ViewerModelTransform
@@ -20,14 +21,86 @@ internal data class PlateObject(
     val workspacePreparationTiming: WorkspacePreparationTiming? = null,
     val transform: ViewerModelTransform,
     val paint: PlateObjectPaint = PlateObjectPaint(),
-    val geometrySource: PlateObjectGeometrySource = PlateObjectGeometrySource.StagedFile
+    val geometrySource: PlateObjectGeometrySource = PlateObjectGeometrySource.StagedFile,
+    val processOverride: PlateObjectProcessOverride? = null,
+    val modifiers: List<PlateObjectModifierMesh> = emptyList(),
+    val attribution: WorkspaceModelAttribution? = null
 )
+
+internal data class PlateObjectModifierMesh(
+    val id: Long,
+    val label: String,
+    val filePath: String,
+    val bounds: MeshBounds? = null,
+    val mesh: StlMesh? = null,
+    val transform: ViewerModelTransform = ViewerModelTransform(centerXmm = 0f, centerYmm = 0f),
+    val processOverride: PlateObjectProcessOverride = PlateObjectProcessOverride(),
+    val enabled: Boolean = true
+) {
+    val hasProcessOverrides: Boolean
+        get() = enabled && processOverride.hasProcessOverrides
+}
+
+internal fun modifierViewerObjectId(parentObjectId: Long, modifierId: Long): Long =
+    -((parentObjectId.coerceAtLeast(1L) * 1_000_000L) + modifierId.coerceAtLeast(1L))
+
+internal data class PlateObjectProcessOverride(
+    val selectedProcessId: String? = null,
+    val editedProcessProfile: ProcessProfile? = null
+) {
+    val hasProcessOverrides: Boolean
+        get() = editedProcessProfile != null
+
+    fun selectedProcessIdOr(defaultProcessId: String): String =
+        selectedProcessId?.takeIf { it.isNotBlank() }
+            ?: editedProcessProfile?.id?.takeIf { it.isNotBlank() }
+            ?: defaultProcessId
+
+    fun effectiveProcess(defaultProcess: ProcessProfile): ProcessProfile =
+        editedProcessProfile?.takeIf { it.id == selectedProcessIdOr(defaultProcess.id) }
+            ?: editedProcessProfile
+            ?: defaultProcess
+
+    fun withSelectedProcess(process: ProcessProfile): PlateObjectProcessOverride =
+        PlateObjectProcessOverride(
+            selectedProcessId = process.id,
+            editedProcessProfile = null
+        )
+
+    fun withEditedProcess(process: ProcessProfile): PlateObjectProcessOverride =
+        copy(
+            selectedProcessId = process.id,
+            editedProcessProfile = process
+        )
+
+    val nativeOverridesJson: String
+        get() = editedProcessProfile?.orcaProcessOverridesJson
+            ?.takeIf { it.isNotBlank() }
+            ?: "{}"
+}
+
+internal data class WorkspaceModelAttribution(
+    val title: String?,
+    val author: String?,
+    val sourceUrl: String?,
+    val licenseName: String?,
+    val licenseUrl: String?,
+    val changes: String?,
+    val rightsBasis: String,
+    val policyRevision: String
+) {
+    fun compactLabel(): String = listOfNotNull(
+        licenseName?.takeIf { it.isNotBlank() },
+        author?.takeIf { it.isNotBlank() }?.let { "by $it" }
+    ).joinToString(" ").ifBlank { "Source metadata stored" }
+}
 
 internal data class WorkspacePlate(
     val id: Long,
     val label: String,
     val objects: List<PlateObject> = emptyList(),
     val selectedObjectId: Long? = objects.firstOrNull()?.id,
+    val profileState: PlateProfileState = PlateProfileState(),
     val gcodeFilePath: String? = null,
     val sliceSummary: SliceResultSummary? = null,
     val sliceTiming: SlicePipelineTiming? = null,
@@ -37,13 +110,71 @@ internal data class WorkspacePlate(
     val objectCount: Int get() = objects.size
 }
 
+internal data class PlateProfileState(
+    val selectedProcessId: String? = null,
+    val editedProcessProfile: ProcessProfile? = null
+) {
+    val hasProcessOverrides: Boolean
+        get() = editedProcessProfile != null
+
+    fun selectedProcessIdOr(defaultProcessId: String): String =
+        selectedProcessId?.takeIf { it.isNotBlank() } ?: defaultProcessId
+
+    fun effectiveProcess(defaultProcess: ProcessProfile): ProcessProfile =
+        editedProcessProfile?.takeIf { it.id == selectedProcessIdOr(defaultProcess.id) }
+            ?: defaultProcess
+
+    fun withSelectedProcess(process: ProcessProfile): PlateProfileState =
+        PlateProfileState(
+            selectedProcessId = process.id,
+            editedProcessProfile = null
+        )
+
+    fun withEditedProcess(process: ProcessProfile): PlateProfileState =
+        copy(
+            selectedProcessId = process.id,
+            editedProcessProfile = process
+        )
+
+    fun resetProcessOverrides(): PlateProfileState =
+        copy(editedProcessProfile = null)
+
+    fun transferProcessOverridesTo(process: ProcessProfile): PlateProfileState {
+        val edited = editedProcessProfile ?: return withSelectedProcess(process)
+        return copy(
+            selectedProcessId = process.id,
+            editedProcessProfile = edited.withValues(
+                "id" to process.id,
+                "name" to process.name,
+                "subtitle" to process.subtitle,
+                "builtIn" to false,
+                "profileSource" to process.profileSource,
+                "printerProfileId" to process.printerProfileId,
+                "printerVariantKey" to process.printerVariantKey,
+                "orcaFamily" to process.orcaFamily,
+                "orcaProcessPath" to process.orcaProcessPath,
+                "orcaRawProcessJson" to process.orcaRawProcessJson,
+                "orcaResolvedProcessJson" to process.orcaResolvedProcessJson,
+                "orcaResolvedSourceChain" to process.orcaResolvedSourceChain
+            )
+        )
+    }
+}
+
 internal fun defaultWorkspacePlateLabel(index: Int): String = "Plate ${index.coerceAtLeast(1)}"
 
 internal sealed class PlateObjectGeometrySource {
     data object StagedFile : PlateObjectGeometrySource()
     data class ThreeMfMeshExtract(
         val originalPath: String,
-        val extractedStlPath: String
+        val extractedStlPath: String,
+        val projectMetadata: ThreeMfProjectMetadata? = null
+    ) : PlateObjectGeometrySource()
+    data class StepMeshConvert(
+        val originalPath: String,
+        val convertedStlPath: String,
+        val linearDeflection: Double,
+        val angleDeflection: Double
     ) : PlateObjectGeometrySource()
     data class NativeCutResult(
         val cutGroupId: String,
@@ -52,6 +183,26 @@ internal sealed class PlateObjectGeometrySource {
         val resultJson: String
     ) : PlateObjectGeometrySource()
 }
+
+internal data class ThreeMfProjectMetadata(
+    val sourcePath: String,
+    val nativeProjectFilePath: String? = null,
+    val plateCount: Int? = null,
+    val objectCount: Int? = null,
+    val plateNames: List<String> = emptyList(),
+    val objectNames: List<String> = emptyList(),
+    val objectFilamentAssignments: List<ThreeMfObjectFilamentAssignment> = emptyList(),
+    val filamentCount: Int? = null,
+    val thumbnailEntries: List<String> = emptyList(),
+    val configEntries: List<String> = emptyList(),
+    val preservedFeatures: List<String> = emptyList(),
+    val unsupportedFeatures: List<String> = emptyList()
+)
+
+internal data class ThreeMfObjectFilamentAssignment(
+    val objectName: String,
+    val filamentIndex: Int
+)
 
 internal data class PlateFilamentSlot(
     val index: Int,
@@ -100,7 +251,9 @@ internal data class WorkspacePreparationTiming(
     val cacheHit: Boolean = false,
     val sourceTriangleCount: Int? = null,
     val displayTriangleCount: Int? = null,
-    val reducedForDisplay: Boolean = false
+    val renderArrayBytes: Long? = null,
+    val cacheRetainedBytes: Long? = null,
+    val exactPreviewBudgetBytes: Long? = null
 )
 
 internal data class SlicePipelineTiming(
@@ -267,7 +420,9 @@ internal data class PreviewFilamentUsageRow(
 
 internal enum class AppScreen {
     Home,
+    ModelSearch,
     Workspace,
+    Scanner,
     Profiles,
     Calibrations,
     PrinterBrowser,

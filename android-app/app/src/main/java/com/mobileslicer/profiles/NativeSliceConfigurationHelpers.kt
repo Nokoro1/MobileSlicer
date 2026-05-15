@@ -9,6 +9,7 @@ internal fun JSONObject.restoreResolvedOrcaParityValues(
     processJson: JSONObject?
 ) {
     copyResolvedValues(printerJson, resolvedPrinterParityKeys)
+    restoreResolvedThumbnailValues(printerJson)
     copyResolvedValues(filamentJson, resolvedFilamentParityKeys)
     copyResolvedValues(processJson, resolvedProcessParityKeys)
     processJson?.opt(NativeConfigKeys.Compatibility.CompatiblePrinters)?.let { compatiblePrinters ->
@@ -31,6 +32,105 @@ internal fun JSONObject.restoreResolvedOrcaParityValues(
     ) {
         put(NativeConfigKeys.Bed.CurrentType, resolvedDefaultBedType)
     }
+}
+
+internal fun JSONObject.restoreResolvedOrcaTemplateDefaultValues(
+    printerJson: JSONObject?,
+    filamentJson: JSONObject?,
+    processJson: JSONObject?
+) {
+    copyResolvedValues(printerJson, resolvedPrinterTemplateDefaultRestoreKeys)
+    copyResolvedValues(filamentJson, resolvedFilamentParityKeys - resolvedProfileIdentityKeys)
+    copyResolvedValues(processJson, resolvedProcessTemplateDefaultRestoreKeys)
+}
+
+private fun JSONObject.restoreResolvedThumbnailValues(printerJson: JSONObject?) {
+    if (printerJson == null) return
+    val legacyThumbnailSize = printerJson.opt("thumbnail_size").toNativeConfigListString().orEmpty()
+    if (legacyThumbnailSize.isNotBlank()) {
+        val format = printerJson.nativeResolvedString("thumbnails_format")
+            .ifBlank { nativeResolvedString("thumbnails_format") }
+            .ifBlank { "PNG" }
+        val normalized = normalizeThumbnailDimensionsWithFormat(legacyThumbnailSize, format)
+        put("thumbnails", normalized)
+        put("thumbnails_format", format.uppercase())
+        return
+    }
+    val resolvedThumbnails = printerJson.nativeResolvedString("thumbnails")
+    if (resolvedThumbnails.isNotBlank()) {
+        val normalized = normalizeThumbnailDimensionsWithFormat(
+            rawThumbnails = resolvedThumbnails,
+            defaultFormat = nativeResolvedString("thumbnails_format").ifBlank {
+                printerJson.nativeResolvedString("thumbnails_format")
+            }
+        )
+        put("thumbnails", normalized)
+        return
+    }
+}
+
+internal fun JSONObject.ensureFluiddCompatibleThumbnails(printer: PrinterProfile) {
+    if (printer.printHostType != PrintHostType.OctoPrint || printer.hasBambuContext()) {
+        return
+    }
+
+    val normalized = normalizeThumbnailDimensionsWithFormat(
+        rawThumbnails = nativeResolvedString("thumbnails"),
+        defaultFormat = nativeResolvedString("thumbnails_format").ifBlank { "PNG" }
+    )
+    val entries = normalized
+        .split(',')
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .toMutableList()
+
+    fun hasPngThumbnail(width: Int, height: Int): Boolean =
+        entries.any { entry ->
+            val dimensions = entry.substringBefore('/').trim()
+            val format = entry.substringAfter('/', missingDelimiterValue = "PNG").trim().uppercase()
+            dimensions.equals("${width}x$height", ignoreCase = true) && format == "PNG"
+        }
+
+    if (!hasPngThumbnail(48, 48)) {
+        entries += "48x48/PNG"
+    }
+    if (!hasPngThumbnail(300, 300)) {
+        entries += "300x300/PNG"
+    }
+
+    put("thumbnails", entries.joinToString(", "))
+    put("thumbnails_format", "PNG")
+}
+
+private val resolvedProcessTemplateDefaultRestoreKeys = resolvedProcessParityKeys - setOf(
+    NativeConfigKeys.PrimeTower.Enable,
+    NativeConfigKeys.PrimeTower.Purge
+)
+
+private val resolvedPrinterTemplateDefaultRestoreKeys = setOf(
+    NativeConfigKeys.Printer.ExtruderAmsCount,
+    NativeConfigKeys.Process.WipeTowerType,
+    NativeConfigKeys.Process.WipeTowerX,
+    NativeConfigKeys.Process.WipeTowerY,
+    NativeConfigKeys.Printer.MachineMaxJunctionDeviation,
+    NativeConfigKeys.PrimeTower.SingleExtruderMultiMaterial
+)
+
+private fun normalizeThumbnailDimensionsWithFormat(rawThumbnails: String, defaultFormat: String): String {
+    val format = defaultFormat.trim().ifBlank { "PNG" }.uppercase()
+    return rawThumbnails
+        .split(',')
+        .mapNotNull { rawItem ->
+            val item = rawItem.trim().trim('"')
+            if (item.isBlank()) {
+                null
+            } else if ('/' in item) {
+                item
+            } else {
+                "$item/$format"
+            }
+        }
+        .joinToString(", ")
 }
 
 private fun JSONObject.copyResolvedValues(source: JSONObject?, keys: Set<String>) {

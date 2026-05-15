@@ -157,21 +157,69 @@ internal fun ProcessProfileEditorDialog(
     initial: ProcessProfile,
     isNew: Boolean,
     showAdvancedProfileSettings: Boolean,
+    editorContextLabel: String? = null,
+    saveLabelOverride: String? = null,
+    secondarySaveLabel: String? = null,
     onDismiss: () -> Unit,
-    onSave: (ProcessProfile) -> Unit
+    onSave: (ProcessProfile) -> Unit,
+    onSecondarySave: ((ProcessProfile) -> Unit)? = null
 ) {
     val draft = remember(initial.id) { ProcessProfileEditorDraft(initial) }
     val options = remember { ProcessProfileEditorOptions() }
+    val draftProfile = draft.toProcessProfile(initial, isNew)
+    val hasUnsavedChanges = draftProfile.contentHash() != initial.contentHash()
+    val profileNameChanged = draft.name != initial.name
+    val effectiveSaveLabel = saveLabelOverride ?: if (isNew) "Create" else "Save"
     ProfileEditorScreenScaffold(
         title = null,
         subtitle = null,
-        saveLabel = if (isNew) "Create" else "Save",
+        saveLabel = if (hasUnsavedChanges) "$effectiveSaveLabel *" else effectiveSaveLabel,
+        secondarySaveLabel = secondarySaveLabel,
         onBack = onDismiss,
         onSave = {
-            onSave(draft.toProcessProfile(initial, isNew))
+            onSave(draftProfile)
         },
+        onSecondarySave = onSecondarySave?.let { save -> { save(draftProfile) } },
         headerContent = {
-            ProfileTextField(draft.name, { draft.name = it }, "Profile name")
+            editorContextLabel?.takeIf { it.isNotBlank() }?.let { label ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            ProfileTextField(
+                value = draft.name,
+                onValueChange = { draft.name = it },
+                label = if (profileNameChanged) "Profile name *" else "Profile name",
+                changed = profileNameChanged
+            )
+            if (hasUnsavedChanges) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.62f)
+                    )
+                ) {
+                    Text(
+                        text = if (saveLabelOverride == null) {
+                            "Unsaved process changes."
+                        } else if (initial.contentHash() != draftProfile.contentHash()) {
+                            "Edited, not applied."
+                        } else {
+                            "Applied, not saved."
+                        },
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         },
         topContent = {
             ProfileEditorTabRow(
@@ -183,6 +231,7 @@ internal fun ProcessProfileEditorDialog(
         }
     ) {
         ProcessProfileEditorSelectedTabContent(
+            initial = initial,
             draft = draft,
             options = options,
             showAdvancedProfileSettings = showAdvancedProfileSettings

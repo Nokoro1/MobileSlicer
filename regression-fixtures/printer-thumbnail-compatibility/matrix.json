@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "parity_target": "OrcaSlicer thumbnail metadata compatibility without adding hidden work to normal slicing",
+    "status_meanings": {
+      "proven_live": "Validated against a real printer host or UI consumer and backed by an automated gate.",
+      "gated": "Validated by local/device automation, but not yet proven on a live printer host.",
+      "source_supported": "Orca/MobileSlicer source paths are present, but no full generated-output gate exists yet.",
+      "pending_live_validation": "Expected compatible, but must not be claimed as supported until a live host or fixture proves it.",
+      "not_supported": "Known unsupported behavior."
+    },
+    "required_release_gates": [
+      "fluidd-thumbnail-metadata",
+      "sliced-3mf-metadata",
+      "multi-plate-sliced-3mf-metadata",
+      "orca-thumbnail-reference-matrix"
+    ],
+    "required_verification_gates": [
+      "orca-metadata-benchmark"
+    ]
+  },
+  "entries": [
+    {
+      "id": "qidi-q2-fluidd-moonraker-png",
+      "printer_family": "Qidi Q2",
+      "host_family": "Fluidd on Moonraker",
+      "formats": [
+        "thumbnail:48x48/PNG",
+        "thumbnail:300x300/PNG"
+      ],
+      "status": "proven_live",
+      "evidence": {
+        "gate": "fluidd-thumbnail-metadata",
+        "live_host": "Qidi Q2 Moonraker at http://192.168.1.162",
+        "latest_report": "artifacts/fluidd-thumbnail-metadata/latest/report.md",
+        "moonraker_metadata": "artifacts/fluidd-thumbnail-metadata/latest/moonraker-metadata.json",
+        "notes": "Moonraker indexed MobileSlicer output as OrcaSlicer and reported 32x32, 48x48, and 300x300 thumbnail PNGs."
+      }
+    },
+    {
+      "id": "generic-fluidd-moonraker-png",
+      "printer_family": "Generic Klipper",
+      "host_family": "Fluidd on Moonraker",
+      "formats": [
+        "thumbnail:48x48/PNG",
+        "thumbnail:300x300/PNG"
+      ],
+      "status": "gated",
+      "evidence": {
+        "gate": "fluidd-thumbnail-metadata",
+        "audit_script": "scripts/orca_metadata_audit.py",
+        "notes": "The generated G-code contract is gated. Additional live hosts still need real upload/index evidence."
+      }
+    },
+    {
+      "id": "mainsail-moonraker-png",
+      "printer_family": "Generic Klipper",
+      "host_family": "Mainsail on Moonraker",
+      "formats": [
+        "thumbnail:48x48/PNG",
+        "thumbnail:300x300/PNG"
+      ],
+      "status": "pending_live_validation",
+      "evidence": {
+        "gate": "fluidd-thumbnail-metadata",
+        "notes": "Mainsail consumes Moonraker metadata, but this repo has not captured a Mainsail UI/live-host fixture."
+      }
+    },
+    {
+      "id": "octoprint-png",
+      "printer_family": "Generic OctoPrint",
+      "host_family": "OctoPrint",
+      "formats": [
+        "thumbnail:PNG"
+      ],
+      "status": "pending_live_validation",
+      "evidence": {
+        "notes": "Upload support exists, but thumbnail indexing/display behavior is plugin-dependent and needs a fixture or live host."
+      }
+    },
+    {
+      "id": "qidi-colpic-gimage-simage",
+      "printer_family": "Qidi legacy thumbnail consumers",
+      "host_family": "Qidi vendor UI",
+      "formats": [
+        "gimage:COLPIC",
+        "simage:COLPIC"
+      ],
+      "status": "gated",
+      "evidence": {
+        "gate": "orca-metadata-benchmark",
+        "fixture_case": "qidi-colpic-gimage-simage-gcode",
+        "fixture": "regression-fixtures/orca-metadata/mobile/qidi-colpic-gimage-simage.gcode",
+        "manifest": "regression-fixtures/orca-metadata/manifest.json",
+        "notes": "Android device capture and the strict metadata fixture gate require both Qidi gimage and simage blocks."
+      }
+    },
+    {
+      "id": "btt-tft",
+      "printer_family": "BTT TFT firmware",
+      "host_family": "SD card / BTT TFT parser",
+      "formats": [
+        "thumbnail_BTT:BTT_TFT"
+      ],
+      "status": "gated",
+      "evidence": {
+        "gate": "orca-metadata-benchmark",
+        "fixture_case": "btt-tft-gcode",
+        "fixture": "regression-fixtures/orca-metadata/mobile/btt-tft.gcode",
+        "manifest": "regression-fixtures/orca-metadata/manifest.json",
+        "notes": "Android device capture and the strict metadata fixture gate require a BTT TFT thumbnail block with the requested dimensions."
+      }
+    },
+    {
+      "id": "qoi-gcode",
+      "printer_family": "QOI-capable firmware",
+      "host_family": "Native G-code thumbnail parser",
+      "formats": [
+        "thumbnail_QOI:96x96/QOI"
+      ],
+      "status": "gated",
+      "evidence": {
+        "gate": "orca-metadata-benchmark",
+        "fixture_case": "non-qidi-qoi-gcode",
+        "manifest": "regression-fixtures/orca-metadata/manifest.json"
+      }
+    },
+    {
+      "id": "jpg-gcode",
+      "printer_family": "JPG-capable firmware",
+      "host_family": "Native G-code thumbnail parser",
+      "formats": [
+        "thumbnail_JPG:JPG"
+      ],
+      "status": "gated",
+      "evidence": {
+        "gate": "orca-metadata-benchmark",
+        "fixture_case": "jpg-gcode",
+        "fixture": "regression-fixtures/orca-metadata/mobile/jpg.gcode",
+        "manifest": "regression-fixtures/orca-metadata/manifest.json",
+        "notes": "Android device capture and the benchmark require a real JPEG SOI/EOI payload inside the Orca-style thumbnail_JPG block."
+      }
+    },
+    {
+      "id": "bambu-orca-sliced-3mf",
+      "printer_family": "Bambu/Orca package consumers",
+      "host_family": "Sliced .gcode.3mf package",
+      "formats": [
+        "Metadata/plate_1.png",
+        "Metadata/plate_1_small.png",
+        "Metadata/plate_no_light_1.png",
+        "Metadata/top_1.png",
+        "Metadata/pick_1.png"
+      ],
+      "status": "gated",
+      "evidence": {
+        "gate": "sliced-3mf-metadata",
+        "visual_gate": "orca-thumbnail-reference-matrix",
+        "manifest": "regression-fixtures/orca-metadata/manifest.json"
+      }
+    },
+    {
+      "id": "multi-plate-sliced-3mf",
+      "printer_family": "Bambu/Orca package consumers",
+      "host_family": "Sliced .gcode.3mf package",
+      "formats": [
+        "Metadata/plate_N.json",
+        "Metadata/plate_N.png"
+      ],
+      "status": "gated",
+      "evidence": {
+        "gate": "multi-plate-sliced-3mf-metadata",
+        "notes": "Device automation exports an Orca/Bambu sliced .gcode.3mf package with plate_1 and plate_2 G-code, JSON, and role thumbnail entries. This proves package structure for generic Orca package consumers; differentiated workspace plate slicing remains tracked separately from thumbnail compatibility."
+      }
+    }
+  ]
+}

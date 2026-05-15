@@ -62,14 +62,20 @@ internal fun requireAllowedPrinterNetworkUrl(url: String) {
 internal fun isLocalPrinterHost(host: String?): Boolean {
     val normalized = host?.trim()?.trim('[', ']')?.lowercase().orEmpty()
     if (normalized.isBlank()) return false
-    if (normalized == "localhost" || normalized.endsWith(".local") || "." !in normalized && ":" !in normalized) return true
+    if (
+        normalized == "localhost" ||
+        normalized.endsWith(".local") ||
+        normalized.endsWith(".ts.net") ||
+        "." !in normalized && ":" !in normalized
+    ) return true
     val octets = normalized.split('.').mapNotNull { it.toIntOrNull() }
     if (octets.size == 4 && octets.all { it in 0..255 }) {
         return octets[0] == 10 ||
             octets[0] == 127 ||
             octets[0] == 192 && octets[1] == 168 ||
             octets[0] == 172 && octets[1] in 16..31 ||
-            octets[0] == 169 && octets[1] == 254
+            octets[0] == 169 && octets[1] == 254 ||
+            octets[0] == 100 && octets[1] in 64..127
     }
     return normalized == "::1" ||
         normalized.startsWith("fe80:") ||

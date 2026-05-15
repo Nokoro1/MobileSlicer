@@ -155,7 +155,14 @@ import org.json.JSONObject
 internal sealed interface ProfileEditorRequest {
     data class Printer(val profile: PrinterProfile, val isNew: Boolean) : ProfileEditorRequest
     data class Filament(val profile: FilamentProfile, val isNew: Boolean) : ProfileEditorRequest
-    data class Process(val profile: ProcessProfile, val isNew: Boolean) : ProfileEditorRequest
+    data class Process(
+        val profile: ProcessProfile,
+        val isNew: Boolean,
+        val workspaceProcessMode: Boolean = false,
+        val objectProcessMode: Boolean = false,
+        val objectLabel: String? = null,
+        val processScopeLabel: String? = null
+    ) : ProfileEditorRequest
 }
 
 internal data class ProfileDeleteRequest(

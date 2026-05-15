@@ -15,6 +15,35 @@ static std::string summary_escape(std::string_view value)
     return encoded.str();
 }
 
+static std::optional<int> preview_total_int_from_summary(const std::string& summary, std::string_view key)
+{
+    const std::string_view prefix = "previewTotals=";
+    const size_t totals_start = summary.find(prefix);
+    if (totals_start == std::string::npos) {
+        return std::nullopt;
+    }
+    const size_t field_start = totals_start + prefix.size();
+    const size_t field_end = summary.find('|', field_start);
+    const std::string_view totals(summary.data() + field_start, (field_end == std::string::npos ? summary.size() : field_end) - field_start);
+    const size_t key_start = totals.find(key);
+    if (key_start == std::string::npos) {
+        return std::nullopt;
+    }
+    const size_t value_start = key_start + key.size();
+    if (value_start >= totals.size() || totals[value_start] != '=') {
+        return std::nullopt;
+    }
+    const size_t digits_start = value_start + 1;
+    const size_t digits_end = totals.find(',', digits_start);
+    const std::string value(totals.substr(digits_start, digits_end == std::string::npos ? std::string_view::npos : digits_end - digits_start));
+    char* end = nullptr;
+    const long parsed = std::strtol(value.c_str(), &end, 10);
+    if (end == value.c_str()) {
+        return std::nullopt;
+    }
+    return static_cast<int>(std::max(0L, parsed));
+}
+
 static const char* hex_for_rgb(uint8_t r, uint8_t g, uint8_t b)
 {
     static thread_local std::array<std::string, 8> cache;
@@ -284,7 +313,7 @@ static std::string enrich_gcode_summary_from_processor(
             option_times[option],
             0.0,
             0.0,
-            option == libvgcode::EOptionType::Seams,
+            false,
             true);
     }
 
@@ -359,11 +388,8 @@ static std::string enrich_gcode_summary_from_processor(
     }
 
     std::ostringstream totals;
-    const unsigned int print_toolchanges = print != nullptr ?
-        static_cast<unsigned int>(std::max(0, print->print_statistics().total_toolchanges)) :
-        0;
-    const unsigned int filament_changes = std::max(result.print_statistics.total_filament_changes, print_toolchanges);
-    const unsigned int extruder_changes = std::max(result.print_statistics.total_extruder_changes, print_toolchanges);
+    const unsigned int filament_changes = result.print_statistics.total_filament_changes;
+    const unsigned int extruder_changes = result.print_statistics.total_extruder_changes;
 
     totals << std::fixed << std::setprecision(5)
            << "totalSeconds=" << total_time
@@ -1768,7 +1794,7 @@ static std::string enrich_gcode_summary_from_preview_input(std::string summary, 
             option_times[option],
             0.0,
             0.0,
-            option == libvgcode::EOptionType::Seams,
+            false,
             true);
     }
 
@@ -1815,14 +1841,17 @@ static std::string enrich_gcode_summary_from_preview_input(std::string summary, 
                   << 0.0;
     }
 
+    const int processor_filament_change_count = preview_total_int_from_summary(summary, "filamentChanges").value_or(filament_change_count);
+    const int processor_extruder_change_count = preview_total_int_from_summary(summary, "extruderChanges").value_or(extruder_change_count);
+
     std::ostringstream totals;
     totals << std::fixed << std::setprecision(5)
            << "totalSeconds=" << total_time
            << ",prepareSeconds=0.00000"
            << ",modelSeconds=" << total_time
            << ",cost=0.00000"
-           << ",filamentChanges=" << filament_change_count
-           << ",extruderChanges=" << extruder_change_count;
+           << ",filamentChanges=" << processor_filament_change_count
+           << ",extruderChanges=" << processor_extruder_change_count;
 
     summary = replace_summary_field(summary, "previewLineTypes", line_types.str());
     summary = replace_summary_field(summary, "previewFilaments", filaments.str());

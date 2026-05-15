@@ -13,8 +13,10 @@
 
 #include "libslic3r/Config.hpp"
 #include "libslic3r/Exception.hpp"
+#include "libslic3r/Format/STEP.hpp"
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/bbs_3mf.hpp"
+#include "libslic3r/GCode/Thumbnails.hpp"
 #include "libslic3r/Geometry/ConvexHull.hpp"
 #include "libslic3r/Layer.hpp"
 #include "libslic3r/Model.hpp"
@@ -24,6 +26,7 @@
 #include "libslic3r/CutUtils.hpp"
 #include "libslic3r/Orient.hpp"
 #include "libslic3r/calib.hpp"
+#include "nlohmann/json.hpp"
 #include <tbb/global_control.h>
 
 #if defined(MOBILE_SLICER_ENABLE_VGCODE)

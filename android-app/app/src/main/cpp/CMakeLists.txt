@@ -45,7 +45,7 @@ if (ORCA_SHIPPING_REQUIRE_REAL_LIBSLIC3R_FOR_ABI AND NOT ORCA_SHIPPING_USE_REAL_
 endif()
 
 if (ORCA_SHIPPING_USE_REAL_LIBSLIC3R)
-    if (NOT DEFINED ORCA_ANDROID_ABI_SUFFIX)
+    if (NOT ORCA_ANDROID_ABI_SUFFIX)
         set(ORCA_ANDROID_ABI_SUFFIX "x86_64")
         if (ANDROID_ABI STREQUAL "arm64-v8a")
             set(ORCA_ANDROID_ABI_SUFFIX "arm64")
@@ -64,6 +64,12 @@ if (ORCA_SHIPPING_USE_REAL_LIBSLIC3R)
     set(ORCA_ANDROID_GMP_PREFIX "${ORCA_ANDROID_LIBSLIC3R_DEPS_PREFIX}-gmp" CACHE PATH "Android GMP prefix")
     set(ORCA_ANDROID_MPFR_PREFIX "${ORCA_ANDROID_LIBSLIC3R_DEPS_PREFIX}-mpfr" CACHE PATH "Android MPFR prefix")
     set(ORCA_ANDROID_CGAL_PREFIX "${ORCA_ANDROID_DEPS_ROOT}/${ORCA_ANDROID_ABI_SUFFIX}-cgal" CACHE PATH "Android CGAL prefix")
+    set(ORCA_ANDROID_JPEG_PREFIX "${ORCA_ANDROID_DEPS_ROOT}/${ORCA_ANDROID_ABI_SUFFIX}-jpeg" CACHE PATH "Android libjpeg-turbo prefix")
+    set(ORCA_ANDROID_OCCT_PREFIX "" CACHE PATH "Android OCCT prefix for STEP import")
+    set(ORCA_ANDROID_DEFAULT_OCCT_PREFIX "${ORCA_ANDROID_DEPS_ROOT}/${ORCA_ANDROID_ABI_SUFFIX}-occt")
+    if (NOT ORCA_ANDROID_OCCT_PREFIX AND EXISTS "${ORCA_ANDROID_DEFAULT_OCCT_PREFIX}/lib/cmake/occt")
+        set(ORCA_ANDROID_OCCT_PREFIX "${ORCA_ANDROID_DEFAULT_OCCT_PREFIX}" CACHE PATH "Android OCCT prefix for STEP import" FORCE)
+    endif()
     set(ORCA_ANDROID_OPENSSL_INCLUDE_DIR "${ORCA_ANDROID_DEPS_ROOT}/${ORCA_ANDROID_ABI_SUFFIX}-openssl/include" CACHE PATH "OpenSSL include root")
     set(ORCA_ANDROID_OPENSSL_CRYPTO_LIBRARY "${ORCA_ANDROID_DEPS_ROOT}/${ORCA_ANDROID_ABI_SUFFIX}-openssl/lib/libcrypto.a" CACHE FILEPATH "OpenSSL crypto library")
     set(ORCA_ANDROID_OPENSSL_SSL_LIBRARY "${ORCA_ANDROID_DEPS_ROOT}/${ORCA_ANDROID_ABI_SUFFIX}-openssl/lib/libssl.a" CACHE FILEPATH "OpenSSL ssl library")
@@ -75,6 +81,7 @@ if (ORCA_SHIPPING_USE_REAL_LIBSLIC3R)
             AND EXISTS "${ORCA_ANDROID_OPENSSL_CRYPTO_LIBRARY}"
             AND EXISTS "${ORCA_ANDROID_OPENSSL_SSL_LIBRARY}"
             AND EXISTS "${ORCA_ANDROID_CGAL_PREFIX}/include"
+            AND EXISTS "${ORCA_ANDROID_JPEG_PREFIX}/lib/libjpeg.a"
             AND EXISTS "${ORCA_ANDROID_BOOST_SRC_ROOT}")
         set(ORCA_ANDROID_LIBSLIC3R_ENABLE ON CACHE BOOL "Enable the experimental Android libslic3r path" FORCE)
         set(ORCA_ANDROID_BOOST_PREFIX "${ORCA_ANDROID_BOOST_PREFIX}" CACHE PATH "Android Boost prefix" FORCE)
@@ -84,6 +91,7 @@ if (ORCA_SHIPPING_USE_REAL_LIBSLIC3R)
         set(ORCA_ANDROID_GMP_PREFIX "${ORCA_ANDROID_GMP_PREFIX}" CACHE PATH "Android GMP prefix" FORCE)
         set(ORCA_ANDROID_MPFR_PREFIX "${ORCA_ANDROID_MPFR_PREFIX}" CACHE PATH "Android MPFR prefix" FORCE)
         set(ORCA_ANDROID_CGAL_PREFIX "${ORCA_ANDROID_CGAL_PREFIX}" CACHE PATH "Android CGAL prefix" FORCE)
+        set(ORCA_ANDROID_JPEG_PREFIX "${ORCA_ANDROID_JPEG_PREFIX}" CACHE PATH "Android libjpeg-turbo prefix" FORCE)
         set(ORCA_ANDROID_OPENSSL_INCLUDE_DIR "${ORCA_ANDROID_OPENSSL_INCLUDE_DIR}" CACHE PATH "OpenSSL include root" FORCE)
         set(ORCA_ANDROID_OPENSSL_CRYPTO_LIBRARY "${ORCA_ANDROID_OPENSSL_CRYPTO_LIBRARY}" CACHE FILEPATH "OpenSSL crypto library" FORCE)
         set(ORCA_ANDROID_OPENSSL_SSL_LIBRARY "${ORCA_ANDROID_OPENSSL_SSL_LIBRARY}" CACHE FILEPATH "OpenSSL ssl library" FORCE)
@@ -194,6 +202,62 @@ target_link_libraries(orca_engine
     $<$<BOOL:${ORCA_SHIPPING_REAL_WRAPPER}>:libvgcode>
     ${gles-lib}
     ${egl-lib}
+    ${log-lib}
+)
+
+file(GLOB APRILTAG_COMMON_SOURCES
+    third_party/apriltag/common/*.c
+)
+
+add_library(scanner_apriltag_core STATIC
+    third_party/apriltag/apriltag.c
+    third_party/apriltag/apriltag_pose.c
+    third_party/apriltag/apriltag_quad_thresh.c
+    third_party/apriltag/tag36h11.c
+    ${APRILTAG_COMMON_SOURCES}
+)
+
+target_include_directories(scanner_apriltag_core PUBLIC
+    third_party/apriltag
+)
+
+set_property(TARGET scanner_apriltag_core PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+add_library(scanner_apriltag SHARED
+    scanner_apriltag_stub.cpp
+)
+
+target_include_directories(scanner_apriltag PRIVATE
+    third_party/apriltag
+)
+
+target_link_libraries(scanner_apriltag
+    scanner_apriltag_core
+    ${log-lib}
+)
+
+add_library(scanner_pose_solver SHARED
+    scanner_pose_solver_stub.cpp
+)
+
+target_link_libraries(scanner_pose_solver
+    ${log-lib}
+)
+
+add_library(scanner_pose_optimizer SHARED
+    scanner_pose_optimizer_stub.cpp
+)
+
+target_include_directories(scanner_pose_optimizer PRIVATE
+    ../../../../../vendor/orcaslicer/deps_src
+    ../../../../../vendor/orcaslicer/deps_src/eigen
+)
+
+target_compile_options(scanner_pose_optimizer PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-declarations>
+)
+
+target_link_libraries(scanner_pose_optimizer
     ${log-lib}
 )
 

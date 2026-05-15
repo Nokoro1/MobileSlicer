@@ -171,6 +171,183 @@ class NativeSliceConfigTest {
     }
 
     @Test
+    fun nativeSliceConfigNormalizesBlankShellThicknessValuesBeforeNativePlanning() {
+        NativeSliceConfigCache.clear()
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_blank_shell")
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_blank_shell",
+            printerProfileId = printer.id
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_blank_shell",
+            1 to "Blank Shell Thickness",
+            259 to printer.id,
+            265 to """
+                {
+                  "top_shell_thickness":"",
+                  "bottom_shell_thickness":"nil"
+                }
+            """.trimIndent()
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals(0.0, nativeConfig.optDouble("top_shell_thickness"), 0.0001)
+        assertEquals(0.0, nativeConfig.optDouble("bottom_shell_thickness"), 0.0001)
+        assertTrue(nativeConfig.optString("top_shell_thickness").isNotBlank())
+        assertTrue(nativeConfig.optString("bottom_shell_thickness").isNotBlank())
+    }
+
+    @Test
+    fun nativeSliceConfigUsesClosedSeamGapByDefault() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_closed_seam")
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_closed_seam",
+            printerProfileId = printer.id
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_closed_seam",
+            1 to "Closed Seam",
+            259 to printer.id
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals("0%", nativeConfig.optString("seam_gap"))
+    }
+
+    @Test
+    fun nativeSliceConfigEmitsOnlyOneWallFirstLayer() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_first_layer_wall")
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_first_layer_wall",
+            printerProfileId = printer.id
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_first_layer_wall",
+            1 to "Only One First Layer Wall",
+            55 to com.mobileslicer.profiles.ProcessQualitySurfaceDetails(
+                onlyOneWallFirstLayer = true
+            ),
+            259 to printer.id
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertTrue(nativeConfig.optBoolean("only_one_wall_first_layer", false))
+    }
+
+    @Test
+    fun importedOrcaProcessReadsOnlyOneWallFirstLayer() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(
+            id = "printer_import_first_layer_wall",
+            nozzleDiameterMm = 0.4f
+        )
+        val imported = OrcaProcessPresetBundle(
+            machineName = "Fixture 0.4",
+            nozzleDiameterMm = 0.4f,
+            name = "0.20mm First Layer Wall Fixture",
+            rawName = "0.20mm First Layer Wall Fixture",
+            profilePath = "Fixture/process/0.20mm First Layer Wall Fixture.json",
+            rawProcessJson = "{}",
+            resolvedProcessJson = """
+                {
+                  "print_settings_id":"0.20mm First Layer Wall Fixture",
+                  "only_one_wall_first_layer":true,
+                  "only_one_wall_top":false
+                }
+            """.trimIndent(),
+            resolvedSourceChain = emptyList()
+        ).toImportedProcessProfile(printer)
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_import_first_layer_wall",
+            printerProfileId = printer.id
+        ), imported))
+
+        assertTrue(imported.onlyOneWallFirstLayer)
+        assertTrue(nativeConfig.optBoolean("only_one_wall_first_layer", false))
+        assertFalse(nativeConfig.optBoolean("only_one_wall_top", true))
+    }
+
+    @Test
+    fun nativeSliceConfigNormalizesLegacyResolvedSeamGap() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_legacy_seam")
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_legacy_seam",
+            printerProfileId = printer.id
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_legacy_seam",
+            1 to "Legacy Seam",
+            258 to "orca",
+            259 to printer.id,
+            265 to """{"print_settings_id":"Legacy Seam","seam_gap":"10%"}"""
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals("0%", nativeConfig.optString("seam_gap"))
+    }
+
+    @Test
+    fun plateFilamentConfigNormalizesBlankShellThicknessValuesAfterSlotApplication() {
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(id = "filament_plate_blank_shell")
+        val nativeConfig = JSONObject(
+            applyPlateFilamentSlotsToNativeConfig(
+                configJson = """{"top_shell_thickness":"","bottom_shell_thickness":"nil"}""",
+                slots = listOf(filament.toPlateFilamentSlot(index = 1)),
+                plateObjects = listOf(testPlateObject(id = 1L, filamentSlotIndex = 1)),
+                filaments = listOf(filament),
+                flushVolumes = null
+            )
+        )
+
+        assertEquals(0.0, nativeConfig.optDouble("top_shell_thickness"), 0.0001)
+        assertEquals(0.0, nativeConfig.optDouble("bottom_shell_thickness"), 0.0001)
+        assertTrue(nativeConfig.optString("top_shell_thickness").isNotBlank())
+        assertTrue(nativeConfig.optString("bottom_shell_thickness").isNotBlank())
+    }
+
+    @Test
+    fun nativeSliceConfigKeepsCommentsButDoesNotForceObjectLabelsWithoutObjectExclusion() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_preview_metadata")
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_preview_metadata",
+            printerProfileId = printer.id
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_preview_metadata",
+            1 to "Preview Metadata",
+            258 to "orca",
+            259 to printer.id,
+            265 to """{"print_settings_id":"Preview Metadata","gcode_comments":0,"gcode_label_objects":0}"""
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertFalse(nativeConfig.optBoolean("gcode_comments"))
+        assertFalse(nativeConfig.optBoolean("gcode_label_objects"))
+    }
+
+    @Test
+    fun plateFilamentConfigKeepsCommentsButDoesNotForceObjectLabelsWithoutObjectExclusion() {
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(id = "filament_plate_preview_metadata")
+        val nativeConfig = JSONObject(
+            applyPlateFilamentSlotsToNativeConfig(
+                configJson = """{"gcode_comments":false,"gcode_label_objects":false}""",
+                slots = listOf(filament.toPlateFilamentSlot(index = 1)),
+                plateObjects = listOf(testPlateObject(id = 1L, filamentSlotIndex = 1)),
+                filaments = listOf(filament),
+                flushVolumes = null
+            )
+        )
+
+        assertFalse(nativeConfig.optBoolean("gcode_comments"))
+        assertFalse(nativeConfig.optBoolean("gcode_label_objects"))
+    }
+
+    @Test
     fun positiveBrimWidthUsesManualOuterBrimForNativeSliceConfig() {
         val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_brim_width")
         val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
@@ -799,7 +976,39 @@ class NativeSliceConfigTest {
     }
 
     @Test
-    fun plateObjectsUsingOnlyFourthFilamentSlotStillSliceAsSingleMaterial() {
+    fun plateObjectsUsingOnlySecondFilamentSlotPreservePhysicalSlotSelection() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_slot2")
+        val filaments = (1..2).map { index ->
+            ProfileStoreRepository.fallbackFilamentProfile().copy(
+                id = "filament_$index",
+                name = "Filament $index",
+                printerProfileId = printer.id,
+                defaultFilamentColor = if (index == 1) "#8FC1FF" else "#445566"
+            )
+        }
+        val slots = filaments.mapIndexed { index, filament -> filament.toPlateFilamentSlot(index + 1) }
+        val plateObjects = listOf(testPlateObject(id = 1L, filamentSlotIndex = 2))
+
+        val result = JSONObject(
+            applyPlateFilamentSlotsToNativeConfig(
+                configJson = """{"enable_prime_tower":true,"purge_in_prime_tower":false}""",
+                slots = slots,
+                plateObjects = plateObjects,
+                filaments = filaments,
+                flushVolumes = null
+            )
+        )
+
+        assertEquals(2, result.optInt("mobile_slicer_active_filament_slot_count"))
+        assertFalse(result.optBoolean("enable_prime_tower", true))
+        assertFalse(result.optBoolean("purge_in_prime_tower", true))
+        assertJsonArrayEquals(listOf("Filament 1", "Filament 2"), result.getJSONArray("filament_settings_id"))
+        assertJsonArrayEquals(listOf(1, 2), result.getJSONArray("filament_self_index"))
+        assertJsonArrayEquals(listOf(1, 1), result.getJSONArray("filament_map"))
+    }
+
+    @Test
+    fun plateObjectsUsingOnlyFourthFilamentSlotPreservePhysicalSlotSelection() {
         val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_slot4")
         val filaments = (1..4).map { index ->
             ProfileStoreRepository.fallbackFilamentProfile().copy(
@@ -828,11 +1037,86 @@ class NativeSliceConfigTest {
             )
         )
 
-        assertEquals(1, result.optInt("mobile_slicer_active_filament_slot_count"))
+        assertEquals(4, result.optInt("mobile_slicer_active_filament_slot_count"))
         assertFalse(result.optBoolean("enable_prime_tower", true))
         assertFalse(result.optBoolean("purge_in_prime_tower", true))
-        assertEquals("Filament 4", result.optString("filament_settings_id"))
-        assertEquals("#445566", result.optString("filament_colour"))
+        assertJsonArrayEquals(listOf("Filament 1", "Filament 2", "Filament 3", "Filament 4"), result.getJSONArray("filament_settings_id"))
+        assertJsonArrayEquals(listOf(1, 2, 3, 4), result.getJSONArray("filament_self_index"))
+        assertJsonArrayEquals(listOf(1, 1, 1, 1), result.getJSONArray("filament_map"))
+    }
+
+    @Test
+    fun multiNozzlePrinterMapsFilamentSlotsToPhysicalNozzlesLikeOrca() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_dual_nozzle")
+        val filaments = (1..2).map { index ->
+            ProfileStoreRepository.fallbackFilamentProfile().copy(
+                id = "filament_dual_$index",
+                name = "Nozzle Filament $index",
+                printerProfileId = printer.id
+            )
+        }
+        val slots = filaments.mapIndexed { index, filament -> filament.toPlateFilamentSlot(index + 1) }
+
+        val result = JSONObject(
+            applyPlateFilamentSlotsToNativeConfig(
+                configJson = """{"nozzle_diameter":[0.4,0.6],"enable_prime_tower":true}""",
+                slots = slots,
+                plateObjects = listOf(
+                    testPlateObject(id = 1L, filamentSlotIndex = 1),
+                    testPlateObject(id = 2L, filamentSlotIndex = 2)
+                ),
+                filaments = filaments,
+                flushVolumes = null
+            )
+        )
+
+        // Orca stores object extruders as 1-based filament slots; filament_map maps those slots to nozzles/tools.
+        assertEquals(2, result.optInt("mobile_slicer_physical_nozzle_count"))
+        assertJsonArrayEquals(listOf(1, 2), result.getJSONArray("filament_self_index"))
+        assertJsonArrayEquals(listOf(1, 2), result.getJSONArray("filament_map"))
+        assertEquals("Auto For Flush", result.optString("filament_map_mode"))
+        assertFalse(result.optBoolean("single_extruder_multi_material", true))
+    }
+
+    @Test
+    fun explicitToolchangerMappingUsesManualFilamentMapWithoutRenumberingSlots() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(id = "printer_toolchanger")
+        val filaments = (1..3).map { index ->
+            ProfileStoreRepository.fallbackFilamentProfile().copy(
+                id = "filament_tool_$index",
+                name = "Tool Filament $index",
+                printerProfileId = printer.id
+            )
+        }
+        val slots = filaments.mapIndexed { index, filament ->
+            val slotIndex = index + 1
+            filament.toPlateFilamentSlot(slotIndex).copy(
+                physicalNozzleIndex = when (slotIndex) {
+                    1 -> 3
+                    2 -> 1
+                    else -> 2
+                }
+            )
+        }
+
+        val result = JSONObject(
+            applyPlateFilamentSlotsToNativeConfig(
+                configJson = """{"nozzle_diameter":[0.4,0.4,0.6],"enable_prime_tower":true}""",
+                slots = slots,
+                plateObjects = listOf(
+                    testPlateObject(id = 1L, filamentSlotIndex = 1),
+                    testPlateObject(id = 2L, filamentSlotIndex = 3)
+                ),
+                filaments = filaments,
+                flushVolumes = null
+            )
+        )
+
+        assertEquals(3, result.optInt("mobile_slicer_active_filament_slot_count"))
+        assertJsonArrayEquals(listOf(1, 2, 3), result.getJSONArray("filament_self_index"))
+        assertJsonArrayEquals(listOf(3, 1, 2), result.getJSONArray("filament_map"))
+        assertEquals("Manual", result.optString("filament_map_mode"))
+        assertFalse(result.optBoolean("single_extruder_multi_material", true))
     }
 
     @Test
@@ -1019,6 +1303,136 @@ class NativeSliceConfigTest {
     }
 
     @Test
+    fun qidiQ2LegacyThumbnailSizeKeepsOrcaProfilePngThumbnail() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(
+            id = "printer_qidi_q2_thumbnail",
+            name = "Qidi Q2",
+            profileSource = "orca",
+            orcaFamily = "Qidi",
+            printerModel = "",
+            printerAgent = "qidi",
+            thumbnails = "380x380/COLPIC,210x210/COLPIC,110x110/PNG",
+            orcaResolvedMachineJson = """
+                {
+                  "name":"Qidi Q2 0.4 nozzle",
+                  "printer_settings_id":"Qidi",
+                  "printer_model":"Qidi Q2",
+                  "printer_agent":"qidi",
+                  "thumbnails":"380x380/COLPIC",
+                  "thumbnails_format":"PNG",
+                  "thumbnail_size":["150x150"]
+                }
+            """.trimIndent()
+        )
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_qidi_q2_thumbnail",
+            printerProfileId = printer.id,
+            profileSource = "orca",
+            orcaResolvedFilamentJson = """{"filament_settings_id":"Generic ABS @Qidi Q2 0.4 nozzle","filament_type":"ABS"}"""
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_qidi_q2_thumbnail",
+            1 to "0.20mm Standard @Qidi Q2",
+            259 to printer.id,
+            258 to "orca",
+            262 to "Qidi",
+            265 to """{"print_settings_id":"0.20mm Standard @Qidi Q2"}"""
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals("Qidi Q2 0.4 nozzle", nativeConfig.optString("printer_settings_id"))
+        assertEquals("Qidi Q2", nativeConfig.optString("printer_model"))
+        assertEquals("150x150/PNG, 48x48/PNG, 300x300/PNG", nativeConfig.optString("thumbnails"))
+        assertEquals("PNG", nativeConfig.optString("thumbnails_format"))
+        assertEquals("ABS", nativeConfig.optString("filament_type"))
+    }
+
+    @Test
+    fun nonQidiLegacyThumbnailSizeKeepsPrinterRequestedFormatWithoutQidiBlocks() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(
+            id = "printer_generic_legacy_thumbnail",
+            name = "Generic Klipper",
+            profileSource = "orca",
+            printerModel = "Generic Klipper",
+            printerAgent = "",
+            thumbnails = "48x48/PNG",
+            orcaResolvedMachineJson = """
+                {
+                  "name":"Generic Klipper 0.4 nozzle",
+                  "printer_settings_id":"Generic Klipper 0.4 nozzle",
+                  "printer_model":"Generic Klipper",
+                  "printer_agent":"",
+                  "thumbnails_format":"PNG",
+                  "thumbnail_size":["300x300","96x96"]
+                }
+            """.trimIndent()
+        )
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_generic_legacy_thumbnail",
+            printerProfileId = printer.id,
+            profileSource = "orca",
+            orcaResolvedFilamentJson = """{"filament_settings_id":"Generic PLA","filament_type":"PLA"}"""
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_generic_legacy_thumbnail",
+            1 to "0.20mm Standard",
+            259 to printer.id,
+            258 to "orca",
+            265 to """{"print_settings_id":"0.20mm Standard"}"""
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals("Generic Klipper 0.4 nozzle", nativeConfig.optString("printer_settings_id"))
+        assertEquals("300x300/PNG, 96x96/PNG, 48x48/PNG", nativeConfig.optString("thumbnails"))
+        assertEquals("PNG", nativeConfig.optString("thumbnails_format"))
+        assertFalse(nativeConfig.optString("thumbnails").contains("COLPIC"))
+    }
+
+    @Test
+    fun nonQidiExplicitThumbnailsKeepOrcaProfileFormats() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(
+            id = "printer_bambu_thumbnail",
+            name = "Bambu Lab X1 Carbon",
+            profileSource = "orca",
+            printerModel = "Bambu Lab X1 Carbon",
+            printerAgent = "bambu",
+            thumbnails = "48x48/PNG",
+            orcaResolvedMachineJson = """
+                {
+                  "name":"Bambu Lab X1 Carbon 0.4 nozzle",
+                  "printer_settings_id":"Bambu Lab X1 Carbon 0.4 nozzle",
+                  "printer_model":"Bambu Lab X1 Carbon",
+                  "printer_agent":"bambu",
+                  "thumbnails":"300x300/PNG, 96x96/PNG",
+                  "thumbnails_format":"PNG"
+                }
+            """.trimIndent()
+        )
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_bambu_thumbnail",
+            printerProfileId = printer.id,
+            profileSource = "orca",
+            orcaResolvedFilamentJson = """{"filament_settings_id":"Bambu PLA","filament_type":"PLA"}"""
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_bambu_thumbnail",
+            1 to "0.20mm Standard",
+            259 to printer.id,
+            258 to "orca",
+            265 to """{"print_settings_id":"0.20mm Standard"}"""
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals("Bambu Lab X1 Carbon 0.4 nozzle", nativeConfig.optString("printer_settings_id"))
+        assertEquals("300x300/PNG, 96x96/PNG", nativeConfig.optString("thumbnails"))
+        assertEquals("PNG", nativeConfig.optString("thumbnails_format"))
+        assertFalse(nativeConfig.optString("thumbnails").contains("COLPIC"))
+    }
+
+    @Test
     fun processEditorChangesOnlyEditedOrcaProcessKeys() {
         val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(
             id = "printer_orca_edit",
@@ -1118,7 +1532,7 @@ class NativeSliceConfigTest {
         val nativeConfig = JSONObject(store.activeConfiguration().toNativeSliceConfigJson())
 
         assertEquals(256.0, nativeConfig.optDouble("bed_width_mm"), 0.0001)
-        assertEquals("96x96/PNG", nativeConfig.optString("thumbnails"))
+        assertEquals("96x96/PNG, 48x48/PNG, 300x300/PNG", nativeConfig.optString("thumbnails"))
         assertEquals("PNG", nativeConfig.optString("thumbnails_format"))
         assertEquals(225, nativeConfig.optInt("nozzle_temperature"))
         assertEquals(4, nativeConfig.optInt("wall_loops"))
@@ -1192,7 +1606,7 @@ class NativeSliceConfigTest {
         assertEquals("octoprint", nativeConfig.optString("host_type"))
         assertEquals("key", nativeConfig.optString("printhost_authorization_type"))
         assertEquals(0, nativeConfig.optInt("printhost_ssl_ignore_revoke"))
-        assertEquals("300x300/PNG, 96x96/PNG", nativeConfig.optString("thumbnails"))
+        assertEquals("300x300/PNG, 96x96/PNG, 48x48/PNG", nativeConfig.optString("thumbnails"))
         assertEquals("PNG", nativeConfig.optString("thumbnails_format"))
         assertEquals("100%", nativeConfig.optString("accel_to_decel_factor"))
         assertEquals(0, nativeConfig.optInt("combine_brims"))
@@ -1203,9 +1617,118 @@ class NativeSliceConfigTest {
         assertEquals(0, nativeConfig.optInt("slowdown_for_curled_perimeters"))
         assertEquals("nowhere", nativeConfig.optString("gap_fill_target"))
         assertEquals(0, nativeConfig.optInt("exclude_object"))
-        assertEquals(0, nativeConfig.optInt("gcode_label_objects"))
+        assertFalse(nativeConfig.optBoolean("gcode_comments"))
+        assertFalse(nativeConfig.optBoolean("gcode_label_objects"))
         assertEquals("auto", nativeConfig.optString("wall_direction"))
         assertEquals(0, nativeConfig.optInt("wipe_tower_cone_angle"))
+    }
+
+    @Test
+    fun nativeSliceConfigRestoresResolvedOrcaValuesAfterFinalTemplateDefaults() {
+        val printer = ProfileStoreRepository.fallbackPrinterProfile().copy(
+            id = "printer_final_orca_restore",
+            name = "Qidi Q2",
+            printerModel = "Qidi Q2",
+            printerAgent = "qidi",
+            profileSource = "orca",
+            orcaFamily = "Qidi",
+            orcaResolvedMachineJson = """
+                {
+                  "printer_settings_id":"Qidi Q2 0.4 nozzle",
+                  "machine_max_junction_deviation":"0.013"
+                }
+            """.trimIndent()
+        )
+        val filament = ProfileStoreRepository.fallbackFilamentProfile().copy(
+            id = "filament_final_orca_restore",
+            printerProfileId = printer.id,
+            profileSource = "orca",
+            orcaResolvedFilamentJson = """{"filament_settings_id":"Qidi ABS"}"""
+        )
+        val process = newProcessProfileUnchecked(
+            0 to "process_final_orca_restore",
+            1 to "Orca dangerous values",
+            259 to printer.id,
+            263 to "orca",
+            262 to "Qidi",
+            265 to """
+                {
+                  "print_settings_id":"Orca dangerous values",
+                  "accel_to_decel_enable":"1",
+                  "wall_direction":"ccw",
+                  "bridge_density":"0",
+                  "bridge_speed":"0",
+                  "filter_out_gap_fill":"0",
+                  "initial_layer_min_bead_width":"0",
+                  "internal_bridge_density":"0",
+                  "internal_bridge_speed":"0",
+                  "ooze_prevention":"0",
+                  "prime_volume":"45",
+                  "wipe_tower_wall_type":"rectangle",
+                  "wipe_tower_cone_angle":"30",
+                  "wipe_tower_x":"15",
+                  "wipe_tower_y":"220",
+                  "internal_solid_infill_pattern":"monotonicline",
+                  "resolution":"0",
+                  "small_perimeter_speed":"15",
+                  "small_perimeter_threshold":"0",
+                  "solid_infill_direction":"0",
+                  "sparse_infill_acceleration":"500",
+                  "support_bottom_interface_spacing":"0",
+                  "support_bottom_z_distance":"0",
+                  "support_interface_speed":"100",
+                  "support_ironing_flow":"0",
+                  "support_ironing_spacing":"0",
+                  "support_object_xy_distance":"50%",
+                  "top_bottom_infill_wall_overlap":"0",
+                  "detect_narrow_internal_solid_infill":false,
+                  "ensure_vertical_shell_thickness":"none",
+                  "only_one_wall_top":true,
+                  "default_jerk":"0",
+                  "top_surface_jerk":"9",
+                  "travel_jerk":"12",
+                  "wall_generator":"classic"
+                }
+            """.trimIndent()
+        )
+
+        val nativeConfig = JSONObject(nativeConfigFor(printer, filament, process))
+
+        assertEquals("0.013", nativeConfig.optString("machine_max_junction_deviation"))
+        assertEquals(1, nativeConfig.optInt("accel_to_decel_enable"))
+        assertEquals("ccw", nativeConfig.optString("wall_direction"))
+        assertEquals("0", nativeConfig.optString("bridge_density"))
+        assertEquals("0", nativeConfig.optString("bridge_speed"))
+        assertEquals("0", nativeConfig.optString("filter_out_gap_fill"))
+        assertEquals("0", nativeConfig.optString("initial_layer_min_bead_width"))
+        assertEquals("0", nativeConfig.optString("internal_bridge_density"))
+        assertEquals("0", nativeConfig.optString("internal_bridge_speed"))
+        assertEquals(0, nativeConfig.optInt("ooze_prevention"))
+        assertEquals(45.0, nativeConfig.optDouble("prime_volume"), 0.0001)
+        assertEquals("rectangle", nativeConfig.optString("wipe_tower_wall_type"))
+        assertEquals(30.0, nativeConfig.optDouble("wipe_tower_cone_angle"), 0.0001)
+        assertEquals(15.0, nativeConfig.optDouble("wipe_tower_x"), 0.0001)
+        assertEquals(220.0, nativeConfig.optDouble("wipe_tower_y"), 0.0001)
+        assertEquals("monotonicline", nativeConfig.optString("internal_solid_infill_pattern"))
+        assertEquals("0", nativeConfig.optString("resolution"))
+        assertEquals("15", nativeConfig.optString("small_perimeter_speed"))
+        assertEquals("0", nativeConfig.optString("small_perimeter_threshold"))
+        assertEquals("0", nativeConfig.optString("solid_infill_direction"))
+        assertEquals("500", nativeConfig.optString("sparse_infill_acceleration"))
+        assertEquals("0", nativeConfig.optString("support_bottom_interface_spacing"))
+        assertEquals("0", nativeConfig.optString("support_bottom_z_distance"))
+        assertEquals(100, nativeConfig.optInt("support_interface_speed"))
+        assertEquals("0", nativeConfig.optString("support_ironing_flow"))
+        assertEquals("0", nativeConfig.optString("support_ironing_spacing"))
+        assertEquals("50%", nativeConfig.optString("support_object_xy_distance"))
+        assertEquals("0", nativeConfig.optString("top_bottom_infill_wall_overlap"))
+        assertFalse(nativeConfig.optBoolean("detect_narrow_internal_solid_infill"))
+        assertEquals("none", nativeConfig.optString("ensure_vertical_shell_thickness"))
+        assertTrue(nativeConfig.optBoolean("only_one_wall_top"))
+        assertEquals(0, nativeConfig.optInt("default_jerk"))
+        assertEquals(9, nativeConfig.optInt("top_surface_jerk"))
+        assertEquals(12, nativeConfig.optInt("travel_jerk"))
+        assertEquals("classic", nativeConfig.optString("wall_generator"))
     }
 
     @Test
@@ -1919,7 +2442,8 @@ class NativeSliceConfigTest {
         assertEquals(0, nativeConfig.optInt("accel_to_decel_enable"))
         assertEquals("auto", nativeConfig.optString("wall_direction"))
         assertEquals(0.5, nativeConfig.optDouble("filter_out_gap_fill"), 0.0001)
-        assertEquals(0, nativeConfig.optInt("gcode_label_objects"))
+        assertFalse(nativeConfig.optBoolean("gcode_comments"))
+        assertFalse(nativeConfig.optBoolean("gcode_label_objects"))
         assertCriticalNativeConfigContains(
             nativeConfig,
             mapOf(

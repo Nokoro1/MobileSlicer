@@ -134,6 +134,6 @@ class PreparedViewerMeshCacheTest {
             sourceTriangleCount = mesh.triangleCount,
             displayTriangleCount = mesh.triangleCount,
             sourceBounds = mesh.bounds,
-            reducedForDisplay = false
+            renderArrayBytes = (mesh.vertices.size.toLong() + mesh.normals.size.toLong()) * Float.SIZE_BYTES
         )
 }

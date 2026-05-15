@@ -28,7 +28,9 @@ internal data class StlMesh(
     val vertices: FloatArray,
     val normals: FloatArray,
     val triangleCount: Int,
-    val bounds: MeshBounds
+    val bounds: MeshBounds,
+    val indices: IntArray? = null,
+    val flatShaded: Boolean = false
 )
 
 internal data class PreparedViewerMesh(
@@ -36,14 +38,13 @@ internal data class PreparedViewerMesh(
     val sourceTriangleCount: Int,
     val displayTriangleCount: Int,
     val sourceBounds: MeshBounds,
-    val reducedForDisplay: Boolean
+    val renderArrayBytes: Long
 )
 
 internal const val STL_MAX_TRIANGLES: Int = Int.MAX_VALUE / 9
+internal const val DEFAULT_MAX_EXACT_PREVIEW_MESH_BYTES: Long = 96L * 1024L * 1024L
 
 internal object StlMeshParser {
-    const val DEFAULT_MAX_DISPLAY_TRIANGLES = 1_000_000
-
     fun parse(file: File): StlMesh {
         require(file.exists() && file.length() > 0L) { "STL file is empty." }
         return if (looksLikeBinaryStl(file)) {
@@ -55,14 +56,15 @@ internal object StlMeshParser {
 
     fun parseForDisplay(
         file: File,
-        maxDisplayTriangles: Int = DEFAULT_MAX_DISPLAY_TRIANGLES
+        maxPreviewMeshBytes: Long = DEFAULT_MAX_EXACT_PREVIEW_MESH_BYTES
     ): PreparedViewerMesh {
-        require(maxDisplayTriangles > 0) { "Display triangle budget must be positive." }
+        // Workspace preview must be geometrically honest: exact STL triangles or a clear error.
+        require(maxPreviewMeshBytes > 0L) { "Exact preview mesh byte budget must be positive." }
         require(file.exists() && file.length() > 0L) { "STL file is empty." }
         return if (looksLikeBinaryStl(file)) {
-            parseBinaryForDisplay(file, maxDisplayTriangles)
+            parseBinaryForDisplay(file, maxPreviewMeshBytes)
         } else {
-            parseAsciiForDisplay(file, maxDisplayTriangles)
+            parseAsciiForDisplay(file, maxPreviewMeshBytes)
         }
     }
 

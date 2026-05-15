@@ -8,6 +8,8 @@ import com.mobileslicer.viewer.ViewerModelTransform
 import com.mobileslicer.workspace.PlateObject
 import java.io.File
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 
 internal data class GeneratedFootprintRect(
     val minX: Float,
@@ -30,8 +32,12 @@ internal data class PlateAutoArrangeResult(
     val objects: List<PlateObject>,
     val changedCount: Int,
     val reservedPrimeTowerSpace: Boolean,
-    val centersSummary: String
-)
+    val centersSummary: String,
+    val bedIndices: List<Int> = List(objects.size) { 0 }
+) {
+    val arrangedPlateCount: Int get() = bedIndices.distinct().size.coerceAtLeast(1)
+    val usesMultipleBeds: Boolean get() = bedIndices.any { it != 0 }
+}
 
 internal sealed class PlatePlanningOutcome<out T> {
     data class Success<T>(val result: T) : PlatePlanningOutcome<T>()
@@ -43,6 +49,44 @@ internal fun generatedFootprintClearanceMm(process: ProcessProfile): Float {
     val skirtClearance = if (process.skirts > 0) process.skirtDistanceMm.coerceAtLeast(0f) + 8f else 0f
     return maxOf(0f, brimClearance, skirtClearance)
 }
+
+internal fun generatedFootprintClearanceMm(configJson: String): Float {
+    val json = runCatching { JSONObject(configJson) }.getOrNull() ?: return 0f
+    val brimType = BrimType.fromConfigValue(json.nativeScalarString("brim_type"))
+    val brimWidth = json.nativeScalarFloat("brim_width", fallback = 0f).coerceAtLeast(0f)
+    val brimClearance = if (brimType == BrimType.NoBrim || brimWidth <= 0f) {
+        0f
+    } else {
+        brimWidth + 2f
+    }
+    val skirts = json.nativeScalarInt("skirt_loops", fallback = json.nativeScalarInt("skirts", fallback = 0))
+    val skirtDistance = json.nativeScalarFloat("skirt_distance", fallback = 0f).coerceAtLeast(0f)
+    val skirtClearance = if (skirts > 0) skirtDistance + 8f else 0f
+    return maxOf(0f, brimClearance, skirtClearance)
+}
+
+private fun JSONObject.nativeScalarString(key: String): String {
+    if (!has(key) || isNull(key)) return ""
+    return when (val value = opt(key)) {
+        is JSONArray -> {
+            for (index in 0 until value.length()) {
+                val item = value.opt(index)?.toString()?.trim()?.trim('"').orEmpty()
+                if (item.isNotBlank()) return item
+            }
+            ""
+        }
+        is String -> value.trim().trim('"')
+        else -> value?.toString()?.trim()?.trim('"').orEmpty()
+    }
+}
+
+private fun JSONObject.nativeScalarFloat(key: String, fallback: Float): Float =
+    nativeScalarString(key).toFloatOrNull()?.takeIf { it.isFinite() } ?: fallback
+
+private fun JSONObject.nativeScalarInt(key: String, fallback: Int): Int =
+    nativeScalarString(key).toIntOrNull()
+        ?: nativeScalarString(key).toFloatOrNull()?.toInt()
+        ?: fallback
 
 internal fun generatedFootprintRect(
     bounds: MeshBounds,

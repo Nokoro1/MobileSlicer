@@ -9,13 +9,30 @@ PACKAGE_NAME="com.mobileslicer"
 MAIN_ACTIVITY="com.mobileslicer/.MainActivity"
 AUTOMATION_ACTION="com.mobileslicer.action.AUTOMATE_SLICE"
 PREVIEW_INTERACTION_ACTION="com.mobileslicer.action.PROFILE_PREVIEW_INTERACTION"
+EGL_THUMBNAIL_SMOKE_ACTION="com.mobileslicer.action.EGL_THUMBNAIL_SMOKE"
+EGL_SLICE_THUMBNAIL_SMOKE_ACTION="com.mobileslicer.action.EGL_SLICE_THUMBNAIL_SMOKE"
+EGL_THUMBNAIL_COMPARE_ACTION="com.mobileslicer.action.EGL_THUMBNAIL_COMPARE"
 DEFAULT_SLICE_SMOKE_STL="$ROOT_DIR/regression-fixtures/slicing/mobileslicer_test_cube.stl"
+STEP_IMPORT_SMOKE_MODEL="$ROOT_DIR/regression-fixtures/import/occt_screw.step"
+THREE_MF_IMPORT_SMOKE_MODEL="$ROOT_DIR/vendor/orcaslicer/resources/handy_models/OrcaCube_v2.3mf"
 SUPPORT_SLICE_SMOKE_STL="$ROOT_DIR/regression-fixtures/slicing/stage2_bridge_speed_fixture.stl"
 PERIMETER_ARRAY_SLICE_SMOKE_STL="$ROOT_DIR/regression-fixtures/slicing/stage2_small_perimeter_array_fixture.stl"
 MEDIUM_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/volumetric_speed/SpeedTestStructure.stl"
 COMPLEX_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/vfa/vfa.stl"
 STRESS_SLICE_PERF_STL="$ROOT_DIR/android-app/app/src/main/assets/calib_stl/temperature_tower/temperature_tower.stl"
-BENCHY_AUTOMATION_CONFIG='{"bed_width_mm":270,"bed_depth_mm":270,"max_height_mm":256,"nozzle_diameter":0.4000000059604645,"filament_diameter":1.75,"filament_type":"PLA","filament_max_volumetric_speed":50,"nozzle_temperature_initial_layer":210,"nozzle_temperature":210,"bed_temperature_initial_layer":60,"bed_temperature":60,"cooling_baseline":100,"close_fan_the_first_x_layers":1,"layer_height":0.20000000298023224,"first_layer_height":0.20000000298023224,"first_layer_print_speed":10,"first_layer_infill_speed":22.5,"initial_layer_travel_speed_percent":50,"slow_down_layers":0,"outer_wall_speed":30,"inner_wall_speed":30,"top_surface_speed":30,"travel_speed":120,"outer_wall_acceleration":500,"inner_wall_acceleration":10000,"top_surface_acceleration":500,"sparse_infill_acceleration":500,"bridge_speed":10,"small_perimeter_speed":15,"small_perimeter_threshold":0,"sparse_infill_speed":300,"internal_solid_infill_speed":30,"gap_infill_speed":15,"top_shell_layers":4,"bottom_shell_layers":3,"seam_position":"aligned","precise_outer_wall":true,"only_one_wall_top":true,"top_surface_pattern":"monotonicline","sparse_infill_density":15,"sparse_infill_pattern":"grid","wall_loops":2,"print_speed_baseline":60,"skirts":0,"brim_width":0}'
+BENCHY_AUTOMATION_CONFIG_PATH="$ROOT_DIR/regression-fixtures/orca-metadata/mobile-baseline-config.json"
+[[ -f "$BENCHY_AUTOMATION_CONFIG_PATH" ]] || {
+  printf '[verify_android] ERROR: missing automation baseline config: %s\n' "$BENCHY_AUTOMATION_CONFIG_PATH" >&2
+  exit 1
+}
+BENCHY_AUTOMATION_CONFIG="$(python3 - "$BENCHY_AUTOMATION_CONFIG_PATH" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    print(json.dumps(json.load(fh), separators=(",", ":")))
+PY
+)"
 CURRENT_AUTOMATION_SERIAL=""
 CURRENT_AUTOMATION_LABEL=""
 CURRENT_AUTOMATION_OUTPUT_PATH=""
@@ -29,6 +46,7 @@ AUTOMATION_LAST_ELAPSED_MS=""
 AUTOMATION_LAST_PLACEMENT_MS=""
 AUTOMATION_LAST_CONFIG_MS=""
 AUTOMATION_LAST_NATIVE_SLICE_MS=""
+AUTOMATION_LAST_THUMBNAIL_MS=""
 AUTOMATION_LAST_WRITE_GCODE_MS=""
 AUTOMATION_LAST_PREVIEW_MOVES=""
 AUTOMATION_LAST_PREVIEW_CACHE_BUILT=""
@@ -92,6 +110,29 @@ Usage:
   scripts/verify_android.sh lint
   scripts/verify_android.sh stubs
   scripts/verify_android.sh script-tests
+  scripts/verify_android.sh orca-fixture-gate
+  scripts/verify_android.sh orca-gcode-metadata-parity
+  scripts/verify_android.sh orca-thumbnail-reference-fixtures
+  scripts/verify_android.sh orca-3mf-roundtrip-device [serial]
+  scripts/verify_android.sh orca-rich-project-fixture
+  scripts/verify_android.sh orca-rich-project-roundtrip-contract
+  scripts/verify_android.sh orca-rich-project-roundtrip-device [serial]
+  scripts/verify_android.sh orca-modifier-project-fixture
+  scripts/verify_android.sh orca-modifier-project-roundtrip-contract
+  scripts/verify_android.sh orca-modifier-project-roundtrip-device [serial]
+  scripts/verify_android.sh orca-height-range-project-fixture
+  scripts/verify_android.sh orca-height-range-project-roundtrip-contract
+  scripts/verify_android.sh orca-height-range-project-roundtrip-device [serial]
+  scripts/verify_android.sh orca-project-parity-matrix
+  scripts/verify_android.sh orca-project-parity-device-matrix [serial]
+  scripts/verify_android.sh orca-active-multifilament-reference-probe
+  scripts/verify_android.sh orca-fixture-capture-mobile [serial]
+  scripts/verify_android.sh printer-thumbnail-compatibility
+  scripts/verify_android.sh fluidd-thumbnail-metadata [serial]
+  scripts/verify_android.sh orca-metadata-benchmark [serial]
+  scripts/verify_android.sh egl-thumbnail-smoke [serial]
+  scripts/verify_android.sh egl-slice-thumbnail-smoke [serial]
+  scripts/verify_android.sh egl-thumbnail-compare [serial]
   scripts/verify_android.sh asset-tests
   scripts/verify_android.sh apk
   scripts/verify_android.sh release
@@ -101,6 +142,11 @@ Usage:
   scripts/verify_android.sh device-automation [serial]
   scripts/verify_android.sh slice-lifecycle [serial]
   scripts/verify_android.sh slice-regression [serial]
+  scripts/verify_android.sh object-process [serial]
+  scripts/verify_android.sh orca-object-label-parity [serial]
+  scripts/verify_android.sh orca-import-smoke [serial]
+  scripts/verify_android.sh sliced-3mf-metadata [serial]
+  scripts/verify_android.sh multi-plate-sliced-3mf-metadata [serial]
   scripts/verify_android.sh skirt-parity [serial]
   scripts/verify_android.sh profile-ui [serial]
   scripts/verify_android.sh responsiveness [serial]
@@ -120,6 +166,77 @@ Modes:
   stubs   Validate the Android Orca native stub inventory.
   script-tests
           Run shell syntax checks for verification scripts.
+  orca-fixture-gate
+          Validate the Orca metadata fixture manifest and any committed outputs.
+          Set MOBILE_SLICER_STRICT_ORCA_FIXTURES=1 to fail when declared
+          desktop Orca references, MobileSlicer outputs, or pending cases are
+          missing. The local release path enables strict mode automatically.
+  orca-gcode-metadata-parity
+          Audit committed G-code fixtures for visible metadata parity: print
+          time, filament usage, cost, layer count, generator markers,
+          toolchanges, thumbnail signatures, and desktop-vs-MobileSlicer drift.
+          Set MOBILE_SLICER_FAIL_ORCA_METADATA_DRIFT=1 only after the desktop
+          Orca and MobileSlicer fixtures are generated from matched profiles.
+  orca-thumbnail-reference-fixtures
+          Validate the checked-in desktop Orca thumbnail reference matrix,
+          manifests, source sliced 3MF packages, role PNGs, and source models.
+  orca-3mf-roundtrip-device
+          Build, install, import a real Orca 3MF package on device, export a
+          MobileSlicer project 3MF without slicing, pull it, and compare the
+          source package against the MobileSlicer round-trip output. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  orca-active-multifilament-reference-probe
+          Try to generate a desktop Orca active multi-filament thumbnail
+          reference. This is intentionally strict: it fails if Orca collapses
+          the package to one active filament or omits package thumbnails.
+  orca-fixture-capture-mobile
+          Build, install, run the supported Orca metadata fixture cases on a
+          device, pull MobileSlicer outputs into regression-fixtures/orca-metadata/mobile,
+          and audit each captured output. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  printer-thumbnail-compatibility
+          Audit the printer thumbnail compatibility matrix so live/gated/source
+          support claims stay honest across Fluidd, Mainsail, OctoPrint, Qidi,
+          BTT, QOI/JPG, and sliced 3MF package consumers.
+  fluidd-thumbnail-metadata
+          Build, install, run one plain G-code slice with Fluidd/Moonraker
+          thumbnails enabled, pull the output, require both 48x48/PNG and
+          300x300/PNG thumbnail blocks, require decoded visual/detail metrics,
+          and assert thumbnail timing stays under
+          MOBILE_SLICER_METADATA_FLUIDD_THUMBNAIL_MAX_MS. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1. When
+          MOBILE_SLICER_MOONRAKER_URL is set, this also uploads the generated
+          G-code to Moonraker, polls /server/files/metadata, and requires
+          Moonraker to report both Fluidd thumbnails.
+  orca-metadata-benchmark
+          Build, install, run no-thumbnail, PNG, QOI, and sliced 3MF metadata
+          fixture slices on a device, audit the outputs, and write a timing
+          report under artifacts/orca-metadata-benchmark. Also asserts plain
+          G-code slices do not render package thumbnails, sliced 3MF does, and
+          thumbnail/write timings stay under configurable thresholds. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  egl-thumbnail-smoke
+          Build, install, run the isolated offscreen EGL thumbnail prototype,
+          assert it renders nonblank pixels, and fail if render/readback timing
+          exceeds thresholds. This does not slice and does not touch production
+          thumbnail export behavior. Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  egl-slice-thumbnail-smoke
+          Build, install, run the offscreen EGL slice thumbnail renderer against
+          a real mesh upload/draw/readback path, and fail if visual metrics are
+          blank, GL reports an error, or timing exceeds thresholds. This does
+          not replace the production software thumbnail renderer. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  egl-thumbnail-compare
+          Build, install, render all package thumbnail roles for a real STL
+          fixture through both the current software renderer and the guarded EGL
+          backend, pull PNG/JSON artifacts, and fail on blank, tiny, collapsed,
+          or slow EGL role outputs. Also writes software-vs-EGL visual diff
+          reports and, when MOBILE_SLICER_ORCA_THUMBNAIL_REFERENCE_DIR points
+          at desktop Orca PNGs or a .gcode.3mf package, desktop-Orca visual diff
+          reports. Set MOBILE_SLICER_REQUIRE_ORCA_THUMBNAIL_REFERENCE=1 to make
+          missing desktop references fatal. Set MOBILE_SLICER_EGL_COMPARE_MODEL
+          to compare a non-default fixture. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   asset-tests
           Run script tests for generated Orca Android profile assets.
   apk     Build the debug APK.
@@ -140,6 +257,26 @@ Modes:
           Build, install, run a physical-device slicing parameter matrix, pull
           emitted G-code, and assert expected geometry/G-code changes.
           Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  object-process
+          Build, install, run object-scoped process override slices, assert
+          native Orca accepted object override keys while ignoring metadata-only
+          probes, and compare emitted G-code to prove the override changes only
+          one object in a two-object project. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  orca-import-smoke
+          Build, install, run automation slicing through the supported Orca
+          import surface: STL direct load, Orca 3MF mesh extraction, and STEP
+          tessellation. Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  sliced-3mf-metadata
+          Build, install, export a sliced .gcode.3mf on device, pull it, and
+          audit Orca thumbnail entries, relationships, and Metadata/plate_1.json.
+          Requires MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
+  multi-plate-sliced-3mf-metadata
+          Build, install, export a differentiated two-plate sliced .gcode.3mf
+          on device, pull it, and audit Orca package entries, per-plate
+          relationships, byte-distinct plate G-code, byte-distinct plate bbox
+          JSON, and required role thumbnails. Requires
+          MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1.
   skirt-parity
           Build, install, run baseline/combined/per-object/brim skirt slices on
           device, pull emitted G-code, and assert Orca skirt features survive
@@ -315,14 +452,389 @@ run_stub_inventory() {
 run_script_tests() {
   log "Running verification script syntax checks"
   bash -n "$ROOT_DIR/scripts/verify_android.sh"
+  bash -n "$ROOT_DIR/scripts/release_gate_android.sh"
+  bash -n "$ROOT_DIR/scripts/generate_orca_reference_fixtures.sh"
+  bash -n "$ROOT_DIR/scripts/generate_orca_thumbnail_reference_fixture.sh"
+  bash -n "$ROOT_DIR/scripts/generate_orca_thumbnail_reference_matrix.sh"
+  bash -n "$ROOT_DIR/scripts/generate_orca_rich_project_fixture.sh"
+  bash -n "$ROOT_DIR/scripts/generate_orca_modifier_project_fixture.sh"
+  bash -n "$ROOT_DIR/scripts/generate_orca_height_range_project_fixture.sh"
+  bash -n "$ROOT_DIR/scripts/probe_orca_active_multifilament_reference.sh"
+  bash -n "$ROOT_DIR/scripts/run_orca_thumbnail_reference_matrix.sh"
   python3 -m py_compile "$ROOT_DIR"/scripts/*.py
+  (cd "$ROOT_DIR" && python3 scripts/test_orca_metadata_audit.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_orca_metadata_fixture_gate.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_orca_gcode_metadata_parity_audit.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_orca_thumbnail_port_audit.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_orca_thumbnail_visual_diff.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_orca_thumbnail_reference_fixture_audit.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_orca_3mf_project_preservation_audit.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_printer_thumbnail_compatibility_audit.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_extract_orca_thumbnail_references.py)
   (cd "$ROOT_DIR" && python3 scripts/test_analyze_mobile_performance.py)
   (cd "$ROOT_DIR" && python3 scripts/test_analyze_preview_responsiveness.py)
   (cd "$ROOT_DIR" && python3 scripts/test_gcode_preview_layer_counter.py)
   (cd "$ROOT_DIR" && python3 scripts/test_regression_fixtures.py)
   (cd "$ROOT_DIR" && python3 scripts/test_release_worktree_audit.py)
+  (cd "$ROOT_DIR" && python3 scripts/test_process_profile_coverage.py)
   (cd "$ROOT_DIR" && python3 scripts/test_validate_orca_profile_bundle.py)
   (cd "$ROOT_DIR" && python3 scripts/test_validate_orca_export_with_cli.py)
+  (cd "$ROOT_DIR" && python3 scripts/orca_thumbnail_reference_fixture_audit.py --pretty >/dev/null)
+}
+
+run_orca_fixture_gate() {
+  log "Running Orca metadata fixture gate"
+  local strict_args=()
+  if [[ "${MOBILE_SLICER_STRICT_ORCA_FIXTURES:-0}" == "1" ]]; then
+    strict_args+=(--strict-references)
+  fi
+  (cd "$ROOT_DIR" && python3 scripts/orca_metadata_fixture_gate.py --pretty "${strict_args[@]}")
+}
+
+run_orca_3mf_project_preservation_gate() {
+  log "Running Orca 3MF project preservation gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-thumbnail-references/active-multifilament-two-objects/h2d-direct-two-filament-objects.gcode.3mf"
+  [[ -f "$fixture" ]] || fail "Missing Orca 3MF project preservation fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --three-mf "$fixture" \
+    --min-plate-count 1 \
+    --min-object-count 2 \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-project-thumbnails \
+    --require-project-settings \
+    --pretty)
+}
+
+run_orca_rich_project_fixture_gate() {
+  log "Running rich Orca 3MF project fixture gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/rich-object-settings/rich-object-settings.gcode.3mf"
+  [[ -f "$fixture" ]] || fail "Missing rich Orca project fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --three-mf "$fixture" \
+    --min-plate-count 2 \
+    --min-object-count 2 \
+    --require-plate-names \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-object-settings \
+    --require-project-thumbnails \
+    --require-plate-json-metadata \
+    --require-sliced-plate-gcode \
+    --require-project-settings \
+    --pretty)
+}
+
+run_orca_3mf_roundtrip_contract_gate() {
+  log "Running Orca 3MF round-trip preservation contract gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-thumbnail-references/active-multifilament-two-objects/h2d-direct-two-filament-objects.gcode.3mf"
+  [[ -f "$fixture" ]] || fail "Missing Orca 3MF round-trip fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --source-3mf "$fixture" \
+    --roundtrip-3mf "$fixture" \
+    --min-plate-count 1 \
+    --min-object-count 2 \
+    --require-plate-names \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-project-thumbnails \
+    --require-project-settings \
+    --pretty)
+}
+
+run_orca_rich_project_roundtrip_contract_gate() {
+  log "Running rich Orca 3MF round-trip preservation contract gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/rich-object-settings/rich-object-settings.gcode.3mf"
+  [[ -f "$fixture" ]] || fail "Missing rich Orca 3MF round-trip fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --source-3mf "$fixture" \
+    --roundtrip-3mf "$fixture" \
+    --min-plate-count 2 \
+    --min-object-count 2 \
+    --require-plate-names \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-object-settings \
+    --require-project-thumbnails \
+    --require-plate-json-metadata \
+    --require-sliced-plate-gcode \
+    --require-project-settings \
+    --pretty)
+}
+
+run_orca_modifier_project_fixture_gate() {
+  log "Running modifier Orca 3MF project fixture gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/modifier-object-settings/modifier-object-settings.gcode.3mf"
+  [[ -f "$fixture" ]] || fail "Missing modifier Orca project fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --three-mf "$fixture" \
+    --min-plate-count 2 \
+    --min-object-count 2 \
+    --require-plate-names \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-object-settings \
+    --require-modifier-volumes \
+    --require-modifier-settings \
+    --require-project-thumbnails \
+    --require-plate-json-metadata \
+    --require-sliced-plate-gcode \
+    --require-project-settings \
+    --pretty)
+}
+
+run_orca_modifier_project_roundtrip_contract_gate() {
+  log "Running modifier Orca 3MF round-trip preservation contract gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/modifier-object-settings/modifier-object-settings.gcode.3mf"
+  [[ -f "$fixture" ]] || fail "Missing modifier Orca 3MF round-trip fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --source-3mf "$fixture" \
+    --roundtrip-3mf "$fixture" \
+    --min-plate-count 2 \
+    --min-object-count 2 \
+    --require-plate-names \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-object-settings \
+    --require-modifier-volumes \
+    --require-modifier-settings \
+    --require-project-thumbnails \
+    --require-plate-json-metadata \
+    --require-sliced-plate-gcode \
+    --require-project-settings \
+    --pretty)
+}
+
+run_orca_project_parity_matrix_gate() {
+  log "Running Orca project parity matrix"
+  run_orca_3mf_project_preservation_gate
+  run_orca_rich_project_fixture_gate
+  run_orca_rich_project_roundtrip_contract_gate
+  run_orca_modifier_project_fixture_gate
+  run_orca_modifier_project_roundtrip_contract_gate
+  run_orca_height_range_project_fixture_gate
+  run_orca_height_range_project_roundtrip_contract_gate
+}
+
+run_orca_project_parity_device_matrix_gate() {
+  local serial="$1"
+  log "Running Orca project parity device matrix on $serial"
+  run_orca_rich_project_roundtrip_device_gate "$serial"
+  run_orca_modifier_project_roundtrip_device_gate "$serial"
+  run_orca_height_range_project_roundtrip_device_gate "$serial"
+}
+
+run_orca_height_range_project_fixture_gate() {
+  log "Running height-range Orca 3MF project fixture gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/height-range-project/height-range-project.3mf"
+  [[ -f "$fixture" ]] || fail "Missing height-range Orca project fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --three-mf "$fixture" \
+    --min-plate-count 2 \
+    --min-object-count 2 \
+    --require-plate-names \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-object-settings \
+    --require-layer-ranges \
+    --require-layer-range-settings \
+    --require-project-thumbnails \
+    --require-project-settings \
+    --pretty)
+}
+
+run_orca_height_range_project_roundtrip_contract_gate() {
+  log "Running height-range Orca 3MF round-trip preservation contract gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/height-range-project/height-range-project.3mf"
+  [[ -f "$fixture" ]] || fail "Missing height-range Orca 3MF round-trip fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --source-3mf "$fixture" \
+    --roundtrip-3mf "$fixture" \
+    --min-plate-count 2 \
+    --min-object-count 2 \
+    --require-plate-names \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-object-settings \
+    --require-layer-ranges \
+    --require-layer-range-settings \
+    --require-project-thumbnails \
+    --require-project-settings \
+    --pretty)
+}
+
+run_orca_3mf_roundtrip_device_gate_for_fixture() {
+  local serial="$1"
+  local fixture="$2"
+  local fixture_label="$3"
+  local output_slug="$4"
+  local min_plate_count="$5"
+  local min_object_count="$6"
+  local require_object_settings="$7"
+  local require_modifier_settings="${8:-0}"
+  local require_layer_range_settings="${9:-0}"
+  require_device_automation
+  require_automation_fixture "$fixture" "$fixture_label"
+  install_apk "$serial"
+
+  local app_model_path
+  app_model_path="$(stage_app_private_file "$serial" "$fixture" | tail -n 1)"
+  local stamp output_path status_path
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  output_path="/data/data/$PACKAGE_NAME/files/automation/$output_slug-$stamp.3mf"
+  status_path="$output_path.status.txt"
+  set_current_automation_context "$serial" "$output_slug" "$output_path" "$status_path"
+
+  log "Running $fixture_label round-trip export on $serial"
+  adb_device "$serial" shell run-as "$PACKAGE_NAME" rm -f "$output_path" "$status_path"
+  adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  ensure_package_enabled "$serial"
+  adb_device "$serial" logcat -c
+  local start_output
+  start_output="$(adb_device "$serial" shell "am start -W \
+    -a '$AUTOMATION_ACTION' \
+    -n '$MAIN_ACTIVITY' \
+    --es automation_model_path '$app_model_path' \
+    --es automation_output_path '$output_path' \
+    --es automation_status_path '$status_path' \
+    --ez automation_export_project_3mf true")"
+  printf '%s\n' "$start_output"
+  if printf '%s\n' "$start_output" | grep -Eq '^(Error|Exception):'; then
+    fail "Automation activity did not start."
+  fi
+
+  log "Project round-trip automation status"
+  local status
+  status="$(wait_for_status "$serial" "$status_path")"
+  printf '%s\n' "$status"
+  [[ "$status" == success:* ]] || fail "Project 3MF round-trip automation did not report success."
+  [[ "$(status_metric "$status" "projectRoundTrip")" == "1" ]] ||
+    fail "Project 3MF round-trip status did not include projectRoundTrip=1."
+
+  local tmp_dir roundtrip_path
+  tmp_dir="$(mktemp -d)"
+  roundtrip_path="$tmp_dir/mobileslicer-roundtrip.3mf"
+  pull_app_private_file "$serial" "$output_path" "$roundtrip_path"
+
+  local audit_args=(
+    "$ROOT_DIR/scripts/orca_3mf_project_preservation_audit.py"
+    --source-3mf "$fixture" \
+    --roundtrip-3mf "$roundtrip_path" \
+    --min-plate-count "$min_plate_count" \
+    --min-object-count "$min_object_count" \
+    --require-plate-names \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-project-thumbnails \
+    --require-project-settings \
+    --pretty
+  )
+  if [[ "$require_object_settings" == "1" ]]; then
+    audit_args+=(--require-object-settings)
+  fi
+  if [[ "$require_modifier_settings" == "1" ]]; then
+    audit_args+=(--require-modifier-volumes --require-modifier-settings)
+  fi
+  if [[ "$require_layer_range_settings" == "1" ]]; then
+    audit_args+=(--require-layer-ranges --require-layer-range-settings)
+  fi
+  log "Auditing MobileSlicer 3MF round-trip output"
+  python3 "${audit_args[@]}"
+  rm -rf "$tmp_dir"
+  clear_current_automation_context
+  assert_no_crash_after_launch "$serial"
+}
+
+run_orca_3mf_roundtrip_device_gate() {
+  local serial="$1"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-thumbnail-references/active-multifilament-two-objects/h2d-direct-two-filament-objects.gcode.3mf"
+  run_orca_3mf_roundtrip_device_gate_for_fixture \
+    "$serial" \
+    "$fixture" \
+    "Orca 3MF round-trip source package" \
+    "orca-3mf-roundtrip-device" \
+    1 \
+    2 \
+    0 \
+    0 \
+    0
+}
+
+run_orca_rich_project_roundtrip_device_gate() {
+  local serial="$1"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/rich-object-settings/rich-object-settings.gcode.3mf"
+  run_orca_3mf_roundtrip_device_gate_for_fixture \
+    "$serial" \
+    "$fixture" \
+    "rich Orca 3MF round-trip source package" \
+    "orca-rich-project-roundtrip-device" \
+    2 \
+    2 \
+    1 \
+    0 \
+    0
+}
+
+run_orca_modifier_project_roundtrip_device_gate() {
+  local serial="$1"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/modifier-object-settings/modifier-object-settings.gcode.3mf"
+  run_orca_3mf_roundtrip_device_gate_for_fixture \
+    "$serial" \
+    "$fixture" \
+    "modifier Orca 3MF round-trip source package" \
+    "orca-modifier-project-roundtrip-device" \
+    2 \
+    2 \
+    1 \
+    1 \
+    0
+}
+
+run_orca_height_range_project_roundtrip_device_gate() {
+  local serial="$1"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/height-range-project/height-range-project.3mf"
+  run_orca_3mf_roundtrip_device_gate_for_fixture \
+    "$serial" \
+    "$fixture" \
+    "height-range Orca 3MF round-trip source package" \
+    "orca-height-range-project-roundtrip-device" \
+    2 \
+    2 \
+    1 \
+    0 \
+    1
+}
+
+run_orca_gcode_metadata_parity() {
+  log "Running Orca G-code metadata parity audit"
+  local drift_args=()
+  if [[ "${MOBILE_SLICER_FAIL_ORCA_METADATA_DRIFT:-0}" == "1" ]]; then
+    drift_args+=(--fail-on-drift)
+  fi
+  (cd "$ROOT_DIR" && python3 scripts/orca_gcode_metadata_parity_audit.py --pretty "${drift_args[@]}")
+}
+
+run_orca_fixture_gate_strict() {
+  MOBILE_SLICER_STRICT_ORCA_FIXTURES=1 run_orca_fixture_gate
+}
+
+run_orca_gcode_metadata_parity_strict_contract() {
+  MOBILE_SLICER_FAIL_ORCA_METADATA_DRIFT=0 run_orca_gcode_metadata_parity
+}
+
+run_orca_thumbnail_reference_fixture_gate() {
+  log "Auditing desktop Orca thumbnail reference fixtures"
+  (cd "$ROOT_DIR" && python3 scripts/orca_thumbnail_reference_fixture_audit.py --pretty)
+}
+
+run_orca_active_multifilament_reference_probe() {
+  log "Probing desktop Orca active multi-filament thumbnail reference generation"
+  (cd "$ROOT_DIR" && scripts/probe_orca_active_multifilament_reference.sh)
+}
+
+run_printer_thumbnail_compatibility_gate() {
+  log "Running printer thumbnail compatibility audit"
+  (cd "$ROOT_DIR" && python3 scripts/printer_thumbnail_compatibility_audit.py --pretty)
 }
 
 run_asset_generator_tests() {
@@ -379,6 +891,11 @@ adb_device() {
   "$adb" -s "$serial" "$@"
 }
 
+ensure_package_enabled() {
+  local serial="$1"
+  adb_device "$serial" shell pm enable "$PACKAGE_NAME" >/dev/null 2>&1 || true
+}
+
 require_device_automation() {
   case "${MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION:-}" in
     1|true|TRUE|yes|YES)
@@ -407,6 +924,7 @@ install_apk() {
   require_device "$serial"
   log "Installing debug APK on $serial"
   adb_device "$serial" install -r "$APK_PATH"
+  ensure_package_enabled "$serial"
 }
 
 install_perf_apk() {
@@ -415,12 +933,14 @@ install_perf_apk() {
   require_device "$serial"
   log "Installing perf debug APK on $serial"
   adb_device "$serial" install -r "$PERF_APK_PATH"
+  ensure_package_enabled "$serial"
 }
 
 launch_app() {
   local serial="$1"
   log "Cold-launching $PACKAGE_NAME on $serial"
   adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  ensure_package_enabled "$serial"
   adb_device "$serial" logcat -c
   adb_device "$serial" shell am start -W -n "$MAIN_ACTIVITY"
   log "Recent app logs"
@@ -431,6 +951,7 @@ launch_app_for_perf() {
   local serial="$1"
   log "Cold-launching $PACKAGE_NAME on $serial for performance measurement"
   adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  ensure_package_enabled "$serial"
   adb_device "$serial" logcat -c
   local output
   output="$(adb_device "$serial" shell am start -W -n "$MAIN_ACTIVITY")"
@@ -454,6 +975,17 @@ assert_no_crash_after_launch() {
   pid="$(adb_device "$serial" shell pidof "$PACKAGE_NAME" || true)"
   [[ -n "$pid" ]] || fail "$PACKAGE_NAME is not running after launch."
   log "$PACKAGE_NAME running with pid $pid and clean crash buffer"
+}
+
+assert_clean_crash_buffer() {
+  local serial="$1"
+  local crash_log
+  crash_log="$(adb_device "$serial" logcat -b crash -d -t 200)"
+  if [[ -n "$crash_log" ]]; then
+    printf '%s\n' "$crash_log" >&2
+    fail "Crash log buffer is not empty."
+  fi
+  log "Crash buffer clean"
 }
 
 dump_ui_xml() {
@@ -548,6 +1080,636 @@ run_device_automation_smoke() {
   assert_no_crash_after_launch "$serial"
   run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "device-smoke" "0"
   assert_no_crash_after_launch "$serial"
+}
+
+run_orca_import_smoke() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "STL import smoke model"
+  require_automation_fixture "$THREE_MF_IMPORT_SMOKE_MODEL" "Orca 3MF import smoke model"
+  require_automation_fixture "$STEP_IMPORT_SMOKE_MODEL" "STEP import smoke model"
+  install_apk "$serial"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "orca-import-stl" "0"
+  run_automation_slice "$THREE_MF_IMPORT_SMOKE_MODEL" "$serial" "orca-import-3mf" "0"
+  run_automation_slice "$STEP_IMPORT_SMOKE_MODEL" "$serial" "orca-import-step" "0"
+  assert_no_crash_after_launch "$serial"
+}
+
+object_process_override_config() {
+  python3 - "$BENCHY_AUTOMATION_CONFIG" <<'PY'
+import json
+import sys
+
+config = json.loads(sys.argv[1])
+config["mobile_slicer_object_process_overrides"] = [
+    {
+        "mobileObjectId": 1,
+        "plateObjectIndex": 0,
+        "selectedProcessId": "verify_android_object_override",
+        "config": {
+            "wall_loops": 5,
+            "only_one_wall_first_layer": True,
+            "printer_settings_id": "ignored_metadata_probe",
+            "mobile_slicer_ignored_probe": True,
+        },
+    }
+]
+print(json.dumps(config, separators=(",", ":")))
+PY
+}
+
+object_process_isolation_config() {
+  local mode="$1"
+  python3 - "$BENCHY_AUTOMATION_CONFIG" "$mode" <<'PY'
+import json
+import sys
+
+config = json.loads(sys.argv[1])
+config.update({
+    "brim_width": 0,
+    "skirts": 0,
+    "sparse_infill_density": 0,
+    "top_shell_layers": 2,
+    "bottom_shell_layers": 2,
+    "wall_loops": 2,
+    "gcode_label_objects": True,
+})
+if sys.argv[2] == "override":
+    config["mobile_slicer_object_process_overrides"] = [
+        {
+            "mobileObjectId": 1,
+            "plateObjectIndex": 0,
+            "selectedProcessId": "verify_android_object_isolation",
+            "config": {
+                "wall_loops": 5,
+            },
+        }
+    ]
+print(json.dumps(config, separators=(",", ":")))
+PY
+}
+
+modifier_process_override_config() {
+  local modifier_path="$1"
+  python3 - "$BENCHY_AUTOMATION_CONFIG" "$modifier_path" <<'PY'
+import json
+import sys
+
+config = json.loads(sys.argv[1])
+config.update({
+    "brim_width": 0,
+    "skirts": 0,
+    "sparse_infill_density": 0,
+    "top_shell_layers": 2,
+    "bottom_shell_layers": 2,
+    "wall_loops": 2,
+    "gcode_label_objects": True,
+})
+config["mobile_slicer_modifier_process_overrides"] = [
+    {
+        "mobileObjectId": 1,
+        "modifierId": 9001,
+        "plateObjectIndex": 0,
+        "label": "Whole object modifier",
+        "path": sys.argv[2],
+        "selectedProcessId": "verify_android_modifier_override",
+        "config": {
+            "wall_loops": 5,
+        },
+    }
+]
+print(json.dumps(config, separators=(",", ":")))
+PY
+}
+
+assert_modifier_process_override_log() {
+  local serial="$1"
+  local logcat
+  logcat="$(adb_device "$serial" logcat -d -v time | grep 'modifier_process_override' || true)"
+  printf '%s\n' "$logcat"
+  [[ "$logcat" == *"acceptedKeys="*"wall_loops"* ]] ||
+    fail "Modifier process override did not accept wall_loops."
+}
+
+generate_object_process_isolation_3mf() {
+  local output_path="$1"
+  python3 - "$output_path" <<'PY'
+import pathlib
+import sys
+import zipfile
+
+output = pathlib.Path(sys.argv[1])
+output.parent.mkdir(parents=True, exist_ok=True)
+
+vertices = [
+    (0, 0, 0), (22, 0, 0), (22, 22, 0), (0, 22, 0),
+    (0, 0, 8), (22, 0, 8), (22, 22, 8), (0, 22, 8),
+]
+triangles = [
+    (0, 2, 1), (0, 3, 2),
+    (4, 5, 6), (4, 6, 7),
+    (0, 1, 5), (0, 5, 4),
+    (1, 2, 6), (1, 6, 5),
+    (2, 3, 7), (2, 7, 6),
+    (3, 0, 4), (3, 4, 7),
+]
+
+def mesh_object(object_id):
+    verts = "\n".join(
+        f'          <vertex x="{x}" y="{y}" z="{z}"/>'
+        for x, y, z in vertices
+    )
+    tris = "\n".join(
+        f'          <triangle v1="{a}" v2="{b}" v3="{c}"/>'
+        for a, b, c in triangles
+    )
+    return f'''    <object id="{object_id}" type="model">
+      <mesh>
+        <vertices>
+{verts}
+        </vertices>
+        <triangles>
+{tris}
+        </triangles>
+      </mesh>
+    </object>'''
+
+model = f'''<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+{mesh_object(1)}
+{mesh_object(2)}
+  </resources>
+  <build>
+    <item objectid="1" transform="1 0 0 0 1 0 0 0 1 70 120 0"/>
+    <item objectid="2" transform="1 0 0 0 1 0 0 0 1 176 120 0"/>
+  </build>
+</model>
+'''
+
+with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as package:
+    package.writestr("[Content_Types].xml", '''<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+</Types>
+''')
+    package.writestr("_rels/.rels", '''<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>
+''')
+    package.writestr("3D/3dmodel.model", model)
+print(output)
+PY
+}
+
+analyze_object_process_isolation_gcode() {
+  local baseline_gcode="$1"
+  local override_gcode="$2"
+  python3 - "$baseline_gcode" "$override_gcode" <<'PY'
+import math
+import pathlib
+import re
+import sys
+
+word_re = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))", re.I)
+object_start_re = re.compile(r"; printing object (.+?) id:")
+
+def extrusion_lengths(path):
+    x = y = z = e = 0.0
+    absolute_xyz = True
+    absolute_e = True
+    moves = []
+    object_lengths = {}
+    current_object = None
+    for raw in pathlib.Path(path).read_text(errors="replace").splitlines():
+        object_match = object_start_re.match(raw)
+        if object_match:
+            current_object = object_match.group(1)
+            object_lengths.setdefault(current_object, 0.0)
+            continue
+        if raw.startswith("; stop printing object "):
+            current_object = None
+            continue
+        command = raw.split(";", 1)[0].strip()
+        if not command:
+            continue
+        upper = command.upper()
+        if upper == "G90":
+            absolute_xyz = True
+            continue
+        if upper == "G91":
+            absolute_xyz = False
+            continue
+        if upper == "M82":
+            absolute_e = True
+            continue
+        if upper == "M83":
+            absolute_e = False
+            continue
+        words = {key.upper(): float(value) for key, value in word_re.findall(command)}
+        if not upper.startswith(("G0", "G1")):
+            continue
+        px, py, pe = x, y, e
+        if "X" in words:
+            x = words["X"] if absolute_xyz else x + words["X"]
+        if "Y" in words:
+            y = words["Y"] if absolute_xyz else y + words["Y"]
+        if "Z" in words:
+            z = words["Z"] if absolute_xyz else z + words["Z"]
+        if "E" in words:
+            e = words["E"] if absolute_e else e + words["E"]
+        delta_e = e - pe
+        if delta_e <= 0:
+            continue
+        distance = math.hypot(x - px, y - py)
+        if distance <= 0:
+            continue
+        midpoint_x = (x + px) / 2.0
+        moves.append((midpoint_x, distance))
+        if current_object is not None:
+            object_lengths[current_object] = object_lengths.get(current_object, 0.0) + distance
+    if len(moves) < 20:
+        raise SystemExit(f"not enough extrusion moves in {path}: {len(moves)}")
+    return moves, object_lengths
+
+baseline_moves, baseline_objects = extrusion_lengths(sys.argv[1])
+override_moves, override_objects = extrusion_lengths(sys.argv[2])
+common_objects = sorted(set(baseline_objects).intersection(override_objects))
+if len(common_objects) >= 2:
+    changed = []
+    stable_failures = []
+    details = []
+    for name in common_objects:
+        base = baseline_objects[name]
+        override = override_objects[name]
+        delta = override - base
+        details.append(f"{name}:baseline={base:.3f},override={override:.3f},delta={delta:.3f}")
+        if abs(delta) >= max(80.0, base * 0.12):
+            changed.append(name)
+        elif abs(delta) > max(25.0, base * 0.04):
+            stable_failures.append(name)
+    if len(changed) == 1 and not stable_failures:
+        print("object-process-isolation targetObject=" + changed[0] + " " + " ".join(details))
+        raise SystemExit(0)
+    raise SystemExit(
+        "expected exactly one labeled object to change after object process override; "
+        f"changed={changed} stableFailures={stable_failures} details={' | '.join(details)}"
+    )
+
+xs = sorted(x for x, _ in baseline_moves)
+largest_gap = max(range(len(xs) - 1), key=lambda index: xs[index + 1] - xs[index])
+split = (xs[largest_gap] + xs[largest_gap + 1]) / 2.0
+if xs[largest_gap + 1] - xs[largest_gap] < 20:
+    raise SystemExit(f"could not find two separated object regions; largest X gap={xs[largest_gap + 1] - xs[largest_gap]:.3f}")
+
+def bucket_lengths(moves):
+    left = sum(distance for x, distance in moves if x < split)
+    right = sum(distance for x, distance in moves if x >= split)
+    return left, right
+
+base_left, base_right = bucket_lengths(baseline_moves)
+override_left, override_right = bucket_lengths(override_moves)
+if min(base_left, base_right, override_left, override_right) <= 1.0:
+    raise SystemExit(
+        "object regions did not both receive extrusion: "
+        f"base=({base_left:.3f},{base_right:.3f}) override=({override_left:.3f},{override_right:.3f}) split={split:.3f}"
+    )
+
+left_delta = override_left - base_left
+right_delta = override_right - base_right
+left_changed = abs(left_delta) >= max(80.0, base_left * 0.12)
+right_changed = abs(right_delta) >= max(80.0, base_right * 0.12)
+if left_changed == right_changed:
+    raise SystemExit(
+        "expected exactly one object region to change after object process override; "
+        f"base=({base_left:.3f},{base_right:.3f}) override=({override_left:.3f},{override_right:.3f}) "
+        f"delta=({left_delta:.3f},{right_delta:.3f}) split={split:.3f}"
+    )
+stable_delta = right_delta if left_changed else left_delta
+stable_base = base_right if left_changed else base_left
+if abs(stable_delta) > max(25.0, stable_base * 0.04):
+    raise SystemExit(
+        "non-target object region changed too much; "
+        f"base=({base_left:.3f},{base_right:.3f}) override=({override_left:.3f},{override_right:.3f}) "
+        f"delta=({left_delta:.3f},{right_delta:.3f}) split={split:.3f}"
+    )
+target = "left" if left_changed else "right"
+print(
+    "object-process-isolation "
+    f"target={target} splitX={split:.3f} "
+    f"baselineLeft={base_left:.3f} overrideLeft={override_left:.3f} "
+    f"baselineRight={base_right:.3f} overrideRight={override_right:.3f}"
+)
+PY
+}
+
+run_object_process_gcode_isolation_regression() {
+  local serial="$1"
+  local artifact_dir="$ROOT_DIR/artifacts/object-process-isolation"
+  mkdir -p "$artifact_dir"
+  local fixture="$artifact_dir/two-object-isolation.3mf"
+  generate_object_process_isolation_3mf "$fixture" >/dev/null
+
+  local baseline_config override_config
+  baseline_config="$(object_process_isolation_config baseline)"
+  override_config="$(object_process_isolation_config override)"
+  run_automation_slice "$fixture" "$serial" "object-process-isolation-baseline" "0" "$baseline_config" "0" ".gcode" "1"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$artifact_dir/baseline.gcode"
+  run_automation_slice "$fixture" "$serial" "object-process-isolation-override" "0" "$override_config" "0" ".gcode" "1"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$artifact_dir/override.gcode"
+  analyze_object_process_isolation_gcode "$artifact_dir/baseline.gcode" "$artifact_dir/override.gcode" | tee "$artifact_dir/report.txt"
+  log "Object process isolation artifacts: $artifact_dir"
+}
+
+run_object_process_override_regression() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "object process override smoke STL"
+  install_apk "$serial"
+  local config
+  config="$(object_process_override_config)"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "object-process-override" "0" "$config"
+  local logcat
+  logcat="$(adb_device "$serial" logcat -d -v time | grep 'object_process_override' || true)"
+  printf '%s\n' "$logcat"
+  [[ "$logcat" == *"acceptedKeys="*"wall_loops"* ]] ||
+    fail "Object process override did not accept wall_loops."
+  [[ "$logcat" == *"acceptedKeys="*"only_one_wall_first_layer"* ]] ||
+    fail "Object process override did not accept only_one_wall_first_layer."
+  [[ "$logcat" == *"ignoredKeys="*"printer_settings_id"* ]] ||
+    fail "Object process override did not ignore printer_settings_id metadata."
+  [[ "$logcat" == *"ignoredKeys="*"mobile_slicer_ignored_probe"* ]] ||
+    fail "Object process override did not ignore mobile_slicer metadata."
+  run_object_process_gcode_isolation_regression "$serial"
+  local modifier_path modifier_config
+  modifier_path="$(stage_app_private_file "$serial" "$DEFAULT_SLICE_SMOKE_STL" | tail -n 1)"
+  modifier_config="$(modifier_process_override_config "$modifier_path")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "modifier-process-override" "0" "$modifier_config"
+  assert_modifier_process_override_log "$serial"
+  assert_no_crash_after_launch "$serial"
+}
+
+gcode_marker_count() {
+  local gcode_path="$1"
+  local pattern="$2"
+  grep -E -c "$pattern" "$gcode_path" || true
+}
+
+assert_gcode_marker_count_equals() {
+  local gcode_path="$1"
+  local pattern="$2"
+  local expected="$3"
+  local description="$4"
+  local actual
+  actual="$(gcode_marker_count "$gcode_path" "$pattern")"
+  [[ "$actual" == "$expected" ]] ||
+    fail "$description expected $expected marker(s), found $actual in $gcode_path"
+}
+
+assert_gcode_marker_count_positive() {
+  local gcode_path="$1"
+  local pattern="$2"
+  local description="$3"
+  local actual
+  actual="$(gcode_marker_count "$gcode_path" "$pattern")"
+  [[ "$actual" =~ ^[0-9]+$ && "$actual" -gt 0 ]] ||
+    fail "$description expected at least one marker, found $actual in $gcode_path"
+}
+
+append_orca_object_label_report_case() {
+  local report_path="$1"
+  local label="$2"
+  local gcode_path="$3"
+  local printing_count
+  local stop_count
+  local exclude_count
+  local m486_count
+  printing_count="$(gcode_marker_count "$gcode_path" '^; printing object ')"
+  stop_count="$(gcode_marker_count "$gcode_path" '^; stop printing object ')"
+  exclude_count="$(gcode_marker_count "$gcode_path" '^EXCLUDE_OBJECT')"
+  m486_count="$(gcode_marker_count "$gcode_path" '^M486')"
+  printf '| `%s` | `%s` | `%s` | `%s` | `%s` | `%s` | `%s` | `%s` |\n' \
+    "$label" \
+    "$printing_count" \
+    "$stop_count" \
+    "$exclude_count" \
+    "$m486_count" \
+    "${AUTOMATION_LAST_NATIVE_SLICE_MS:-}" \
+    "${AUTOMATION_LAST_ELAPSED_MS:-}" \
+    "${AUTOMATION_LAST_BYTES:-}" >> "$report_path"
+}
+
+run_orca_object_label_case() {
+  local serial="$1"
+  local artifact_dir="$2"
+  local report_path="$3"
+  local label="$4"
+  local fixture="$5"
+  local expect_labels="$6"
+  local expect_exclude="$7"
+  shift 7
+
+  local config_json output_path
+  config_json="$(automation_config_with_overrides "$@")"
+  run_automation_slice "$fixture" "$serial" "$label" "0" "$config_json" "0" ".gcode"
+  output_path="$artifact_dir/$label.gcode"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+
+  if [[ "$expect_labels" == "present" ]]; then
+    assert_gcode_marker_count_positive "$output_path" '^; printing object ' "$label printing object comments"
+    assert_gcode_marker_count_positive "$output_path" '^; stop printing object ' "$label stop printing object comments"
+  else
+    assert_gcode_marker_count_equals "$output_path" '^; printing object ' "0" "$label printing object comments"
+    assert_gcode_marker_count_equals "$output_path" '^; stop printing object ' "0" "$label stop printing object comments"
+  fi
+
+  if [[ "$expect_exclude" == "present" ]]; then
+    local exclude_count m486_count
+    exclude_count="$(gcode_marker_count "$output_path" '^EXCLUDE_OBJECT')"
+    m486_count="$(gcode_marker_count "$output_path" '^M486')"
+    [[ "$exclude_count" -gt 0 || "$m486_count" -gt 0 ]] ||
+      fail "$label expected Orca exclude-object commands, found EXCLUDE_OBJECT=$exclude_count M486=$m486_count"
+  else
+    assert_gcode_marker_count_equals "$output_path" '^EXCLUDE_OBJECT' "0" "$label EXCLUDE_OBJECT commands"
+    assert_gcode_marker_count_equals "$output_path" '^M486' "0" "$label M486 commands"
+  fi
+
+  append_orca_object_label_report_case "$report_path" "$label" "$output_path"
+  ORCA_OBJECT_LABEL_LAST_OUTPUT="$output_path"
+}
+
+verify_moonraker_label_off_metadata_round_trip() {
+  local output_path="$1"
+  local artifact_dir="$2"
+  local report_path="$3"
+  local base_url="${MOBILE_SLICER_MOONRAKER_URL:-}"
+  if [[ -z "$base_url" ]]; then
+    printf -- '- moonrakerLabelOffRoundTrip: skipped (set MOBILE_SLICER_MOONRAKER_URL to verify label-off metadata indexing on a live host)\n' >> "$report_path"
+    return 0
+  fi
+
+  command -v curl >/dev/null 2>&1 || fail "curl is required for MOBILE_SLICER_MOONRAKER_URL round-trip verification"
+  grep -Eq '^; model printing time: .*total estimated time:' "$output_path" ||
+    fail "Label-off Moonraker verification expected Orca-compatible print-time metadata in $output_path"
+
+  base_url="${base_url%/}"
+  local stamp remote_name encoded_name upload_json metadata_json delete_json metadata_url started_ms elapsed_ms
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  remote_name="${MOBILE_SLICER_MOONRAKER_UPLOAD_NAME:-MobileSlicer_label_off_${stamp}.gcode}"
+  encoded_name="$(urlencode "$remote_name")"
+  upload_json="$artifact_dir/moonraker-label-off-upload.json"
+  metadata_json="$artifact_dir/moonraker-label-off-metadata.json"
+  delete_json="$artifact_dir/moonraker-label-off-delete.json"
+  metadata_url="$base_url/server/files/metadata?filename=$encoded_name"
+
+  local curl_headers=()
+  if [[ -n "${MOBILE_SLICER_MOONRAKER_API_KEY:-}" ]]; then
+    curl_headers=(-H "X-Api-Key: ${MOBILE_SLICER_MOONRAKER_API_KEY}")
+  fi
+
+  curl -fsS "${curl_headers[@]}" \
+    -F "root=gcodes" \
+    -F "print=false" \
+    -F "file=@${output_path};filename=${remote_name}" \
+    "$base_url/server/files/upload" > "$upload_json"
+
+  started_ms="$(date +%s%3N)"
+  local attempt
+  for attempt in $(seq 1 20); do
+    if curl -fsS "${curl_headers[@]}" "$metadata_url" > "$metadata_json"; then
+      elapsed_ms=$(( $(date +%s%3N) - started_ms ))
+      python3 - "$metadata_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+result = payload.get("result", payload)
+if not isinstance(result, dict):
+    print("Moonraker metadata response did not contain an object result", file=sys.stderr)
+    sys.exit(1)
+required = ("filament_total", "layer_height", "object_height", "slicer")
+missing = [key for key in required if key not in result]
+if missing:
+    print(f"Moonraker metadata missing required keys: {missing}; keys={sorted(result)}", file=sys.stderr)
+    sys.exit(1)
+print("Moonraker label-off metadata keys:", ", ".join(required))
+PY
+      local max_ms="${MOBILE_SLICER_MOONRAKER_LABEL_OFF_METADATA_MAX_MS:-5000}"
+      [[ "$elapsed_ms" -le "$max_ms" ]] ||
+        fail "Moonraker label-off metadata indexing took ${elapsed_ms}ms, above ${max_ms}ms"
+      {
+        printf -- '- moonrakerLabelOffRoundTrip: passed\n'
+        printf -- '- moonrakerLabelOffMetadataMs: `%s`\n' "$elapsed_ms"
+        printf -- '- moonrakerLabelOffMaxMs: `%s`\n' "$max_ms"
+        printf -- '- moonrakerLabelOffGcodePrintTime: present\n'
+        printf -- '- moonrakerUrl: `%s`\n' "$base_url"
+        printf -- '- moonrakerRemoteFile: `%s`\n' "$remote_name"
+        printf -- '- moonrakerUpload: `%s`\n' "$upload_json"
+        printf -- '- moonrakerMetadata: `%s`\n' "$metadata_json"
+      } >> "$report_path"
+      if [[ "${MOBILE_SLICER_MOONRAKER_DELETE_AFTER:-1}" != "0" ]]; then
+        curl -fsS -X DELETE "${curl_headers[@]}" "$base_url/server/files/gcodes/$encoded_name" > "$delete_json" || true
+        printf -- '- moonrakerDelete: `%s`\n' "$delete_json" >> "$report_path"
+      fi
+      return 0
+    fi
+    sleep 1
+  done
+
+  fail "Moonraker did not return label-off metadata for $remote_name within 20 seconds"
+}
+
+run_orca_object_label_parity_matrix() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "object label parity cube STL"
+  require_automation_fixture "$SUPPORT_SLICE_SMOKE_STL" "object label parity printable STL"
+  install_apk "$serial"
+
+  local stamp artifact_dir report_path label_off_printable_output
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  artifact_dir="$ROOT_DIR/artifacts/orca-object-label-parity/$stamp"
+  mkdir -p "$artifact_dir"
+  report_path="$artifact_dir/report.md"
+
+  {
+    printf '# Orca Object Label Parity Gate\n\n'
+    printf -- '- captured_at: %s\n' "$stamp"
+    printf -- '- serial: `%s`\n' "$serial"
+    printf -- '- cube_fixture: `%s`\n' "$DEFAULT_SLICE_SMOKE_STL"
+    printf -- '- printable_fixture: `%s`\n\n' "$SUPPORT_SLICE_SMOKE_STL"
+    printf 'This gate follows Orca behavior: `gcode_label_objects` controls object label comments, while `exclude_object` is preserved as a separate option and only emits exclude commands when Orca enables them for the active printer/flavor path.\n\n'
+    printf '| case | printing comments | stop comments | EXCLUDE_OBJECT | M486 | nativeSliceMs | elapsedMs | bytes |\n'
+    printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n'
+  } > "$report_path"
+
+  run_orca_object_label_case "$serial" "$artifact_dir" "$report_path" \
+    "orca-label-off-exclude-off" \
+    "$DEFAULT_SLICE_SMOKE_STL" \
+    "absent" \
+    "absent" \
+    "gcode_label_objects=false" \
+    "exclude_object=false" \
+    "thumbnails=\"\"" \
+    "thumbnails_format=\"PNG\""
+
+  run_orca_object_label_case "$serial" "$artifact_dir" "$report_path" \
+    "orca-label-on-exclude-off" \
+    "$DEFAULT_SLICE_SMOKE_STL" \
+    "present" \
+    "absent" \
+    "gcode_label_objects=true" \
+    "exclude_object=false" \
+    "thumbnails=\"\"" \
+    "thumbnails_format=\"PNG\""
+
+  run_orca_object_label_case "$serial" "$artifact_dir" "$report_path" \
+    "orca-label-off-exclude-on-klipper" \
+    "$DEFAULT_SLICE_SMOKE_STL" \
+    "absent" \
+    "absent" \
+    "gcode_label_objects=false" \
+    "exclude_object=true" \
+    "gcode_flavor=\"klipper\"" \
+    "thumbnails=\"\"" \
+    "thumbnails_format=\"PNG\""
+
+  run_orca_object_label_case "$serial" "$artifact_dir" "$report_path" \
+    "orca-label-on-exclude-on-klipper" \
+    "$DEFAULT_SLICE_SMOKE_STL" \
+    "present" \
+    "absent" \
+    "gcode_label_objects=true" \
+    "exclude_object=true" \
+    "gcode_flavor=\"klipper\"" \
+    "thumbnails=\"\"" \
+    "thumbnails_format=\"PNG\""
+
+  run_orca_object_label_case "$serial" "$artifact_dir" "$report_path" \
+    "orca-label-printable-label-off" \
+    "$SUPPORT_SLICE_SMOKE_STL" \
+    "absent" \
+    "absent" \
+    "gcode_label_objects=false" \
+    "exclude_object=false" \
+    "thumbnails=\"\"" \
+    "thumbnails_format=\"PNG\"" \
+    "brim_width=0" \
+    "wall_loops=2" \
+    "sparse_infill_density=15" \
+    "enable_support=false"
+  label_off_printable_output="$ORCA_OBJECT_LABEL_LAST_OUTPUT"
+
+  printf '\n' >> "$report_path"
+  verify_moonraker_label_off_metadata_round_trip "$label_off_printable_output" "$artifact_dir" "$report_path"
+
+  rm -rf "$ROOT_DIR/artifacts/orca-object-label-parity/latest"
+  ln -sfn "$artifact_dir" "$ROOT_DIR/artifacts/orca-object-label-parity/latest"
+  log "Orca object label parity artifacts: $artifact_dir"
+  assert_clean_crash_buffer "$serial"
 }
 
 automation_config_with_overrides() {
@@ -864,6 +2026,7 @@ run_preview_interaction_profile() {
   log "Running $profile_name profile on $serial"
   adb_device "$serial" shell run-as "$PACKAGE_NAME" rm -f "$status_path"
   adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  ensure_package_enabled "$serial"
   adb_device "$serial" logcat -c
   adb_device "$serial" shell "CONFIG='$BENCHY_AUTOMATION_CONFIG'; am start -W \
     -a '$PREVIEW_INTERACTION_ACTION' \
@@ -1242,6 +2405,361 @@ print(match.group(1) if match else "")
 PY
 }
 
+assert_int_metric_at_most() {
+  local label="$1"
+  local metric_name="$2"
+  local value="$3"
+  local max_value="$4"
+  [[ "$value" =~ ^[0-9]+$ ]] || fail "$label did not report numeric $metric_name."
+  [[ "$max_value" =~ ^[0-9]+$ ]] || fail "Invalid max threshold for $label $metric_name: $max_value"
+  [[ "$value" -le "$max_value" ]] ||
+    fail "$label $metric_name exceeded threshold: ${value}ms > ${max_value}ms."
+}
+
+latest_automation_thumbnail_log() {
+  local serial="$1"
+  adb_device "$serial" logcat -d -s MobileSlicer:I MobileSlicerNative:I '*:S' 2>/dev/null |
+    grep 'automation:slice_thumbnail_render' |
+    tail -n 1 || true
+}
+
+assert_automation_thumbnail_scope() {
+  local serial="$1"
+  local label="$2"
+  local expected_package="$3"
+  local expected_rendered="${4:-}"
+  local expected_renderer="${5:-}"
+  local line
+  line="$(latest_automation_thumbnail_log "$serial")"
+  [[ -n "$line" ]] || fail "$label did not log automation thumbnail scope."
+  [[ "$line" == *"packageThumbnails=$expected_package"* ]] ||
+    fail "$label thumbnail scope mismatch. Expected packageThumbnails=$expected_package, got: $line"
+  if [[ -n "$expected_rendered" ]]; then
+    [[ "$line" == *"rendered=$expected_rendered"* ]] ||
+      fail "$label thumbnail render count mismatch. Expected rendered=$expected_rendered, got: $line"
+  fi
+  if [[ -n "$expected_renderer" ]]; then
+    [[ "$line" == *"renderers=$expected_renderer"* ]] ||
+      fail "$label thumbnail renderer mismatch. Expected renderers=$expected_renderer, got: $line"
+  fi
+}
+
+run_egl_thumbnail_smoke() {
+  local serial="$1"
+  require_device_automation
+  install_apk "$serial"
+  local width="${MOBILE_SLICER_EGL_THUMBNAIL_WIDTH:-128}"
+  local height="${MOBILE_SLICER_EGL_THUMBNAIL_HEIGHT:-128}"
+  local repeats="${MOBILE_SLICER_EGL_THUMBNAIL_REPEATS:-3}"
+  [[ "$width" =~ ^[0-9]+$ && "$height" =~ ^[0-9]+$ && "$repeats" =~ ^[0-9]+$ ]] ||
+    fail "EGL thumbnail smoke width/height/repeats must be numeric."
+  local stamp status_path
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  status_path="/data/data/$PACKAGE_NAME/files/automation/egl-thumbnail-smoke-$stamp.status.txt"
+  set_current_automation_context "$serial" "egl-thumbnail-smoke" "" "$status_path"
+
+  log "Running offscreen EGL thumbnail smoke on $serial"
+  adb_device "$serial" shell run-as "$PACKAGE_NAME" rm -f "$status_path"
+  adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  ensure_package_enabled "$serial"
+  adb_device "$serial" logcat -c
+  local start_output
+  start_output="$(adb_device "$serial" shell "am start -W \
+    -a '$EGL_THUMBNAIL_SMOKE_ACTION' \
+    -n '$MAIN_ACTIVITY' \
+    --es automation_status_path '$status_path' \
+    --ei automation_width '$width' \
+    --ei automation_height '$height' \
+    --ei automation_repeats '$repeats'")"
+  printf '%s\n' "$start_output"
+  if printf '%s\n' "$start_output" | grep -Eq '^(Error|Exception):'; then
+    fail "EGL thumbnail smoke activity did not start."
+  fi
+
+  log "EGL thumbnail smoke status"
+  local status
+  status="$(wait_for_status "$serial" "$status_path" 120 1)"
+  printf '%s\n' "$status"
+  [[ "$status" == success:* ]] || fail "EGL thumbnail smoke did not report success."
+
+  local total_ms render_ms read_ms nontransparent gl_error
+  total_ms="$(status_metric "$status" "totalMs")"
+  render_ms="$(status_metric "$status" "renderMs")"
+  read_ms="$(status_metric "$status" "readPixelsMs")"
+  nontransparent="$(status_metric "$status" "nontransparentPixels")"
+  gl_error="$(status_metric "$status" "glError")"
+  assert_int_metric_at_most \
+    "egl-thumbnail-smoke" \
+    "totalMs" \
+    "$total_ms" \
+    "${MOBILE_SLICER_EGL_THUMBNAIL_TOTAL_MAX_MS:-1000}"
+  assert_int_metric_at_most \
+    "egl-thumbnail-smoke" \
+    "renderMs" \
+    "$render_ms" \
+    "${MOBILE_SLICER_EGL_THUMBNAIL_RENDER_MAX_MS:-500}"
+  assert_int_metric_at_most \
+    "egl-thumbnail-smoke" \
+    "readPixelsMs" \
+    "$read_ms" \
+    "${MOBILE_SLICER_EGL_THUMBNAIL_READ_MAX_MS:-500}"
+  [[ "$nontransparent" =~ ^[0-9]+$ && "$nontransparent" -gt 0 ]] ||
+    fail "EGL thumbnail smoke produced no visible pixels."
+  [[ "$gl_error" == "0" ]] ||
+    fail "EGL thumbnail smoke reported glError=$gl_error"
+  adb_device "$serial" logcat -d -v time | grep 'egl_thumbnail_smoke' || true
+  clear_current_automation_context
+  assert_no_crash_after_launch "$serial"
+}
+
+run_egl_slice_thumbnail_smoke() {
+  local serial="$1"
+  require_device_automation
+  install_apk "$serial"
+  local width="${MOBILE_SLICER_EGL_SLICE_THUMBNAIL_WIDTH:-128}"
+  local height="${MOBILE_SLICER_EGL_SLICE_THUMBNAIL_HEIGHT:-128}"
+  [[ "$width" =~ ^[0-9]+$ && "$height" =~ ^[0-9]+$ ]] ||
+    fail "EGL slice thumbnail smoke width/height must be numeric."
+  local stamp status_path
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  status_path="/data/data/$PACKAGE_NAME/files/automation/egl-slice-thumbnail-smoke-$stamp.status.txt"
+  set_current_automation_context "$serial" "egl-slice-thumbnail-smoke" "" "$status_path"
+
+  log "Running offscreen EGL slice thumbnail smoke on $serial"
+  adb_device "$serial" shell run-as "$PACKAGE_NAME" rm -f "$status_path"
+  adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  ensure_package_enabled "$serial"
+  adb_device "$serial" logcat -c
+  local start_output
+  start_output="$(adb_device "$serial" shell "am start -W \
+    -a '$EGL_SLICE_THUMBNAIL_SMOKE_ACTION' \
+    -n '$MAIN_ACTIVITY' \
+    --es automation_status_path '$status_path' \
+    --ei automation_width '$width' \
+    --ei automation_height '$height'")"
+  printf '%s\n' "$start_output"
+  if printf '%s\n' "$start_output" | grep -Eq '^(Error|Exception):'; then
+    fail "EGL slice thumbnail smoke activity did not start."
+  fi
+
+  log "EGL slice thumbnail smoke status"
+  local status
+  status="$(wait_for_status "$serial" "$status_path" 120 1)"
+  printf '%s\n' "$status"
+  [[ "$status" == success:* ]] || fail "EGL slice thumbnail smoke did not report success."
+
+  local total_ms draw_ms read_ms upload_ms nontransparent gl_error bbox_min_x bbox_max_x bbox_min_y bbox_max_y
+  total_ms="$(status_metric "$status" "totalMs")"
+  draw_ms="$(status_metric "$status" "drawMs")"
+  read_ms="$(status_metric "$status" "readPixelsMs")"
+  upload_ms="$(status_metric "$status" "uploadMs")"
+  nontransparent="$(status_metric "$status" "nontransparentPixels")"
+  gl_error="$(status_metric "$status" "glError")"
+  bbox_min_x="$(status_metric "$status" "bboxMinX")"
+  bbox_max_x="$(status_metric "$status" "bboxMaxX")"
+  bbox_min_y="$(status_metric "$status" "bboxMinY")"
+  bbox_max_y="$(status_metric "$status" "bboxMaxY")"
+  assert_int_metric_at_most \
+    "egl-slice-thumbnail-smoke" \
+    "totalMs" \
+    "$total_ms" \
+    "${MOBILE_SLICER_EGL_SLICE_THUMBNAIL_TOTAL_MAX_MS:-1000}"
+  assert_int_metric_at_most \
+    "egl-slice-thumbnail-smoke" \
+    "uploadMs" \
+    "$upload_ms" \
+    "${MOBILE_SLICER_EGL_SLICE_THUMBNAIL_UPLOAD_MAX_MS:-500}"
+  assert_int_metric_at_most \
+    "egl-slice-thumbnail-smoke" \
+    "drawMs" \
+    "$draw_ms" \
+    "${MOBILE_SLICER_EGL_SLICE_THUMBNAIL_DRAW_MAX_MS:-500}"
+  assert_int_metric_at_most \
+    "egl-slice-thumbnail-smoke" \
+    "readPixelsMs" \
+    "$read_ms" \
+    "${MOBILE_SLICER_EGL_SLICE_THUMBNAIL_READ_MAX_MS:-500}"
+  [[ "$nontransparent" =~ ^[0-9]+$ && "$nontransparent" -gt 0 ]] ||
+    fail "EGL slice thumbnail smoke produced no visible pixels."
+  [[ "$nontransparent" -ge "${MOBILE_SLICER_EGL_SLICE_THUMBNAIL_MIN_VISIBLE_PIXELS:-256}" ]] ||
+    fail "EGL slice thumbnail smoke produced too few visible pixels: $nontransparent"
+  [[ "$bbox_min_x" =~ ^-?[0-9]+$ && "$bbox_max_x" =~ ^-?[0-9]+$ && "$bbox_min_y" =~ ^-?[0-9]+$ && "$bbox_max_y" =~ ^-?[0-9]+$ ]] ||
+    fail "EGL slice thumbnail smoke bbox metrics were not numeric."
+  [[ $((bbox_max_x - bbox_min_x + 1)) -ge "${MOBILE_SLICER_EGL_SLICE_THUMBNAIL_MIN_BBOX_PX:-12}" ]] ||
+    fail "EGL slice thumbnail smoke bbox width is too small."
+  [[ $((bbox_max_y - bbox_min_y + 1)) -ge "${MOBILE_SLICER_EGL_SLICE_THUMBNAIL_MIN_BBOX_PX:-12}" ]] ||
+    fail "EGL slice thumbnail smoke bbox height is too small."
+  [[ "$gl_error" == "0" ]] ||
+    fail "EGL slice thumbnail smoke reported glError=$gl_error"
+  adb_device "$serial" logcat -d -v time | grep 'egl_thumbnail_smoke' || true
+  clear_current_automation_context
+  assert_no_crash_after_launch "$serial"
+}
+
+run_egl_thumbnail_compare() {
+  local serial="$1"
+  require_device_automation
+  local compare_model="${MOBILE_SLICER_EGL_COMPARE_MODEL:-$DEFAULT_SLICE_SMOKE_STL}"
+  require_automation_fixture "$compare_model" "EGL thumbnail comparison STL"
+  install_apk "$serial"
+  local width="${MOBILE_SLICER_EGL_COMPARE_THUMBNAIL_WIDTH:-128}"
+  local height="${MOBILE_SLICER_EGL_COMPARE_THUMBNAIL_HEIGHT:-128}"
+  local bed_width="${MOBILE_SLICER_EGL_COMPARE_BED_WIDTH_MM:-270}"
+  local bed_depth="${MOBILE_SLICER_EGL_COMPARE_BED_DEPTH_MM:-270}"
+  local bed_height="${MOBILE_SLICER_EGL_COMPARE_BED_HEIGHT_MM:-256}"
+  local source_layout="${MOBILE_SLICER_EGL_COMPARE_SOURCE_LAYOUT:-single}"
+  local source_colors="${MOBILE_SLICER_EGL_COMPARE_SOURCE_COLORS:-}"
+  [[ "$width" =~ ^[0-9]+$ && "$height" =~ ^[0-9]+$ ]] ||
+    fail "EGL thumbnail compare width/height must be numeric."
+  [[ "$bed_width" =~ ^[0-9]+([.][0-9]+)?$ && "$bed_depth" =~ ^[0-9]+([.][0-9]+)?$ && "$bed_height" =~ ^[0-9]+([.][0-9]+)?$ ]] ||
+    fail "EGL thumbnail compare bed dimensions must be numeric."
+  local app_model_path
+  app_model_path="$(stage_app_private_file "$serial" "$compare_model" | tail -n 1)"
+  local stamp status_path app_artifact_dir artifact_dir
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  status_path="/data/data/$PACKAGE_NAME/files/automation/egl-thumbnail-compare-$stamp.status.txt"
+  app_artifact_dir="/data/data/$PACKAGE_NAME/files/automation/egl-thumbnail-compare-$stamp"
+  artifact_dir="$ROOT_DIR/artifacts/egl-thumbnail-compare/$stamp"
+  mkdir -p "$artifact_dir"
+  set_current_automation_context "$serial" "egl-thumbnail-compare" "" "$status_path"
+
+  log "Running EGL thumbnail comparison on $serial with model $compare_model"
+  adb_device "$serial" shell run-as "$PACKAGE_NAME" rm -rf "$status_path" "$app_artifact_dir"
+  adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  ensure_package_enabled "$serial"
+  adb_device "$serial" logcat -c
+  local start_output
+  start_output="$(adb_device "$serial" shell "am start -W \
+    -a '$EGL_THUMBNAIL_COMPARE_ACTION' \
+    -n '$MAIN_ACTIVITY' \
+    --es automation_status_path '$status_path' \
+    --es automation_model_path '$app_model_path' \
+    --es automation_artifact_dir '$app_artifact_dir' \
+    --ei automation_width '$width' \
+    --ei automation_height '$height' \
+    --ef automation_bed_width_mm '$bed_width' \
+    --ef automation_bed_depth_mm '$bed_depth' \
+    --ef automation_bed_height_mm '$bed_height' \
+    --es automation_thumbnail_source_layout '$source_layout' \
+    --es automation_thumbnail_source_colors '$source_colors'")"
+  printf '%s\n' "$start_output"
+  if printf '%s\n' "$start_output" | grep -Eq '^(Error|Exception):'; then
+    fail "EGL thumbnail comparison activity did not start."
+  fi
+
+  log "EGL thumbnail comparison status"
+  local status
+  status="$(wait_for_status "$serial" "$status_path" 120 1)"
+  printf '%s\n' "$status"
+  [[ "$status" == success:* ]] || fail "EGL thumbnail comparison did not report success."
+
+  local metrics_path distinct_roles min_visible
+  metrics_path="$app_artifact_dir/metrics.json"
+  distinct_roles="$(status_metric "$status" "distinctEglRoles")"
+  min_visible="$(status_metric "$status" "minVisible")"
+  local source_count
+  source_count="$(status_metric "$status" "sourceCount")"
+  if [[ "$source_layout" == "two_filament_objects" ]]; then
+    [[ "$source_count" == "2" ]] ||
+      fail "EGL thumbnail comparison did not use two filament sources: sourceCount=$source_count"
+  fi
+  [[ "$distinct_roles" =~ ^[0-9]+$ && "$distinct_roles" -ge "${MOBILE_SLICER_EGL_COMPARE_MIN_DISTINCT_ROLES:-3}" ]] ||
+    fail "EGL thumbnail comparison role outputs collapsed: distinct=$distinct_roles"
+  local min_visible_floor
+  if [[ -n "${MOBILE_SLICER_EGL_COMPARE_MIN_VISIBLE_PIXELS:-}" ]]; then
+    min_visible_floor="$MOBILE_SLICER_EGL_COMPARE_MIN_VISIBLE_PIXELS"
+  elif [[ "${MOBILE_SLICER_REQUIRE_ORCA_THUMBNAIL_REFERENCE:-0}" == "1" ]]; then
+    min_visible_floor="1"
+  else
+    min_visible_floor="64"
+  fi
+  [[ "$min_visible" =~ ^[0-9]+$ && "$min_visible" -ge "$min_visible_floor" ]] ||
+    fail "EGL thumbnail comparison visible-pixel floor failed: minVisible=$min_visible"
+
+  pull_app_private_file "$serial" "$metrics_path" "$artifact_dir/metrics.json"
+  local role
+  for role in plate no_light top pick; do
+    pull_app_private_file "$serial" "$app_artifact_dir/software-$role.png" "$artifact_dir/software-$role.png"
+    pull_app_private_file "$serial" "$app_artifact_dir/egl-$role.png" "$artifact_dir/egl-$role.png"
+  done
+  local min_bbox_floor
+  if [[ -n "${MOBILE_SLICER_EGL_COMPARE_MIN_BBOX_PX:-}" ]]; then
+    min_bbox_floor="$MOBILE_SLICER_EGL_COMPARE_MIN_BBOX_PX"
+  elif [[ "${MOBILE_SLICER_REQUIRE_ORCA_THUMBNAIL_REFERENCE:-0}" == "1" ]]; then
+    min_bbox_floor="1"
+  else
+    min_bbox_floor="8"
+  fi
+  python3 - "$artifact_dir/metrics.json" \
+    "${MOBILE_SLICER_EGL_COMPARE_TOTAL_MAX_MS:-1000}" \
+    "${MOBILE_SLICER_EGL_COMPARE_DRAW_MAX_MS:-500}" \
+    "${MOBILE_SLICER_EGL_COMPARE_READ_MAX_MS:-500}" \
+    "$min_bbox_floor" <<'PY'
+import json
+import pathlib
+import sys
+
+metrics = json.loads(pathlib.Path(sys.argv[1]).read_text())
+total_max = int(sys.argv[2])
+draw_max = int(sys.argv[3])
+read_max = int(sys.argv[4])
+min_bbox = int(sys.argv[5])
+roles = metrics.get("roles", [])
+if len(roles) != 4:
+    raise SystemExit(f"expected 4 roles, got {len(roles)}")
+for role in roles:
+    name = role["role"]
+    egl = role["egl"]
+    timing = role["eglTiming"]
+    bbox_w = egl["bboxMaxX"] - egl["bboxMinX"] + 1
+    bbox_h = egl["bboxMaxY"] - egl["bboxMinY"] + 1
+    if egl["nontransparentPixels"] <= 0:
+        raise SystemExit(f"{name}: blank EGL thumbnail")
+    if bbox_w < min_bbox or bbox_h < min_bbox:
+        raise SystemExit(f"{name}: EGL bbox too small {bbox_w}x{bbox_h}")
+    if timing.get("glError") != 0:
+        raise SystemExit(f"{name}: glError={timing.get('glError')}")
+    if timing.get("totalMs", 0) > total_max:
+        raise SystemExit(f"{name}: totalMs too high {timing.get('totalMs')}")
+    if timing.get("drawMs", 0) > draw_max:
+        raise SystemExit(f"{name}: drawMs too high {timing.get('drawMs')}")
+    if timing.get("readPixelsMs", 0) > read_max:
+        raise SystemExit(f"{name}: readPixelsMs too high {timing.get('readPixelsMs')}")
+print(f"validated {len(roles)} EGL thumbnail roles from {sys.argv[1]}")
+PY
+  python3 "$ROOT_DIR/scripts/orca_thumbnail_visual_diff.py" \
+    --mobile-dir "$artifact_dir" \
+    --reference-dir "$artifact_dir" \
+    --mobile-prefix "egl-" \
+    --reference-prefix "software-" \
+    --report-only \
+    --output-json "$artifact_dir/software-vs-egl-visual-diff.json" \
+    --output-md "$artifact_dir/software-vs-egl-visual-diff.md"
+  local orca_reference_dir="${MOBILE_SLICER_ORCA_THUMBNAIL_REFERENCE_DIR:-$ROOT_DIR/regression-fixtures/orca-thumbnail-references/simple-cube}"
+  local reference_args=()
+  if [[ "${MOBILE_SLICER_REQUIRE_ORCA_THUMBNAIL_REFERENCE:-0}" == "1" ]]; then
+    reference_args+=(--require-reference)
+  fi
+  python3 "$ROOT_DIR/scripts/orca_thumbnail_visual_diff.py" \
+    --mobile-dir "$artifact_dir" \
+    --reference-dir "$orca_reference_dir" \
+    --mobile-prefix "egl-" \
+    --max-luma-delta "${MOBILE_SLICER_ORCA_VISUAL_MAX_LUMA_DELTA:-80.0}" \
+    --max-alpha-coverage-delta "${MOBILE_SLICER_ORCA_VISUAL_MAX_ALPHA_COVERAGE_DELTA:-0.35}" \
+    --max-bbox-delta-px "${MOBILE_SLICER_ORCA_VISUAL_MAX_BBOX_DELTA_PX:-32}" \
+    --min-coverage-ratio "${MOBILE_SLICER_ORCA_VISUAL_MIN_COVERAGE_RATIO:-0.25}" \
+    --max-coverage-ratio "${MOBILE_SLICER_ORCA_VISUAL_MAX_COVERAGE_RATIO:-4.0}" \
+    --output-json "$artifact_dir/orca-reference-visual-diff.json" \
+    --output-md "$artifact_dir/orca-reference-visual-diff.md" \
+    "${reference_args[@]}"
+  rm -rf "$ROOT_DIR/artifacts/egl-thumbnail-compare/latest"
+  ln -sfn "$artifact_dir" "$ROOT_DIR/artifacts/egl-thumbnail-compare/latest"
+  adb_device "$serial" logcat -d -v time | grep 'egl_thumbnail_smoke' || true
+  log "EGL thumbnail comparison artifacts: $artifact_dir"
+  clear_current_automation_context
+  assert_no_crash_after_launch "$serial"
+}
+
 run_automation_slice() {
   local local_stl="$1"
   local serial="$2"
@@ -1249,6 +2767,10 @@ run_automation_slice() {
   local should_install="${4:-1}"
   local config_json="${5:-$BENCHY_AUTOMATION_CONFIG}"
   local collect_perf="${6:-0}"
+  local output_suffix="${7:-.gcode}"
+  local preserve_project_objects="${8:-0}"
+  local two_filament_objects="${9:-0}"
+  local multi_plate_package="${10:-0}"
   if [[ "$should_install" == "1" ]]; then
     install_apk "$serial"
   fi
@@ -1257,14 +2779,27 @@ run_automation_slice() {
   app_model_path="$(stage_app_private_file "$serial" "$local_stl" | tail -n 1)"
   local stamp
   stamp="$(date +%Y%m%d-%H%M%S)"
-  local output_path="/data/data/$PACKAGE_NAME/files/automation/$label-$stamp.gcode"
+  local output_path="/data/data/$PACKAGE_NAME/files/automation/$label-$stamp$output_suffix"
   local status_path="$output_path.status.txt"
   set_current_automation_context "$serial" "$label" "$output_path" "$status_path"
 
   log "Running automation slice '$label' on $serial"
   adb_device "$serial" shell run-as "$PACKAGE_NAME" rm -f "$output_path" "$status_path"
   adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  ensure_package_enabled "$serial"
   adb_device "$serial" logcat -c
+  local preserve_arg=""
+  if [[ "$preserve_project_objects" == "1" ]]; then
+    preserve_arg=" --ez automation_preserve_project_objects true"
+  fi
+  local two_filament_arg=""
+  if [[ "$two_filament_objects" == "1" ]]; then
+    two_filament_arg=" --ez automation_two_filament_objects true"
+  fi
+  local multi_plate_arg=""
+  if [[ "$multi_plate_package" == "1" ]]; then
+    multi_plate_arg=" --ez automation_multi_plate_package true"
+  fi
   local start_output
   start_output="$(adb_device "$serial" shell "CONFIG='$config_json'; am start -W \
     -a '$AUTOMATION_ACTION' \
@@ -1272,7 +2807,7 @@ run_automation_slice() {
     --es automation_model_path '$app_model_path' \
     --es automation_output_path '$output_path' \
     --es automation_status_path '$status_path' \
-    --es automation_config_json \"\$CONFIG\"")"
+    --es automation_config_json \"\$CONFIG\"$preserve_arg$two_filament_arg$multi_plate_arg")"
   printf '%s\n' "$start_output"
   if printf '%s\n' "$start_output" | grep -Eq '^(Error|Exception):'; then
     fail "Automation activity did not start."
@@ -1298,9 +2833,9 @@ run_automation_slice() {
   adb_device "$serial" shell run-as "$PACKAGE_NAME" ls -lh "$output_path"
   local output_bytes
   output_bytes="$(adb_device "$serial" shell run-as "$PACKAGE_NAME" wc -c "$output_path" | awk '{print $1}')"
-  [[ "$output_bytes" =~ ^[0-9]+$ ]] || fail "Unable to read automation G-code byte count."
-  [[ "$output_bytes" -gt 1024 ]] || fail "Automation G-code output is unexpectedly small: $output_bytes bytes."
-  log "Automation G-code output verified: $output_bytes bytes"
+  [[ "$output_bytes" =~ ^[0-9]+$ ]] || fail "Unable to read automation output byte count."
+  [[ "$output_bytes" -gt 1024 ]] || fail "Automation output is unexpectedly small: $output_bytes bytes."
+  log "Automation output verified: $output_bytes bytes"
   AUTOMATION_LAST_OUTPUT_PATH="$output_path"
   AUTOMATION_LAST_STATUS="$status"
   AUTOMATION_LAST_BYTES="$output_bytes"
@@ -1310,6 +2845,7 @@ run_automation_slice() {
   AUTOMATION_LAST_PLACEMENT_MS="$(status_metric "$status" "placementMs")"
   AUTOMATION_LAST_CONFIG_MS="$(status_metric "$status" "configMs")"
   AUTOMATION_LAST_NATIVE_SLICE_MS="$(status_metric "$status" "nativeSliceMs")"
+  AUTOMATION_LAST_THUMBNAIL_MS="$(status_metric "$status" "thumbnailMs")"
   AUTOMATION_LAST_WRITE_GCODE_MS="$(status_metric "$status" "writeGcodeMs")"
   AUTOMATION_LAST_PREVIEW_MOVES="$(status_metric "$status" "previewMoves")"
   AUTOMATION_LAST_PREVIEW_CACHE_BUILT="$(status_metric "$status" "previewCacheBuilt")"
@@ -1361,6 +2897,546 @@ run_automation_slice() {
   AUTOMATION_LAST_CACHE_GENERATED_GCODE_KB="$(app_cache_usage_kb "$serial" generated-gcode)"
   AUTOMATION_LAST_CACHE_STAGED_MODEL_KB="$(app_cache_usage_kb "$serial" staged-model)"
   clear_current_automation_context
+}
+
+run_sliced_3mf_metadata_smoke() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "sliced 3MF metadata smoke STL"
+  install_apk "$serial"
+  local config_json
+  config_json="$(automation_config_with_overrides "thumbnails=\"128x128\"" "thumbnails_format=\"PNG\"")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "sliced-3mf-metadata" "0" "$config_json" "0" ".gcode.3mf"
+  assert_automation_thumbnail_scope "$serial" "sliced-3mf-metadata" "true" "5" "offscreen_egl"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local package_path="$tmp_dir/sliced-metadata.gcode.3mf"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$package_path"
+  log "Auditing sliced 3MF metadata package"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-3mf "$package_path" \
+    --expect-3mf-thumbnail-entry Metadata/plate_1.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_1_small.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_no_light_1.png \
+    --expect-3mf-thumbnail-entry Metadata/top_1.png \
+    --expect-3mf-thumbnail-entry Metadata/pick_1.png \
+    --expect-3mf-relationship-target /Metadata/plate_1.png \
+    --expect-3mf-relationship-target /Metadata/plate_1_small.png \
+    --expect-3mf-entry Metadata/plate_1.json \
+    --expect-3mf-bbox-json Metadata/plate_1.json \
+    --require-distinct-3mf-thumbnail-entries \
+    --require-3mf-thumbnail-visuals \
+    --pretty
+  rm -rf "$tmp_dir"
+  assert_no_crash_after_launch "$serial"
+}
+
+run_multi_plate_sliced_3mf_metadata_smoke() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "multi-plate sliced 3MF metadata smoke STL"
+  install_apk "$serial"
+  local config_json
+  config_json="$(automation_config_with_overrides "thumbnails=\"128x128\"" "thumbnails_format=\"PNG\"")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "multi-plate-sliced-3mf-metadata" "0" "$config_json" "0" ".gcode.3mf" "0" "0" "1"
+  assert_automation_thumbnail_scope "$serial" "multi-plate-sliced-3mf-metadata" "true" "5" "offscreen_egl"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local package_path="$tmp_dir/multi-plate-sliced-metadata.gcode.3mf"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$package_path"
+  log "Auditing multi-plate sliced 3MF metadata package"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-3mf "$package_path" \
+    --expect-3mf-entry Metadata/plate_1.gcode \
+    --expect-3mf-entry Metadata/plate_2.gcode \
+    --expect-3mf-thumbnail-entry Metadata/plate_1.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_1_small.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_no_light_1.png \
+    --expect-3mf-thumbnail-entry Metadata/top_1.png \
+    --expect-3mf-thumbnail-entry Metadata/pick_1.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_2.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_2_small.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_no_light_2.png \
+    --expect-3mf-thumbnail-entry Metadata/top_2.png \
+    --expect-3mf-thumbnail-entry Metadata/pick_2.png \
+    --expect-3mf-relationship-target /Metadata/plate_1.png \
+    --expect-3mf-relationship-target /Metadata/plate_1_small.png \
+    --expect-3mf-entry Metadata/plate_1.json \
+    --expect-3mf-entry Metadata/plate_2.json \
+    --expect-3mf-bbox-json Metadata/plate_1.json \
+    --expect-3mf-bbox-json Metadata/plate_2.json \
+    --expect-different-3mf-entry Metadata/plate_1.gcode:Metadata/plate_2.gcode \
+    --expect-different-3mf-entry Metadata/plate_1.json:Metadata/plate_2.json \
+    --require-distinct-3mf-thumbnail-entries \
+    --require-3mf-thumbnail-visuals \
+    --pretty
+  rm -rf "$tmp_dir"
+  assert_no_crash_after_launch "$serial"
+}
+
+run_orca_fixture_mobile_capture() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "Orca metadata fixture cube STL"
+  install_apk "$serial"
+
+  local fixture_dir="$ROOT_DIR/regression-fixtures/orca-metadata/mobile"
+  mkdir -p "$fixture_dir"
+
+  local config_json output_path
+
+  config_json="$(automation_config_with_overrides "thumbnails=\"128x128\"" "thumbnails_format=\"PNG\"" "filament_type=\"PLA\"")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "fixture-simple-cube-png" "0" "$config_json"
+  assert_automation_thumbnail_scope "$serial" "fixture-simple-cube-png" "false" "1" "offscreen_egl"
+  output_path="$fixture_dir/simple-cube-png.gcode"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-gcode "$output_path" \
+    --expect-thumbnail thumbnail:128x128 \
+    --require-gcode-thumbnail-visuals \
+    --require-print-time \
+    --require-filament \
+    --pretty
+
+  config_json="$(automation_config_with_overrides "thumbnails=\"150x150\"" "thumbnails_format=\"PNG\"" "filament_type=\"PLA\"")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "fixture-qidi-q2-legacy-png" "0" "$config_json"
+  assert_automation_thumbnail_scope "$serial" "fixture-qidi-q2-legacy-png" "false" "1" "offscreen_egl"
+  output_path="$fixture_dir/qidi-q2-legacy-png.gcode"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-gcode "$output_path" \
+    --expect-thumbnail thumbnail:150x150 \
+    --require-gcode-thumbnail-visuals \
+    --forbid-thumbnail-tag gimage \
+    --forbid-thumbnail-tag simage \
+    --require-print-time \
+    --require-filament \
+    --pretty
+
+  config_json="$(automation_config_with_overrides "thumbnails=\"96x96\"" "thumbnails_format=\"QOI\"" "filament_type=\"PLA\"")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "fixture-non-qidi-qoi" "0" "$config_json"
+  assert_automation_thumbnail_scope "$serial" "fixture-non-qidi-qoi" "false" "1" "offscreen_egl"
+  output_path="$fixture_dir/non-qidi-qoi.gcode"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-gcode "$output_path" \
+    --expect-thumbnail thumbnail_QOI:96x96 \
+    --require-gcode-thumbnail-payload-signatures \
+    --require-print-time \
+    --require-filament \
+    --pretty
+
+  config_json="$(automation_config_with_overrides "thumbnails=\"96x96\"" "thumbnails_format=\"JPG\"" "filament_type=\"PLA\"")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "fixture-jpg" "0" "$config_json"
+  assert_automation_thumbnail_scope "$serial" "fixture-jpg" "false" "1" "offscreen_egl"
+  output_path="$fixture_dir/jpg.gcode"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-gcode "$output_path" \
+    --expect-thumbnail thumbnail_JPG:96x96 \
+    --require-gcode-thumbnail-payload-signatures \
+    --require-print-time \
+    --require-filament \
+    --pretty
+
+  config_json="$(automation_config_with_overrides "thumbnails=\"70x70\"" "thumbnails_format=\"BTT_TFT\"" "filament_type=\"PLA\"")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "fixture-btt-tft" "0" "$config_json"
+  assert_automation_thumbnail_scope "$serial" "fixture-btt-tft" "false" "1" "offscreen_egl"
+  output_path="$fixture_dir/btt-tft.gcode"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-gcode "$output_path" \
+    --expect-thumbnail thumbnail_BTT:70x70 \
+    --require-print-time \
+    --require-filament \
+    --pretty
+
+  config_json="$(automation_config_with_overrides "thumbnails=\"380x380,210x210\"" "thumbnails_format=\"COLPIC\"" "filament_type=\"PLA\"")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "fixture-qidi-colpic-gimage-simage" "0" "$config_json"
+  assert_automation_thumbnail_scope "$serial" "fixture-qidi-colpic-gimage-simage" "false" "2" "offscreen_egl"
+  output_path="$fixture_dir/qidi-colpic-gimage-simage.gcode"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-gcode "$output_path" \
+    --expect-thumbnail gimage \
+    --expect-thumbnail simage \
+    --require-print-time \
+    --require-filament \
+    --pretty
+
+  config_json="$(automation_config_with_overrides "thumbnails=\"128x128\"" "thumbnails_format=\"PNG\"" "filament_type=\"PLA\"")"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "fixture-sliced-3mf-metadata" "0" "$config_json" "0" ".gcode.3mf"
+  assert_automation_thumbnail_scope "$serial" "fixture-sliced-3mf-metadata" "true" "5" "offscreen_egl"
+  output_path="$fixture_dir/simple-cube.gcode.3mf"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-3mf "$output_path" \
+    --expect-3mf-thumbnail-entry Metadata/plate_1.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_1_small.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_no_light_1.png \
+    --expect-3mf-thumbnail-entry Metadata/top_1.png \
+    --expect-3mf-thumbnail-entry Metadata/pick_1.png \
+    --expect-3mf-relationship-target /Metadata/plate_1.png \
+    --expect-3mf-relationship-target /Metadata/plate_1_small.png \
+    --expect-3mf-entry Metadata/plate_1.json \
+    --expect-3mf-bbox-json Metadata/plate_1.json \
+    --require-distinct-3mf-thumbnail-entries \
+    --require-3mf-thumbnail-visuals \
+    --pretty
+
+  config_json="$(automation_config_with_overrides \
+    "thumbnails=\"128x128\"" \
+    "thumbnails_format=\"PNG\"" \
+    'filament_type=["PLA","PLA"]' \
+    'filament_settings_id=["Generic PLA A","Generic PLA B"]' \
+    'filament_colour=["#F2754E","#4EA3F2"]' \
+    'filament_diameter=[1.75,1.75]' \
+    'nozzle_temperature_initial_layer=[210,210]' \
+    'nozzle_temperature=[210,210]' \
+    'filament_max_volumetric_speed=[50,50]' \
+    'flush_multiplier=[1,1]' \
+    'flush_volumes_matrix="0,0,0,0,0,0,0,0"')"
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "fixture-multi-filament" "0" "$config_json" "0" ".gcode" "0" "1"
+  assert_automation_thumbnail_scope "$serial" "fixture-multi-filament" "false" "1" "offscreen_egl"
+  output_path="$fixture_dir/multi-filament.gcode"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-gcode "$output_path" \
+    --expect-thumbnail thumbnail:128x128 \
+    --require-gcode-thumbnail-visuals \
+    --require-print-time \
+    --require-filament \
+    --require-toolchange \
+    --pretty
+
+  run_orca_fixture_gate
+  assert_no_crash_after_launch "$serial"
+}
+
+append_orca_metadata_benchmark_case() {
+  local report_path="$1"
+  local label="$2"
+  local audit_path="$3"
+  local logcat_path="$4"
+  {
+    printf '| `%s` | %s | %s | %s | %s | %s | %s | %s | %s |\n' \
+      "$label" \
+      "${AUTOMATION_LAST_NATIVE_SLICE_MS:-}" \
+      "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+      "${AUTOMATION_LAST_WRITE_GCODE_MS:-}" \
+      "${AUTOMATION_LAST_ELAPSED_MS:-}" \
+      "${AUTOMATION_LAST_BYTES:-}" \
+      "${AUTOMATION_LAST_NATIVE_GCODE_BYTES:-}" \
+      "$(basename "$audit_path")" \
+      "$(basename "$logcat_path")"
+  } >> "$report_path"
+}
+
+run_orca_metadata_benchmark_case() {
+  local serial="$1"
+  local artifact_dir="$2"
+  local label="$3"
+  local config_json="$4"
+  local output_suffix="${5:-.gcode}"
+  local audit_path_option="$6"
+  shift 6
+  local audit_args=("$@")
+
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "$label" "0" "$config_json" "0" "$output_suffix"
+
+  local output_path="$artifact_dir/$label$output_suffix"
+  local audit_path="$artifact_dir/$label.audit.json"
+  local logcat_path="$artifact_dir/$label.logcat.txt"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  adb_device "$serial" logcat -d > "$logcat_path" || true
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" "$audit_path_option" "$output_path" "${audit_args[@]}" --pretty > "$audit_path"
+  append_orca_metadata_benchmark_case "$artifact_dir/report.md" "$label" "$audit_path" "$logcat_path"
+}
+
+run_fluidd_thumbnail_metadata_smoke() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "Fluidd thumbnail metadata cube STL"
+  install_apk "$serial"
+
+  local stamp artifact_dir report_path config_json output_path audit_path logcat_path
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  artifact_dir="$ROOT_DIR/artifacts/fluidd-thumbnail-metadata/$stamp"
+  mkdir -p "$artifact_dir"
+  report_path="$artifact_dir/report.md"
+  output_path="$artifact_dir/fluidd-thumbnail-metadata.gcode"
+  audit_path="$artifact_dir/fluidd-thumbnail-metadata.audit.json"
+  logcat_path="$artifact_dir/fluidd-thumbnail-metadata.logcat.txt"
+
+  config_json="$(automation_config_with_overrides \
+    "thumbnails=\"48x48/PNG,300x300/PNG\"" \
+    "thumbnails_format=\"PNG\"" \
+    "filament_type=\"PLA\"")"
+
+  run_automation_slice "$DEFAULT_SLICE_SMOKE_STL" "$serial" "fluidd-thumbnail-metadata" "0" "$config_json" "0" ".gcode"
+  assert_automation_thumbnail_scope "$serial" "fluidd-thumbnail-metadata" "false" "2" "offscreen_egl"
+  assert_int_metric_at_most \
+    "fluidd-thumbnail-metadata" \
+    "thumbnailMs" \
+    "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+    "${MOBILE_SLICER_METADATA_FLUIDD_THUMBNAIL_MAX_MS:-500}"
+
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$output_path"
+  if ! grep -Eq '^; generated by OrcaSlicer .*MobileSlicer .* on ' "$output_path"; then
+    fail "Fluidd thumbnail metadata gate expected an OrcaSlicer-compatible generator marker in $output_path"
+  fi
+  adb_device "$serial" logcat -d > "$logcat_path" || true
+  python3 "$ROOT_DIR/scripts/orca_metadata_audit.py" \
+    --mobile-gcode "$output_path" \
+    --expect-thumbnail thumbnail:48x48 \
+    --expect-thumbnail thumbnail:300x300 \
+    --require-gcode-thumbnail-visuals \
+    --require-gcode-thumbnail-antialias \
+    --require-print-time \
+    --require-filament \
+    --pretty > "$audit_path"
+
+  {
+    printf '# Fluidd Thumbnail Metadata Gate\n\n'
+    printf -- '- captured_at: %s\n' "$stamp"
+    printf -- '- serial: `%s`\n' "$serial"
+    printf -- '- model: `%s`\n' "$DEFAULT_SLICE_SMOKE_STL"
+    printf -- '- output: `%s`\n' "$output_path"
+    printf -- '- audit: `%s`\n' "$audit_path"
+    printf -- '- logcat: `%s`\n' "$logcat_path"
+    printf -- '- thumbnailMs: `%s`\n' "${AUTOMATION_LAST_THUMBNAIL_MS:-}"
+    printf -- '- elapsedMs: `%s`\n' "${AUTOMATION_LAST_ELAPSED_MS:-}"
+    printf -- '- outputBytes: `%s`\n' "${AUTOMATION_LAST_BYTES:-}"
+  } > "$report_path"
+
+  verify_moonraker_fluidd_round_trip "$output_path" "$artifact_dir" "$report_path"
+
+  rm -rf "$ROOT_DIR/artifacts/fluidd-thumbnail-metadata/latest"
+  ln -sfn "$artifact_dir" "$ROOT_DIR/artifacts/fluidd-thumbnail-metadata/latest"
+  log "Fluidd thumbnail metadata artifacts: $artifact_dir"
+  assert_clean_crash_buffer "$serial"
+}
+
+urlencode() {
+  python3 - "$1" <<'PY'
+import sys
+from urllib.parse import quote
+print(quote(sys.argv[1], safe=""))
+PY
+}
+
+verify_moonraker_fluidd_round_trip() {
+  local output_path="$1"
+  local artifact_dir="$2"
+  local report_path="$3"
+  local base_url="${MOBILE_SLICER_MOONRAKER_URL:-}"
+  if [[ -z "$base_url" ]]; then
+    printf -- '- moonrakerRoundTrip: skipped (set MOBILE_SLICER_MOONRAKER_URL to verify Fluidd-visible metadata on a live host)\n' >> "$report_path"
+    return 0
+  fi
+
+  command -v curl >/dev/null 2>&1 || fail "curl is required for MOBILE_SLICER_MOONRAKER_URL round-trip verification"
+
+  base_url="${base_url%/}"
+  local stamp remote_name encoded_name upload_json metadata_json delete_json metadata_url
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  remote_name="${MOBILE_SLICER_MOONRAKER_UPLOAD_NAME:-MobileSlicer_fluidd_thumbnail_${stamp}.gcode}"
+  encoded_name="$(urlencode "$remote_name")"
+  upload_json="$artifact_dir/moonraker-upload.json"
+  metadata_json="$artifact_dir/moonraker-metadata.json"
+  delete_json="$artifact_dir/moonraker-delete.json"
+  metadata_url="$base_url/server/files/metadata?filename=$encoded_name"
+
+  local curl_headers=()
+  if [[ -n "${MOBILE_SLICER_MOONRAKER_API_KEY:-}" ]]; then
+    curl_headers=(-H "X-Api-Key: ${MOBILE_SLICER_MOONRAKER_API_KEY}")
+  fi
+
+  curl -fsS "${curl_headers[@]}" \
+    -F "root=gcodes" \
+    -F "print=false" \
+    -F "file=@${output_path};filename=${remote_name}" \
+    "$base_url/server/files/upload" > "$upload_json"
+
+  local attempt
+  for attempt in $(seq 1 20); do
+    if curl -fsS "${curl_headers[@]}" "$metadata_url" > "$metadata_json"; then
+      if python3 - "$metadata_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+thumbs = []
+
+def walk(value):
+    if isinstance(value, dict):
+        if "width" in value and "height" in value:
+            try:
+                thumbs.append((int(value["width"]), int(value["height"])))
+            except (TypeError, ValueError):
+                pass
+        for child in value.values():
+            walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            walk(child)
+
+walk(payload)
+required = {(48, 48), (300, 300)}
+missing = sorted(required.difference(thumbs))
+if missing:
+    print(f"missing thumbnail dimensions: {missing}; reported={sorted(set(thumbs))}", file=sys.stderr)
+    sys.exit(1)
+print(f"reported thumbnail dimensions: {sorted(set(thumbs))}")
+PY
+      then
+        {
+          printf -- '- moonrakerRoundTrip: passed\n'
+          printf -- '- moonrakerUrl: `%s`\n' "$base_url"
+          printf -- '- moonrakerRemoteFile: `%s`\n' "$remote_name"
+          printf -- '- moonrakerUpload: `%s`\n' "$upload_json"
+          printf -- '- moonrakerMetadata: `%s`\n' "$metadata_json"
+        } >> "$report_path"
+        if [[ "${MOBILE_SLICER_MOONRAKER_DELETE_AFTER:-1}" != "0" ]]; then
+          curl -fsS -X DELETE "${curl_headers[@]}" "$base_url/server/files/gcodes/$encoded_name" > "$delete_json" || true
+          printf -- '- moonrakerDelete: `%s`\n' "$delete_json" >> "$report_path"
+        fi
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+
+  fail "Moonraker metadata did not report 48x48 and 300x300 thumbnails for $remote_name after upload. Metadata artifact: $metadata_json"
+}
+
+run_orca_metadata_benchmark() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$DEFAULT_SLICE_SMOKE_STL" "Orca metadata benchmark cube STL"
+  install_apk "$serial"
+
+  local stamp artifact_dir report_path
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  artifact_dir="$ROOT_DIR/artifacts/orca-metadata-benchmark/$stamp"
+  mkdir -p "$artifact_dir"
+  report_path="$artifact_dir/report.md"
+  {
+    printf '# Orca Metadata Benchmark\n\n'
+    printf -- '- captured_at: %s\n' "$stamp"
+    printf -- '- serial: `%s`\n' "$serial"
+    printf -- '- model: `%s`\n\n' "$DEFAULT_SLICE_SMOKE_STL"
+    printf '| case | nativeSliceMs | thumbnailMs | writeGcodeMs | elapsedMs | outputBytes | nativeGcodeBytes | audit | logcat |\n'
+    printf '|---|---:|---:|---:|---:|---:|---:|---|---|\n'
+  } > "$report_path"
+
+  local baseline_config png_small_config png_config fluidd_config qoi_config jpg_config btt_config colpic_config package_config
+  baseline_config="$(automation_config_with_overrides "filament_type=\"PLA\"")"
+  png_small_config="$(automation_config_with_overrides "thumbnails=\"48x48\"" "thumbnails_format=\"PNG\"" "filament_type=\"PLA\"")"
+  png_config="$(automation_config_with_overrides "thumbnails=\"128x128\"" "thumbnails_format=\"PNG\"" "filament_type=\"PLA\"")"
+  fluidd_config="$(automation_config_with_overrides "thumbnails=\"48x48/PNG,300x300/PNG\"" "thumbnails_format=\"PNG\"" "filament_type=\"PLA\"")"
+  qoi_config="$(automation_config_with_overrides "thumbnails=\"96x96\"" "thumbnails_format=\"QOI\"" "filament_type=\"PLA\"")"
+  jpg_config="$(automation_config_with_overrides "thumbnails=\"96x96\"" "thumbnails_format=\"JPG\"" "filament_type=\"PLA\"")"
+  btt_config="$(automation_config_with_overrides "thumbnails=\"70x70\"" "thumbnails_format=\"BTT_TFT\"" "filament_type=\"PLA\"")"
+  colpic_config="$(automation_config_with_overrides "thumbnails=\"380x380,210x210\"" "thumbnails_format=\"COLPIC\"" "filament_type=\"PLA\"")"
+  package_config="$png_config"
+
+  run_orca_metadata_benchmark_case \
+    "$serial" "$artifact_dir" "metadata-baseline-no-thumbnail" "$baseline_config" ".gcode" \
+    --mobile-gcode --require-print-time --require-filament
+  run_orca_metadata_benchmark_case \
+    "$serial" "$artifact_dir" "metadata-png-48" "$png_small_config" ".gcode" \
+    --mobile-gcode --expect-thumbnail thumbnail:48x48 --require-gcode-thumbnail-visuals --require-gcode-thumbnail-antialias --require-print-time --require-filament
+  assert_automation_thumbnail_scope "$serial" "metadata-png-48" "false" "1" "offscreen_egl"
+  assert_int_metric_at_most \
+    "metadata-png-48" \
+    "thumbnailMs" \
+    "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+    "${MOBILE_SLICER_METADATA_PNG_SMALL_THUMBNAIL_MAX_MS:-250}"
+  run_orca_metadata_benchmark_case \
+    "$serial" "$artifact_dir" "metadata-png-128" "$png_config" ".gcode" \
+    --mobile-gcode --expect-thumbnail thumbnail:128x128 --require-gcode-thumbnail-visuals --require-gcode-thumbnail-antialias --require-print-time --require-filament
+  assert_automation_thumbnail_scope "$serial" "metadata-png-128" "false" "1" "offscreen_egl"
+  assert_int_metric_at_most \
+    "metadata-png-128" \
+    "thumbnailMs" \
+    "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+    "${MOBILE_SLICER_METADATA_PNG_THUMBNAIL_MAX_MS:-250}"
+  run_orca_metadata_benchmark_case \
+    "$serial" "$artifact_dir" "metadata-fluidd-png" "$fluidd_config" ".gcode" \
+    --mobile-gcode --expect-thumbnail thumbnail:48x48 --expect-thumbnail thumbnail:300x300 --require-gcode-thumbnail-visuals --require-gcode-thumbnail-antialias --require-print-time --require-filament
+  assert_automation_thumbnail_scope "$serial" "metadata-fluidd-png" "false" "2" "offscreen_egl"
+  assert_int_metric_at_most \
+    "metadata-fluidd-png" \
+    "thumbnailMs" \
+    "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+    "${MOBILE_SLICER_METADATA_FLUIDD_THUMBNAIL_MAX_MS:-500}"
+  run_orca_metadata_benchmark_case \
+    "$serial" "$artifact_dir" "metadata-qoi-96" "$qoi_config" ".gcode" \
+    --mobile-gcode --expect-thumbnail thumbnail_QOI:96x96 --require-gcode-thumbnail-payload-signatures --require-print-time --require-filament
+  assert_automation_thumbnail_scope "$serial" "metadata-qoi-96" "false" "1" "offscreen_egl"
+  assert_int_metric_at_most \
+    "metadata-qoi-96" \
+    "thumbnailMs" \
+    "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+    "${MOBILE_SLICER_METADATA_QOI_THUMBNAIL_MAX_MS:-250}"
+  run_orca_metadata_benchmark_case \
+    "$serial" "$artifact_dir" "metadata-jpg-96" "$jpg_config" ".gcode" \
+    --mobile-gcode --expect-thumbnail thumbnail_JPG:96x96 --require-gcode-thumbnail-payload-signatures --require-print-time --require-filament
+  assert_automation_thumbnail_scope "$serial" "metadata-jpg-96" "false" "1" "offscreen_egl"
+  assert_int_metric_at_most \
+    "metadata-jpg-96" \
+    "thumbnailMs" \
+    "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+    "${MOBILE_SLICER_METADATA_JPG_THUMBNAIL_MAX_MS:-250}"
+  run_orca_metadata_benchmark_case \
+    "$serial" "$artifact_dir" "metadata-btt-tft-70" "$btt_config" ".gcode" \
+    --mobile-gcode --expect-thumbnail thumbnail_BTT:70x70 --require-print-time --require-filament
+  assert_automation_thumbnail_scope "$serial" "metadata-btt-tft-70" "false" "1" "offscreen_egl"
+  assert_int_metric_at_most \
+    "metadata-btt-tft-70" \
+    "thumbnailMs" \
+    "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+    "${MOBILE_SLICER_METADATA_BTT_THUMBNAIL_MAX_MS:-250}"
+  run_orca_metadata_benchmark_case \
+    "$serial" "$artifact_dir" "metadata-colpic-gimage-simage" "$colpic_config" ".gcode" \
+    --mobile-gcode --expect-thumbnail gimage --expect-thumbnail simage --require-print-time --require-filament
+  assert_automation_thumbnail_scope "$serial" "metadata-colpic-gimage-simage" "false" "2" "offscreen_egl"
+  assert_int_metric_at_most \
+    "metadata-colpic-gimage-simage" \
+    "thumbnailMs" \
+    "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+    "${MOBILE_SLICER_METADATA_COLPIC_THUMBNAIL_MAX_MS:-500}"
+  run_orca_metadata_benchmark_case \
+    "$serial" "$artifact_dir" "metadata-sliced-3mf-png" "$package_config" ".gcode.3mf" \
+    --mobile-3mf \
+    --expect-3mf-thumbnail-entry Metadata/plate_1.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_1_small.png \
+    --expect-3mf-thumbnail-entry Metadata/plate_no_light_1.png \
+    --expect-3mf-thumbnail-entry Metadata/top_1.png \
+    --expect-3mf-thumbnail-entry Metadata/pick_1.png \
+    --expect-3mf-relationship-target /Metadata/plate_1.png \
+    --expect-3mf-relationship-target /Metadata/plate_1_small.png \
+    --expect-3mf-entry Metadata/plate_1.json \
+    --expect-3mf-bbox-json Metadata/plate_1.json \
+    --require-distinct-3mf-thumbnail-entries \
+    --require-3mf-thumbnail-visuals
+  assert_automation_thumbnail_scope "$serial" "metadata-sliced-3mf-png" "true" "5" "offscreen_egl"
+  assert_int_metric_at_most \
+    "metadata-sliced-3mf-png" \
+    "thumbnailMs" \
+    "${AUTOMATION_LAST_THUMBNAIL_MS:-}" \
+    "${MOBILE_SLICER_METADATA_3MF_THUMBNAIL_MAX_MS:-500}"
+  assert_int_metric_at_most \
+    "metadata-sliced-3mf-png" \
+    "writeGcodeMs" \
+    "${AUTOMATION_LAST_WRITE_GCODE_MS:-}" \
+    "${MOBILE_SLICER_METADATA_3MF_WRITE_MAX_MS:-1000}"
+
+  log "Orca metadata benchmark report: $report_path"
+  assert_clean_crash_buffer "$serial"
 }
 
 assert_automation_preview_info_ready() {
@@ -1416,6 +3492,7 @@ run_automation_slice_expect_failure() {
   log "Running expected-failure automation slice '$label' on $serial"
   adb_device "$serial" shell run-as "$PACKAGE_NAME" rm -f "$output_path" "$status_path"
   adb_device "$serial" shell am force-stop "$PACKAGE_NAME"
+  ensure_package_enabled "$serial"
   adb_device "$serial" logcat -c
   adb_device "$serial" shell "CONFIG='$config_json'; am start -W \
     -a '$AUTOMATION_ACTION' \
@@ -2210,6 +4287,81 @@ case "$mode" in
   script-tests)
     run_script_tests
     ;;
+  orca-fixture-gate)
+    run_orca_fixture_gate
+    ;;
+  orca-gcode-metadata-parity)
+    run_orca_gcode_metadata_parity
+    ;;
+  orca-thumbnail-reference-fixtures)
+    run_orca_thumbnail_reference_fixture_gate
+    ;;
+  orca-3mf-project-preservation)
+    run_orca_3mf_project_preservation_gate
+    ;;
+  orca-3mf-roundtrip-contract)
+    run_orca_3mf_roundtrip_contract_gate
+    ;;
+  orca-3mf-roundtrip-device)
+    run_orca_3mf_roundtrip_device_gate "$(device_serial "${2:-}")"
+    ;;
+  orca-rich-project-fixture)
+    run_orca_rich_project_fixture_gate
+    ;;
+  orca-rich-project-roundtrip-contract)
+    run_orca_rich_project_roundtrip_contract_gate
+    ;;
+  orca-rich-project-roundtrip-device)
+    run_orca_rich_project_roundtrip_device_gate "$(device_serial "${2:-}")"
+    ;;
+  orca-modifier-project-fixture)
+    run_orca_modifier_project_fixture_gate
+    ;;
+  orca-modifier-project-roundtrip-contract)
+    run_orca_modifier_project_roundtrip_contract_gate
+    ;;
+  orca-modifier-project-roundtrip-device)
+    run_orca_modifier_project_roundtrip_device_gate "$(device_serial "${2:-}")"
+    ;;
+  orca-height-range-project-fixture)
+    run_orca_height_range_project_fixture_gate
+    ;;
+  orca-height-range-project-roundtrip-contract)
+    run_orca_height_range_project_roundtrip_contract_gate
+    ;;
+  orca-height-range-project-roundtrip-device)
+    run_orca_height_range_project_roundtrip_device_gate "$(device_serial "${2:-}")"
+    ;;
+  orca-project-parity-matrix)
+    run_orca_project_parity_matrix_gate
+    ;;
+  orca-project-parity-device-matrix)
+    run_orca_project_parity_device_matrix_gate "$(device_serial "${2:-}")"
+    ;;
+  orca-active-multifilament-reference-probe)
+    run_orca_active_multifilament_reference_probe
+    ;;
+  orca-fixture-capture-mobile)
+    run_orca_fixture_mobile_capture "$(device_serial "${2:-}")"
+    ;;
+  printer-thumbnail-compatibility)
+    run_printer_thumbnail_compatibility_gate
+    ;;
+  fluidd-thumbnail-metadata)
+    run_fluidd_thumbnail_metadata_smoke "$(device_serial "${2:-}")"
+    ;;
+  orca-metadata-benchmark)
+    run_orca_metadata_benchmark "$(device_serial "${2:-}")"
+    ;;
+  egl-thumbnail-smoke)
+    run_egl_thumbnail_smoke "$(device_serial "${2:-}")"
+    ;;
+  egl-slice-thumbnail-smoke)
+    run_egl_slice_thumbnail_smoke "$(device_serial "${2:-}")"
+    ;;
+  egl-thumbnail-compare)
+    run_egl_thumbnail_compare "$(device_serial "${2:-}")"
+    ;;
   asset-tests)
     run_asset_generator_tests
     ;;
@@ -2221,6 +4373,18 @@ case "$mode" in
     ;;
   local)
     run_script_tests
+    run_orca_fixture_gate_strict
+    run_orca_gcode_metadata_parity_strict_contract
+    run_orca_thumbnail_reference_fixture_gate
+    run_orca_3mf_project_preservation_gate
+    run_orca_rich_project_fixture_gate
+    run_orca_3mf_roundtrip_contract_gate
+    run_orca_rich_project_roundtrip_contract_gate
+    run_orca_modifier_project_fixture_gate
+    run_orca_modifier_project_roundtrip_contract_gate
+    run_orca_height_range_project_fixture_gate
+    run_orca_height_range_project_roundtrip_contract_gate
+    run_printer_thumbnail_compatibility_gate
     run_stub_inventory
     run_asset_generator_tests
     run_lint
@@ -2241,6 +4405,21 @@ case "$mode" in
     ;;
   slice-regression)
     run_slice_regression_matrix "$(device_serial "${2:-}")"
+    ;;
+  object-process)
+    run_object_process_override_regression "$(device_serial "${2:-}")"
+    ;;
+  orca-object-label-parity)
+    run_orca_object_label_parity_matrix "$(device_serial "${2:-}")"
+    ;;
+  orca-import-smoke)
+    run_orca_import_smoke "$(device_serial "${2:-}")"
+    ;;
+  sliced-3mf-metadata)
+    run_sliced_3mf_metadata_smoke "$(device_serial "${2:-}")"
+    ;;
+  multi-plate-sliced-3mf-metadata)
+    run_multi_plate_sliced_3mf_metadata_smoke "$(device_serial "${2:-}")"
     ;;
   skirt-parity)
     run_skirt_parity_matrix "$(device_serial "${2:-}")"

@@ -16,6 +16,7 @@ class NativeEngineBridge private constructor() {
         @JvmStatic external fun nativeLoadPlateModelsV2(handle: Long, paths: Array<String>, transforms: DoubleArray, extruderIds: IntArray, mobileObjectIds: LongArray, paintPayloadJson: String): Boolean
         @JvmStatic external fun nativeLoadProject3mf(handle: Long, path: String, mobileObjectIds: LongArray): Boolean
         @JvmStatic external fun nativeExtractModelMeshToStl(handle: Long, inputPath: String, outputStlPath: String): Boolean
+        @JvmStatic external fun nativeConvertStepToStl(handle: Long, inputPath: String, outputStlPath: String, linearDeflection: Double, angleDeflection: Double): Boolean
         @JvmStatic external fun nativeSplitModelMeshToStls(handle: Long, inputPath: String, outputDirectory: String, splitMode: Int): Boolean
         @JvmStatic external fun nativeGetLastSplitResultJson(handle: Long): String?
         @JvmStatic external fun nativeCutObject(handle: Long, requestJson: String): Boolean
@@ -45,6 +46,7 @@ class NativeEngineBridge private constructor() {
         @JvmStatic external fun nativePaintRemapColorSlots(handle: Long, payloadJson: String, oldSlotToNewSlot: IntArray): String?
         @JvmStatic external fun nativePlanPlateArrangement(handle: Long, paths: Array<String>, transforms: DoubleArray, extruderIds: IntArray, configJson: String, allowRotation: Boolean): DoubleArray?
         @JvmStatic external fun nativePlanAutoOrientation(handle: Long, paths: Array<String>, transforms: DoubleArray, extruderIds: IntArray, configJson: String): DoubleArray?
+        @JvmStatic external fun nativePrewarmPlatePlanningModels(handle: Long, paths: Array<String>): Boolean
         @JvmStatic external fun nativeCancelPlanning(handle: Long): Boolean
         @JvmStatic external fun nativeSetModelPlacement(handle: Long, xMm: Double, yMm: Double, zMm: Double): Boolean
         @JvmStatic external fun nativeSetModelTransform(handle: Long, xMm: Double, yMm: Double, zMm: Double, rotationXRadians: Double, rotationYRadians: Double, rotationZRadians: Double, uniformScale: Double): Boolean
@@ -53,10 +55,15 @@ class NativeEngineBridge private constructor() {
         @JvmStatic external fun nativeGetGcodeSummary(handle: Long): String?
         @JvmStatic external fun nativeGetEnrichedGcodeSummary(handle: Long): String?
         @JvmStatic external fun nativeGetSliceMetrics(handle: Long): String?
+        @JvmStatic external fun nativeGetThumbnailRequestsJson(handle: Long): String?
+        @JvmStatic external fun nativeGetSlicedPlateBboxJson(handle: Long): String?
+        @JvmStatic external fun nativeClearSliceThumbnails(handle: Long)
+        @JvmStatic external fun nativeAddSliceThumbnailRgba(handle: Long, width: Int, height: Int, format: String, role: String, rgba: ByteArray): Boolean
         @JvmStatic external fun nativePlanLatestSlicePreviewRanges(handle: Long, minLayer: Long, maxLayer: Long, vertexBudget: Long): String?
         @JvmStatic external fun nativeWriteGcodeToFile(handle: Long, path: String): Boolean
         @JvmStatic external fun nativeWriteProject3mfToFile(handle: Long, path: String): Boolean
         @JvmStatic external fun nativeWriteBambuGcode3mfToFile(handle: Long, path: String): Boolean
+        @JvmStatic external fun nativeWriteMultiPlateBambuGcode3mfToFile(handle: Long, path: String, manifestJson: String): Boolean
         @JvmStatic external fun nativeGetLastError(handle: Long): String?
         internal fun nativeGetLastEngineError(handle: Long): NativeEngineError? =
             parseNativeEngineError(nativeGetLastError(handle))

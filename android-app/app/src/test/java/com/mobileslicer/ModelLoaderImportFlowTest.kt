@@ -57,6 +57,28 @@ class ModelLoaderImportFlowTest {
     }
 
     @Test
+    fun thingiverseStagedImportUsesOriginalFileNameAsPlateLabel() {
+        val application = planModelImportApplication(
+            result = ModelLoadResult(
+                message = "Model loaded\nflower_v1_pot.stl",
+                loaded = true,
+                stagedFilePath = "/tmp/selected-model-123456-flower_v1_pot.stl",
+                format = ImportedModelFormat.Stl,
+                loadTiming = ModelImportTiming(stagingMs = 10L, nativeLoadMs = 20L),
+                bounds = bounds()
+            ),
+            currentScreen = AppScreen.Home,
+            existingPlateObjects = emptyList(),
+            appendRequested = false,
+            nextPlateObjectId = 1L,
+            defaultTransform = { ViewerModelTransform(centerXmm = 0f, centerYmm = 0f) }
+        )
+
+        assertEquals("flower_v1_pot.stl", application.loadedLabel)
+        assertEquals("flower_v1_pot.stl", application.importedPlateObject?.label)
+    }
+
+    @Test
     fun importCompletionUiPlanResetsImportStateAndOpensWorkspaceOnlyWhenNeeded() {
         val openApplication = planModelImportApplication(
             result = modelLoadResult(path = "/tmp/new.stl"),

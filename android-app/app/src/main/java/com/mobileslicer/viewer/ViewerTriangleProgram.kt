@@ -13,7 +13,9 @@ internal object ViewerTriangleProgram {
                 matrixHandle = GLES20.glGetUniformLocation(programId, "uViewProjectionMatrix"),
                 modelMatrixHandle = GLES20.glGetUniformLocation(programId, "uModelMatrix"),
                 colorHandle = GLES20.glGetUniformLocation(programId, "uColor"),
-                lightHandle = GLES20.glGetUniformLocation(programId, "uLightDirection")
+                lightHandle = GLES20.glGetUniformLocation(programId, "uLightDirection"),
+                flatShadingHandle = GLES20.glGetUniformLocation(programId, "uFlatShading"),
+                fullBrightHandle = GLES20.glGetUniformLocation(programId, "uFullBright")
             )
         )
     }
@@ -55,24 +57,47 @@ internal object ViewerTriangleProgram {
         uniform mat4 uViewProjectionMatrix;
         uniform mat4 uModelMatrix;
         uniform vec3 uLightDirection;
+        uniform bool uFlatShading;
+        uniform bool uFullBright;
         attribute vec3 aPosition;
         attribute vec3 aNormal;
         varying float vLighting;
+        varying vec3 vWorldPosition;
+        varying vec3 vLightDirection;
 
         void main() {
+            vec4 worldPosition = uModelMatrix * vec4(aPosition, 1.0);
             vec3 normal = normalize((uModelMatrix * vec4(aNormal, 0.0)).xyz);
-            vLighting = max(dot(normal, normalize(uLightDirection)), 0.0);
-            gl_Position = uViewProjectionMatrix * uModelMatrix * vec4(aPosition, 1.0);
+            vWorldPosition = worldPosition.xyz;
+            vLightDirection = normalize(uLightDirection);
+            vLighting = (uFlatShading || uFullBright) ? 1.0 : max(dot(normal, vLightDirection), 0.0);
+            gl_Position = uViewProjectionMatrix * worldPosition;
         }
     """
 
     private const val TRIANGLE_FRAGMENT_SHADER = """
+        #extension GL_OES_standard_derivatives : enable
         precision mediump float;
         uniform vec4 uColor;
+        uniform bool uFlatShading;
+        uniform bool uFullBright;
         varying float vLighting;
+        varying vec3 vWorldPosition;
+        varying vec3 vLightDirection;
 
         void main() {
-            float diffuse = 0.30 + 0.70 * vLighting;
+            float lighting = vLighting;
+            if (uFullBright) {
+                gl_FragColor = uColor;
+                return;
+            }
+            if (uFlatShading) {
+                vec3 dx = dFdx(vWorldPosition);
+                vec3 dy = dFdy(vWorldPosition);
+                vec3 normal = normalize(cross(dx, dy));
+                lighting = abs(dot(normal, vLightDirection));
+            }
+            float diffuse = 0.30 + 0.70 * lighting;
             gl_FragColor = vec4(uColor.rgb * diffuse, uColor.a);
         }
     """

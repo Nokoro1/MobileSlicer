@@ -11,7 +11,9 @@ import android.opengl.EGLSurface
 import android.opengl.GLES20
 import android.opengl.GLUtils
 import android.opengl.Matrix
+import android.os.SystemClock
 import android.util.AttributeSet
+import android.util.Log
 import android.view.MotionEvent
 import android.view.PixelCopy
 import android.view.ScaleGestureDetector
@@ -25,44 +27,96 @@ import android.os.Looper
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.nio.IntBuffer
 import kotlin.math.abs
 import kotlin.math.max
 
 internal fun uploadTriangleData(vertices: FloatArray, normals: FloatArray): TriangleUpload {
-    require(vertices.size == normals.size) { "Vertex and normal buffers must have matching sizes." }
-    require(vertices.size % 3 == 0) { "Triangle vertex buffer is malformed." }
+    val startedAt = SystemClock.elapsedRealtime()
+    val uploadData = prepareTriangleUploadData(vertices = vertices, normals = normals)
+    return uploadPreparedTriangleData(uploadData, startedAt)
+}
+
+internal fun uploadTriangleMesh(mesh: StlMesh): TriangleUpload {
+    val startedAt = SystemClock.elapsedRealtime()
+    val uploadData = prepareTriangleUploadData(mesh)
+    return uploadPreparedTriangleData(uploadData, startedAt)
+}
+
+private fun uploadPreparedTriangleData(uploadData: TriangleUploadData, startedAt: Long): TriangleUpload {
     val vertexBuffer = IntArray(1)
     val normalBuffer = IntArray(1)
+    val indexBuffer = IntArray(1)
     GLES20.glGenBuffers(1, vertexBuffer, 0)
-    GLES20.glGenBuffers(1, normalBuffer, 0)
+    if (uploadData.normals.isNotEmpty()) {
+        GLES20.glGenBuffers(1, normalBuffer, 0)
+    }
+    if (uploadData.indexed) {
+        GLES20.glGenBuffers(1, indexBuffer, 0)
+    }
 
     GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vertexBuffer[0])
     GLES20.glBufferData(
         GLES20.GL_ARRAY_BUFFER,
-        vertices.size * Float.SIZE_BYTES,
-        floatBufferOf(vertices),
+        uploadData.vertices.size * Float.SIZE_BYTES,
+        floatBufferOf(uploadData.vertices),
         GLES20.GL_STATIC_DRAW
     )
 
-    GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, normalBuffer[0])
-    GLES20.glBufferData(
-        GLES20.GL_ARRAY_BUFFER,
-        normals.size * Float.SIZE_BYTES,
-        floatBufferOf(normals),
-        GLES20.GL_STATIC_DRAW
-    )
+    if (uploadData.normals.isNotEmpty()) {
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, normalBuffer[0])
+        GLES20.glBufferData(
+            GLES20.GL_ARRAY_BUFFER,
+            uploadData.normals.size * Float.SIZE_BYTES,
+            floatBufferOf(uploadData.normals),
+            GLES20.GL_STATIC_DRAW
+        )
+    }
 
+    uploadData.indices?.let { indices ->
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, indexBuffer[0])
+        GLES20.glBufferData(
+            GLES20.GL_ELEMENT_ARRAY_BUFFER,
+            indices.size * Int.SIZE_BYTES,
+            intBufferOf(indices),
+            GLES20.GL_STATIC_DRAW
+        )
+    }
+
+    val glError = GLES20.glGetError()
     GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+    GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
+    val uploadMs = SystemClock.elapsedRealtime() - startedAt
+    if (uploadMs >= 16L || uploadData.sourceVertexCount >= 150_000 || glError != GLES20.GL_NO_ERROR) {
+        Log.i(
+            "MobileSlicerPerf",
+            "workspace_triangle_upload sourceVertices=${uploadData.sourceVertexCount} " +
+                "uploadedVertices=${uploadData.vertexCount} indexed=${uploadData.indexed} flatShaded=${uploadData.flatShaded} " +
+                "indices=${uploadData.indexCount} bytes=${uploadData.uploadBytes} ms=$uploadMs glError=$glError"
+        )
+    }
     return TriangleUpload(
         vertexBufferId = vertexBuffer[0],
         normalBufferId = normalBuffer[0],
-        vertexCount = vertices.size / 3
+        vertexCount = uploadData.vertexCount,
+        indexBufferId = indexBuffer[0],
+        indexCount = uploadData.indexCount,
+        sourceVertexCount = uploadData.sourceVertexCount,
+        uploadBytes = uploadData.uploadBytes,
+        uploadMs = uploadMs,
+        glError = glError,
+        flatShaded = uploadData.flatShaded
     )
 }
 
 internal fun deleteTriangleUpload(upload: TriangleUpload) {
     GLES20.glDeleteBuffers(1, intArrayOf(upload.vertexBufferId), 0)
-    GLES20.glDeleteBuffers(1, intArrayOf(upload.normalBufferId), 0)
+    if (upload.normalBufferId != 0) {
+        GLES20.glDeleteBuffers(1, intArrayOf(upload.normalBufferId), 0)
+    }
+    if (upload.indexBufferId != 0) {
+        GLES20.glDeleteBuffers(1, intArrayOf(upload.indexBufferId), 0)
+    }
 }
 
 internal fun uploadTriangleDataIfNotEmpty(geometry: TriangleGeometry): TriangleUpload? =
@@ -156,6 +210,16 @@ internal fun floatBufferOf(values: FloatArray): FloatBuffer {
     return ByteBuffer.allocateDirect(values.size * Float.SIZE_BYTES)
         .order(ByteOrder.nativeOrder())
         .asFloatBuffer()
+        .apply {
+            put(values)
+            position(0)
+        }
+}
+
+internal fun intBufferOf(values: IntArray): IntBuffer {
+    return ByteBuffer.allocateDirect(values.size * Int.SIZE_BYTES)
+        .order(ByteOrder.nativeOrder())
+        .asIntBuffer()
         .apply {
             put(values)
             position(0)

@@ -1,5 +1,9 @@
 package com.mobileslicer.viewer
 
+import android.os.SystemClock
+import android.util.Log
+import java.util.Collections
+import java.util.IdentityHashMap
 import kotlin.math.max
 
 internal class WorkspaceObjectUploadManager {
@@ -16,25 +20,48 @@ internal class WorkspaceObjectUploadManager {
         bed: PrinterBedSpec,
         camera: ViewerCamera
     ) {
-        clearObjectUploads()
+        val startedAt = SystemClock.elapsedRealtime()
         if (objects.isEmpty()) {
+            clearObjectUploads()
             clearSelectedFootprint()
             plateSceneCameraInitialized = false
             return
         }
 
+        val previousUploadsById = uploads.associateBy { it.id }
+        val reusableUploadsByMesh = IdentityHashMap<StlMesh, TriangleUpload>()
+        uploads.forEach { upload ->
+            reusableUploadsByMesh.putIfAbsent(upload.mesh, upload.upload)
+        }
+        val nextUploadsByMesh = IdentityHashMap<StlMesh, TriangleUpload>()
+        val retainedUploads = Collections.newSetFromMap(IdentityHashMap<TriangleUpload, Boolean>())
         val nextUploads = mutableListOf<ModelObjectUpload>()
         var maxSize = 40f
+        var reusedUploadCount = 0
+        var createdUploadCount = 0
         for (plateObject in objects) {
             val mesh = plateObject.mesh
             if (mesh.triangleCount <= 0) continue
+            val reuse = reusableWorkspaceObjectUpload(
+                plateObject = plateObject,
+                previousUploadsById = previousUploadsById,
+                nextUploadsByMesh = nextUploadsByMesh,
+                reusableUploadsByMesh = reusableUploadsByMesh
+            )
+            val reusableUpload = reuse.upload
+                ?: uploadTriangleMesh(mesh).also { createdUploadCount++ }
+            if (reuse.upload != null) {
+                reusedUploadCount++
+            }
+            retainedUploads.add(reusableUpload)
+            nextUploadsByMesh[mesh] = reusableUpload
             val placement = buildModelPlacement(mesh, plateObject.transform, bed)
             maxSize = max(maxSize, max(max(placement.sizeX, placement.sizeY), placement.sizeZ))
             nextUploads.add(
                 ModelObjectUpload(
                     id = plateObject.id,
                     mesh = mesh,
-                    upload = uploadTriangleData(vertices = mesh.vertices, normals = mesh.normals),
+                    upload = reusableUpload,
                     modelMatrix = placement.matrix,
                     centerX = placement.centerX,
                     centerY = placement.centerY,
@@ -48,8 +75,17 @@ internal class WorkspaceObjectUploadManager {
                 )
             )
         }
+        val deletedUploadCount = deleteUnusedObjectUploads(retainedUploads)
         uploads = nextUploads
         uploadSelectedFootprint(nextUploads.firstOrNull { it.selected })
+        val totalMs = SystemClock.elapsedRealtime() - startedAt
+        if (totalMs >= 16L || createdUploadCount > 0 || deletedUploadCount > 0) {
+            Log.i(
+                "MobileSlicerPerf",
+                "workspace_object_upload objects=${nextUploads.size} reused=$reusedUploadCount " +
+                    "created=$createdUploadCount deleted=$deletedUploadCount ms=$totalMs"
+            )
+        }
 
         if (plateSceneCameraInitialized) {
             camera.updatePlateObjectsSceneKeepingView(bed, maxSize)
@@ -89,8 +125,25 @@ internal class WorkspaceObjectUploadManager {
     }
 
     private fun clearObjectUploads() {
-        uploads.forEach { deleteTriangleUpload(it.upload) }
+        deleteUniqueUploads(uploads.map { it.upload })
         uploads = emptyList()
+    }
+
+    private fun deleteUnusedObjectUploads(retainedUploads: Set<TriangleUpload>): Int {
+        val unusedUploads = uploads
+            .map { it.upload }
+            .filterNot { retainedUploads.contains(it) }
+        return deleteUniqueUploads(unusedUploads)
+    }
+
+    private fun deleteUniqueUploads(uploadList: List<TriangleUpload>): Int {
+        val deletedUploads = Collections.newSetFromMap(IdentityHashMap<TriangleUpload, Boolean>())
+        uploadList.forEach { upload ->
+            if (deletedUploads.add(upload)) {
+                deleteTriangleUpload(upload)
+            }
+        }
+        return deletedUploads.size
     }
 
     private fun uploadSelectedFootprint(selected: ModelObjectUpload?) {
@@ -103,4 +156,38 @@ internal class WorkspaceObjectUploadManager {
         selectedFootprintUpload?.let(::deleteTriangleUpload)
         selectedFootprintUpload = null
     }
+}
+
+internal data class WorkspaceObjectUploadReuse(
+    val upload: TriangleUpload?,
+    val source: WorkspaceObjectUploadReuseSource
+)
+
+internal enum class WorkspaceObjectUploadReuseSource {
+    None,
+    SameObject,
+    CurrentMesh,
+    PreviousMesh
+}
+
+internal fun reusableWorkspaceObjectUpload(
+    plateObject: ViewerPlateObject,
+    previousUploadsById: Map<Long, ModelObjectUpload>,
+    nextUploadsByMesh: IdentityHashMap<StlMesh, TriangleUpload>,
+    reusableUploadsByMesh: IdentityHashMap<StlMesh, TriangleUpload>
+): WorkspaceObjectUploadReuse {
+    val mesh = plateObject.mesh
+    previousUploadsById[plateObject.id]
+        ?.takeIf { it.mesh === mesh }
+        ?.upload
+        ?.let { upload ->
+            return WorkspaceObjectUploadReuse(upload, WorkspaceObjectUploadReuseSource.SameObject)
+        }
+    nextUploadsByMesh[mesh]?.let { upload ->
+        return WorkspaceObjectUploadReuse(upload, WorkspaceObjectUploadReuseSource.CurrentMesh)
+    }
+    reusableUploadsByMesh[mesh]?.let { upload ->
+        return WorkspaceObjectUploadReuse(upload, WorkspaceObjectUploadReuseSource.PreviousMesh)
+    }
+    return WorkspaceObjectUploadReuse(null, WorkspaceObjectUploadReuseSource.None)
 }

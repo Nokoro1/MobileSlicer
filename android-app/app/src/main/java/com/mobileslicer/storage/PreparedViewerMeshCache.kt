@@ -63,7 +63,7 @@ internal class PreparedViewerMeshCache(
     }
 
     private fun byteSizeOf(preparedMesh: PreparedViewerMesh): Long =
-        (preparedMesh.mesh.vertices.size.toLong() + preparedMesh.mesh.normals.size.toLong()) * Float.SIZE_BYTES
+        preparedMesh.renderArrayBytes
 
     private companion object {
         private const val DEFAULT_MAX_BYTES = 96L * 1024L * 1024L

@@ -15,6 +15,7 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/thread.hpp>
+#include <cmath>
 #include <float.h>
 
 namespace {
@@ -10912,10 +10913,16 @@ Points get_bed_shape(const SLAPrinterConfig &cfg) { return to_points(make_counte
 Polygons get_bed_excluded_area(const PrintConfig& cfg)
 {
     const Pointfs exclude_area_points = cfg.bed_exclude_area.values;
+    if (exclude_area_points.size() < 3) {
+        return {};
+    }
 
     Polygon exclude_poly;
     for (int i = 0; i < exclude_area_points.size(); i++) {
         auto pt = exclude_area_points[i];
+        if (!std::isfinite(pt.x()) || !std::isfinite(pt.y())) {
+            return {};
+        }
         exclude_poly.points.emplace_back(scale_(pt.x()), scale_(pt.y()));
     }
 

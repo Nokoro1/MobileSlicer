@@ -66,4 +66,17 @@ class ModelLoaderNavigationTest {
             )
         )
     }
+
+    @Test
+    fun backNavigationReturnsScannerToHome() {
+        assertEquals(
+            ModelLoaderBackNavigationPlan(AppScreen.Home, WorkspaceMode.Prepare),
+            planModelLoaderBackNavigation(
+                currentScreen = AppScreen.Scanner,
+                workspaceMode = WorkspaceMode.Prepare,
+                profilesReturnScreenName = AppScreen.Workspace.name,
+                printerBrowserReturnScreenName = AppScreen.Workspace.name
+            )
+        )
+    }
 }

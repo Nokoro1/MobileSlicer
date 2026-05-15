@@ -47,7 +47,6 @@ import com.mobileslicer.storage.SavedProjectPlateObject
 import com.mobileslicer.workspace.AppScreen
 import com.mobileslicer.workspace.ImportedModelFormat
 import com.mobileslicer.workspace.ModelLoadResult
-import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.workspace.SliceResult
 import com.mobileslicer.workspace.WorkspaceMode
 import com.mobileslicer.workspace.WorkspacePreparationResult
@@ -297,7 +296,7 @@ internal fun transformedObjectBoundsOnPlate(
 
     val offsetX = transform.centerXmm - transformedCenter.x
     val offsetY = transform.centerYmm - transformedCenter.y
-    val offsetZ = -rotatedMinZ
+    val offsetZ = transform.zOffsetMm - rotatedMinZ
     return PlateBounds(
         minX = rotatedMinX + offsetX,
         maxX = rotatedMaxX + offsetX,

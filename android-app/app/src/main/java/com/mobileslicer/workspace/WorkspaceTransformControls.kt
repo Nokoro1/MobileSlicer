@@ -161,6 +161,7 @@ internal fun TransformPopoverContent(
     onLayFaceRequested: () -> Unit,
     onPaintModeSelected: (ViewerPaintMode) -> Unit,
     modifier: Modifier = Modifier,
+    platePlanningInProgress: Boolean = false,
     onSplitToObjectsRequested: () -> Unit = {},
     onSplitToPartsRequested: () -> Unit = {},
     cutBounds: MeshBounds? = null,
@@ -438,6 +439,7 @@ internal fun TransformPopoverContent(
                     onRotateBy = ::rotateBy,
                     onAutoOrientObjects = ::runAutoOrient,
                     onAutoArrangeObjects = ::runAutoArrange,
+                    platePlanningInProgress = platePlanningInProgress,
                     onLayFaceRequested = onLayFaceRequested,
                     onPaintModeSelected = onPaintModeSelected,
                     onSplitToObjectsRequested = onSplitToObjectsRequested,
@@ -557,6 +559,7 @@ private fun TransformToolPanel(
     onRotateBy: (Float, Float, Float) -> Unit,
     onAutoOrientObjects: () -> Unit,
     onAutoArrangeObjects: () -> Unit,
+    platePlanningInProgress: Boolean,
     onLayFaceRequested: () -> Unit,
     onPaintModeSelected: (ViewerPaintMode) -> Unit,
     onSplitToObjectsRequested: () -> Unit,
@@ -650,6 +653,7 @@ private fun TransformToolPanel(
         )
         TransformToolTab.AutoOrient -> TransformAutoOrientToolPanel(
             compactLayout = compactLayout,
+            planningInProgress = platePlanningInProgress,
             onAutoOrientObjects = onAutoOrientObjects,
             onLayFaceRequested = onLayFaceRequested
         )
@@ -660,6 +664,7 @@ private fun TransformToolPanel(
         TransformToolTab.AutoArrange -> TransformAutoArrangeToolPanel(
             compactLayout = compactLayout,
             allowArrangeRotation = allowArrangeRotation,
+            planningInProgress = platePlanningInProgress,
             onAllowArrangeRotationChanged = onAllowArrangeRotationChanged,
             onAutoArrangeObjects = onAutoArrangeObjects
         )
@@ -1275,6 +1280,7 @@ private fun CutGrooveControls(
 @Composable
 private fun TransformAutoOrientToolPanel(
     compactLayout: Boolean,
+    planningInProgress: Boolean,
     onAutoOrientObjects: () -> Unit,
     onLayFaceRequested: () -> Unit
 ) {
@@ -1285,15 +1291,17 @@ private fun TransformAutoOrientToolPanel(
     ) {
         FilledTonalButton(
             onClick = onAutoOrientObjects,
+            enabled = !planningInProgress,
             modifier = Modifier
                 .weight(1f)
                 .height(actionHeight),
             contentPadding = PaddingValues(horizontal = if (compactLayout) 9.dp else 12.dp, vertical = 7.dp)
         ) {
-            Text("Auto orient", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (planningInProgress) "Orienting..." else "Auto orient", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         FilledTonalButton(
             onClick = onLayFaceRequested,
+            enabled = !planningInProgress,
             modifier = Modifier
                 .weight(1f)
                 .height(actionHeight),
@@ -1327,6 +1335,7 @@ private fun TransformPaintToolPanel(
 private fun TransformAutoArrangeToolPanel(
     compactLayout: Boolean,
     allowArrangeRotation: Boolean,
+    planningInProgress: Boolean,
     onAllowArrangeRotationChanged: (Boolean) -> Unit,
     onAutoArrangeObjects: () -> Unit
 ) {
@@ -1344,60 +1353,25 @@ private fun TransformAutoArrangeToolPanel(
                 selected = !allowArrangeRotation,
                 compact = compactLayout,
                 modifier = Modifier.weight(1f)
-            ) { onAllowArrangeRotationChanged(false) }
+            ) { if (!planningInProgress) onAllowArrangeRotationChanged(false) }
             TransformQuickButton(
                 label = "Rotate to fit",
                 selected = allowArrangeRotation,
                 compact = compactLayout,
                 modifier = Modifier.weight(1f)
-            ) { onAllowArrangeRotationChanged(true) }
+            ) { if (!planningInProgress) onAllowArrangeRotationChanged(true) }
         }
         FilledTonalButton(
             onClick = onAutoArrangeObjects,
+            enabled = !planningInProgress,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(actionHeight),
             contentPadding = PaddingValues(horizontal = if (compactLayout) 9.dp else 12.dp, vertical = 7.dp)
         ) {
-            Text("Auto arrange", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (planningInProgress) "Arranging..." else "Auto arrange", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
-}
-
-@Composable
-internal fun TransformToolIcon(
-    type: TransformToolTab,
-    tint: Color,
-    modifier: Modifier = Modifier
-) {
-    Icon(
-        painter = painterResource(type.iconRes()),
-        contentDescription = type.contentDescription(),
-        tint = tint,
-        modifier = modifier
-    )
-}
-
-private fun TransformToolTab.iconRes(): Int = when (this) {
-    TransformToolTab.Move -> R.drawable.ic_tool_move
-    TransformToolTab.Rotate -> R.drawable.ic_tool_rotate
-    TransformToolTab.Scale -> R.drawable.ic_tool_scale
-    TransformToolTab.Split -> R.drawable.ic_tool_split
-    TransformToolTab.Cut -> R.drawable.ic_tool_cut
-    TransformToolTab.Paint -> R.drawable.ic_tool_paint
-    TransformToolTab.AutoOrient -> R.drawable.ic_tool_orient
-    TransformToolTab.AutoArrange -> R.drawable.ic_tool_arrange
-}
-
-private fun TransformToolTab.contentDescription(): String = when (this) {
-    TransformToolTab.Move -> "Move"
-    TransformToolTab.Rotate -> "Rotate"
-    TransformToolTab.Scale -> "Scale"
-    TransformToolTab.Split -> "Split"
-    TransformToolTab.Cut -> "Cut"
-    TransformToolTab.Paint -> "Paint"
-    TransformToolTab.AutoOrient -> "Auto orient"
-    TransformToolTab.AutoArrange -> "Auto arrange"
 }
 
 private fun ViewerModelTransform.snapRotationTo(stepDegrees: Float): ViewerModelTransform =
@@ -1411,91 +1385,6 @@ private fun ViewerModelTransform.snapRotationTo(stepDegrees: Float): ViewerModel
 private fun snapDegrees(value: Float, stepDegrees: Float): Float {
     val step = stepDegrees.coerceAtLeast(1f)
     return normalizeDegrees(kotlin.math.round(value / step) * step)
-}
-
-@Composable
-private fun CutSectionLabel(label: String) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelMedium,
-        color = appTitleColor(),
-        fontWeight = FontWeight.SemiBold
-    )
-}
-
-@Composable
-private fun TransformQuickButton(
-    label: String,
-    modifier: Modifier = Modifier,
-    selected: Boolean = false,
-    onClick: () -> Unit
-) {
-    FilledTonalButton(
-        onClick = onClick,
-        modifier = modifier.height(38.dp),
-        colors = if (selected) {
-            ButtonDefaults.filledTonalButtonColors(
-                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            )
-        } else {
-            ButtonDefaults.filledTonalButtonColors()
-        },
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun TransformQuickButton(
-    label: String,
-    compact: Boolean,
-    modifier: Modifier = Modifier,
-    selected: Boolean = false,
-    onClick: () -> Unit
-) {
-    FilledTonalButton(
-        onClick = onClick,
-        modifier = modifier.height(if (compact) 32.dp else 38.dp),
-        colors = if (selected) {
-            ButtonDefaults.filledTonalButtonColors(
-                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            )
-        } else {
-            ButtonDefaults.filledTonalButtonColors()
-        },
-        contentPadding = PaddingValues(horizontal = if (compact) 8.dp else 10.dp, vertical = 5.dp)
-    ) {
-        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun PaintModeToolButton(label: String, compact: Boolean, onClick: () -> Unit) {
-    FilledTonalButton(
-        onClick = onClick,
-        modifier = Modifier.height(if (compact) 34.dp else 40.dp),
-        contentPadding = PaddingValues(horizontal = if (compact) 9.dp else 12.dp, vertical = 7.dp)
-    ) {
-        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun CutStepButton(label: String, onClick: () -> Unit) {
-    FilledTonalButton(
-        onClick = onClick,
-        modifier = Modifier.height(28.dp),
-        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp)
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1
-        )
-    }
 }
 
 @Composable
@@ -1728,149 +1617,3 @@ private fun CutValueDialog(
         }
     )
 }
-
-@Composable
-internal fun TransformValueDialog(
-    field: TransformNumericField,
-    transform: ViewerModelTransform,
-    printerBed: PrinterBedSpec,
-    onDismiss: () -> Unit,
-    onApply: (Float) -> Unit
-) {
-    val (title, initialValue, suffix) = when (field) {
-        TransformNumericField.MoveX -> Triple("X position", transform.centerXmm, "mm")
-        TransformNumericField.MoveY -> Triple("Y position", transform.centerYmm, "mm")
-        TransformNumericField.RotateX -> Triple("X rotation", transform.rotationXDegrees, "deg")
-        TransformNumericField.RotateY -> Triple("Y rotation", transform.rotationYDegrees, "deg")
-        TransformNumericField.RotateZ -> Triple("Z rotation", transform.rotationZDegrees, "deg")
-        TransformNumericField.Scale -> Triple("Scale", transform.uniformScale * 100f, "%")
-    }
-    var text by remember(field, initialValue) {
-        mutableStateOf(String.format(Locale.US, "%.1f", initialValue))
-    }
-    val parsedValue = text.toFloatOrNull()
-    val validValue = parsedValue?.let { value ->
-        when (field) {
-            TransformNumericField.MoveX -> value.coerceIn(0f, printerBed.widthMm)
-            TransformNumericField.MoveY -> value.coerceIn(0f, printerBed.depthMm)
-            TransformNumericField.RotateX,
-            TransformNumericField.RotateY,
-            TransformNumericField.RotateZ -> normalizeDegrees(value)
-            TransformNumericField.Scale -> value.coerceIn(5f, 2_000f)
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true,
-                suffix = { Text(suffix) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { validValue?.let(onApply) },
-                enabled = validValue != null
-            ) {
-                Text("Apply")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
-internal fun TransformSliderRow(
-    label: String,
-    valueText: String,
-    value: Float,
-    range: ClosedFloatingPointRange<Float>,
-    onValueChange: (Float) -> Unit,
-    onValueClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    beforeValueContent: @Composable (() -> Unit)? = null
-) {
-    val titleColor = appTitleColor()
-    val bodyColor = appBodyColor()
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(0.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = titleColor,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            beforeValueContent?.invoke()
-            Text(
-                text = valueText,
-                style = MaterialTheme.typography.labelMedium,
-                color = bodyColor,
-                maxLines = 1,
-                overflow = TextOverflow.Clip,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(appCardColorMuted().copy(alpha = 0.76f))
-                    .border(1.dp, appOutlineColor().copy(alpha = 0.36f), RoundedCornerShape(9.dp))
-                    .clickable(onClick = onValueClick)
-                    .widthIn(min = 58.dp)
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
-            )
-        }
-        Slider(
-            value = value.coerceIn(range.start, range.endInclusive),
-            onValueChange = onValueChange,
-            valueRange = range,
-            colors = workspaceSliderColors(),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(28.dp)
-        )
-    }
-}
-
-@Composable
-internal fun workspaceSliderColors() = SliderDefaults.colors(
-    thumbColor = MaterialTheme.colorScheme.primary,
-    activeTrackColor = MaterialTheme.colorScheme.primary,
-    activeTickColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.38f),
-    inactiveTrackColor = if (LocalAppDarkTheme.current) {
-        Color(0xFF465160)
-    } else {
-        Color(0xFFD7DCE3)
-    },
-    inactiveTickColor = if (LocalAppDarkTheme.current) {
-        Color(0xFF6D7784)
-    } else {
-        Color(0xFFAEB6C0)
-    },
-    disabledThumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.62f),
-    disabledActiveTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.46f),
-    disabledActiveTickColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.24f),
-    disabledInactiveTrackColor = if (LocalAppDarkTheme.current) {
-        Color(0xFF465160).copy(alpha = 0.72f)
-    } else {
-        Color(0xFFD7DCE3)
-    },
-    disabledInactiveTickColor = if (LocalAppDarkTheme.current) {
-        Color(0xFF6D7784).copy(alpha = 0.72f)
-    } else {
-        Color(0xFFAEB6C0)
-    }
-)

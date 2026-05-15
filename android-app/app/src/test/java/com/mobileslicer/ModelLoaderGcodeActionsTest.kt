@@ -9,6 +9,7 @@ import com.mobileslicer.profiles.ProfileStoreRepository
 import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.ViewerModelTransform
 import com.mobileslicer.workspace.ImportedModelFormat
+import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateObject
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -235,6 +236,26 @@ class ModelLoaderGcodeActionsTest {
         )
 
         assertEquals("http://printer.local/", result.getOrNull())
+    }
+
+    @Test
+    fun exportFilenameMaterialUsesActivePlateSlotInsteadOfSelectedFallback() {
+        val fallbackAbs = ProfileStoreRepository.fallbackFilamentProfile().copy(materialType = "ABS")
+        val material = activeExportFilamentMaterial(
+            plateObjects = listOf(plateObject("benchy").copy(filamentSlotIndex = 1)),
+            plateFilamentSlots = listOf(
+                PlateFilamentSlot(
+                    index = 1,
+                    filamentProfileId = "slot_pla",
+                    label = "SUNLU PLA+ 2.0",
+                    materialType = "PLA",
+                    colorHex = "#E53935"
+                )
+            ),
+            fallbackFilament = fallbackAbs
+        )
+
+        assertEquals("PLA", material)
     }
 
     private fun plateObject(label: String): PlateObject =

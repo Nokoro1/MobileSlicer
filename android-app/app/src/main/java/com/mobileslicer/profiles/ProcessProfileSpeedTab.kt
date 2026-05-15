@@ -143,6 +143,8 @@ internal fun ProcessSpeedTabContent(
             ProfileTextField(overhang4_4Speed, onOverhang4_4SpeedChange, "Overhang 75% speed (mm/s or %)")
             ProfileTextField(bridgeSpeed, onBridgeSpeedChange, "Bridge (mm/s)", KeyboardType.Decimal)
             ProfileTextField(internalBridgeSpeed, onInternalBridgeSpeedChange, "Internal bridge speed (mm/s or %)")
+            ProfileTextField(internalBridgeFlowRatio, onInternalBridgeFlowRatioChange, "Internal bridge flow ratio", KeyboardType.Decimal)
+            ProfileTextField(internalBridgeSupportThickness, onInternalBridgeSupportThicknessChange, "Internal bridge support thickness (mm or %)")
             ProfileGroupHeader("Travel speed")
             ProfileTextField(travelSpeed, onTravelSpeedChange, "Travel (mm/s)", KeyboardType.Decimal)
             ProfileGroupHeader("Acceleration")

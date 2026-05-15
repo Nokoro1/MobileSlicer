@@ -209,14 +209,13 @@ internal fun buildCutFaceFillGeometry(mesh: StlMesh, plane: CutPlaneGeometry): P
 internal fun buildCutClippedObjectGeometry(mesh: StlMesh, plane: CutPlaneGeometry): Pair<FloatArray, FloatArray> {
     val sourceVertices = mesh.vertices
     val sourceNormals = mesh.normals
-    val vertices = ArrayList<Float>(sourceVertices.size)
-    val normals = ArrayList<Float>(sourceNormals.size)
-    var index = 0
-    while (index + 8 < sourceVertices.size) {
+    val vertices = ArrayList<Float>(mesh.triangleCount * 9)
+    val normals = ArrayList<Float>(mesh.triangleCount * 9)
+    mesh.forEachTriangleVertexOffsets { _, a, b, c ->
         val triangle = listOf(
-            cutClipVertex(sourceVertices, sourceNormals, index, plane),
-            cutClipVertex(sourceVertices, sourceNormals, index + 3, plane),
-            cutClipVertex(sourceVertices, sourceNormals, index + 6, plane)
+            cutClipVertex(sourceVertices, sourceNormals, a, plane),
+            cutClipVertex(sourceVertices, sourceNormals, b, plane),
+            cutClipVertex(sourceVertices, sourceNormals, c, plane)
         )
         val clipped = clipTriangleToCutPlane(triangle)
         if (clipped.size >= 3) {
@@ -226,7 +225,6 @@ internal fun buildCutClippedObjectGeometry(mesh: StlMesh, plane: CutPlaneGeometr
                 appendCutClipVertex(clipped[fanIndex + 1], vertices, normals)
             }
         }
-        index += 9
     }
     return vertices.toFloatArray() to normals.toFloatArray()
 }
@@ -328,11 +326,10 @@ private fun StlMesh.cutPlaneSegments(plane: CutPlaneGeometry): List<CutPlaneSegm
     val pointA = FloatArray(3)
     val pointB = FloatArray(3)
     val pointC = FloatArray(3)
-    var index = 0
-    while (index + 8 < vertices.size) {
-        readVertex(vertices, index, pointA)
-        readVertex(vertices, index + 3, pointB)
-        readVertex(vertices, index + 6, pointC)
+    forEachTriangleVertexOffsets { _, a, b, c ->
+        readVertex(vertices, a, pointA)
+        readVertex(vertices, b, pointB)
+        readVertex(vertices, c, pointC)
         val dA = signedDistanceToCutPlane(pointA, plane)
         val dB = signedDistanceToCutPlane(pointB, plane)
         val dC = signedDistanceToCutPlane(pointC, plane)
@@ -350,7 +347,6 @@ private fun StlMesh.cutPlaneSegments(plane: CutPlaneGeometry): List<CutPlaneSegm
                 segments.add(CutPlaneSegment(first[0], first[1], second[0], second[1]))
             }
         }
-        index += 9
     }
     return segments
 }

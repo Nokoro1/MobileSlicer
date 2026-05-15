@@ -323,6 +323,7 @@ function run_in_docker() {
     local host_user
     local -a build_args
     local -a container_env
+    local -a container_args
 
     container_cli=$(resolve_container_cli)
     runner_image=$(get_docker_runner_image)
@@ -355,10 +356,16 @@ function run_in_docker() {
     if [[ -n "${ORCA_UPDATER_SIG_KEY}" ]] ; then
         container_env+=( -e "ORCA_UPDATER_SIG_KEY=${ORCA_UPDATER_SIG_KEY}" )
     fi
+    container_args=()
+    if [[ "$(basename "${container_cli}")" == "podman" ]] ; then
+        container_args+=(--userns=keep-id)
+        container_env+=( -e "ORCA_CONTAINER_KEEP_ID=1" )
+    fi
 
     ensure_docker_runner_image "${container_cli}" "${runner_image}"
 
     printf '%q ' "${container_cli}" run --rm -i \
+        "${container_args[@]}" \
         -v "${SCRIPT_PATH}:${container_workspace}" \
         -w "${container_workspace}" \
         "${container_env[@]}" \
@@ -370,12 +377,24 @@ function run_in_docker() {
     fi
 
     "${container_cli}" run --rm -i \
+        "${container_args[@]}" \
         -v "${SCRIPT_PATH}:${container_workspace}" \
         -w "${container_workspace}" \
         "${container_env[@]}" \
         "${runner_image}" \
         bash -s -- "${build_args[@]}" <<'EOF'
 set -e
+
+if [[ "${ORCA_CONTAINER_KEEP_ID:-}" == "1" ]] ; then
+    mkdir -p "${GITHUB_WORKSPACE}/deps/build/destdir"
+    cd "${GITHUB_WORKSPACE}"
+    if [[ "$#" -gt 0 ]] ; then
+        ./build_linux.sh "$@"
+    else
+        echo "No build steps were requested after container setup."
+    fi
+    exit 0
+fi
 
 function create_builder_user() {
     if [[ "${HOST_UID}" == "0" ]] ; then

@@ -13,13 +13,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,8 +78,10 @@ internal fun WorkspaceScreen(
     selectedPrinter: PrinterProfile,
     activeConfiguration: ActiveSlicerConfiguration,
     workspaceStatus: String,
+    showModelImportOverlay: Boolean,
     workspaceMode: WorkspaceMode,
     sliceInProgress: Boolean,
+    platePlanningInProgress: Boolean,
     sendToPrinterInProgress: Boolean,
     hasGeneratedGcode: Boolean,
     canSendToPrinter: Boolean,
@@ -120,6 +126,14 @@ internal fun WorkspaceScreen(
     onAutoArrangeObjects: (Boolean) -> Unit,
     onAddObject: () -> Unit,
     onOpenProfiles: () -> Unit,
+    onOpenObjectProcess: (Long?) -> Unit,
+    onAddModifierToObject: (Long) -> Unit,
+    onOpenModifierProcess: (Long, Long) -> Unit,
+    onToggleModifier: (Long, Long, Boolean) -> Unit,
+    onDeleteModifier: (Long, Long) -> Unit,
+    onCenterModifierOnObject: (Long, Long) -> Unit,
+    onRotateModifier: (Long, Long) -> Unit,
+    onModifierTransformChanged: (Long, Long, ViewerModelTransform) -> Unit,
     onSavePlate: (Bitmap?) -> Unit,
     onBack: () -> Unit,
     onFirstVisibleWorkspaceFrame: () -> Unit,
@@ -520,6 +534,14 @@ internal fun WorkspaceScreen(
                         if (selectedPlateObject == null) {
                             plateObjects.firstOrNull()?.id?.let(onPlateObjectSelected)
                         }
+                    } else if (objectId != null && objectId < 0L) {
+                        val parentObject = plateObjects.firstOrNull { objectOnPlate ->
+                            objectOnPlate.modifiers.any { modifier ->
+                                modifierViewerObjectId(objectOnPlate.id, modifier.id) == objectId
+                            }
+                        }
+                        primeTowerSelected = false
+                        onPlateObjectSelected(parentObject?.id)
                     } else {
                         primeTowerSelected = false
                         onPlateObjectSelected(objectId)
@@ -545,6 +567,23 @@ internal fun WorkspaceScreen(
                                 centerXmm = (currentTransform.centerXmm + deltaXmm)
                                     .coerceIn(0f, selectedPrinter.toBedSpec().widthMm),
                                 centerYmm = (currentTransform.centerYmm + deltaYmm)
+                                    .coerceIn(0f, selectedPrinter.toBedSpec().depthMm)
+                            )
+                        )
+                    }
+                } else if (!finished && canDragSelectedPlateObject && objectId < 0L) {
+                    plateObjects.firstNotNullOfOrNull { objectOnPlate ->
+                        objectOnPlate.modifiers.firstOrNull { modifier ->
+                            modifierViewerObjectId(objectOnPlate.id, modifier.id) == objectId
+                        }?.let { modifier -> objectOnPlate to modifier }
+                    }?.let { (objectOnPlate, modifier) ->
+                        onModifierTransformChanged(
+                            objectOnPlate.id,
+                            modifier.id,
+                            modifier.transform.copy(
+                                centerXmm = (modifier.transform.centerXmm + deltaXmm)
+                                    .coerceIn(0f, selectedPrinter.toBedSpec().widthMm),
+                                centerYmm = (modifier.transform.centerYmm + deltaYmm)
                                     .coerceIn(0f, selectedPrinter.toBedSpec().depthMm)
                             )
                         )
@@ -593,6 +632,11 @@ internal fun WorkspaceScreen(
                 }
             }
         )
+        if (showModelImportOverlay) {
+            ImportingModelOverlay(
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
         if (paintModeActive && isLandscape && paintControlsExpanded) {
             Box(
                 modifier = Modifier
@@ -672,6 +716,7 @@ internal fun WorkspaceScreen(
                 onTransformChanged = onModelTransformChanged,
                 onAutoOrientObjects = onAutoOrientObjects,
                 onAutoArrangeObjects = onAutoArrangeObjects,
+                platePlanningInProgress = platePlanningInProgress,
                 onLayFaceRequested = {
                     layFacePickPending = true
                 },
@@ -854,6 +899,7 @@ internal fun WorkspaceScreen(
             currentGcodeFileName = currentGcodeFileName,
             sliceSummary = sliceSummary,
             sliceInProgress = sliceInProgress,
+            platePlanningInProgress = platePlanningInProgress,
             previewPathVisibility = previewPathVisibility,
             previewDisplayMode = previewDisplayMode,
             plateObjects = plateObjects,
@@ -907,6 +953,26 @@ internal fun WorkspaceScreen(
                 onPlateObjectSelected(objectId)
                 showObjectListSheet = false
             },
+            onObjectProcessSelected = { objectId ->
+                onPlateObjectSelected(objectId)
+                showObjectListSheet = false
+                onOpenObjectProcess(objectId)
+            },
+            onAddModifierToObject = { objectId ->
+                onPlateObjectSelected(objectId)
+                showObjectListSheet = false
+                onAddModifierToObject(objectId)
+            },
+            onModifierProcessSelected = { objectId, modifierId ->
+                onPlateObjectSelected(objectId)
+                showObjectListSheet = false
+                onOpenModifierProcess(objectId, modifierId)
+            },
+            onToggleModifier = onToggleModifier,
+            onDeleteModifier = onDeleteModifier,
+            onCenterModifierOnObject = onCenterModifierOnObject,
+            onRotateModifier = onRotateModifier,
+            onModifierTransformChanged = onModifierTransformChanged,
             onObjectListDismiss = { showObjectListSheet = false },
             onPlateSettingsDismiss = { showPlateSettingsSheet = false },
             onActivePlateChanged = { plateId ->
@@ -945,5 +1011,32 @@ internal fun WorkspaceScreen(
             },
             onMissingPrinterConnectionDismiss = { missingPrinterConnectionDialog = false }
         )
+    }
+}
+
+@Composable
+private fun ImportingModelOverlay(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.widthIn(min = 180.dp, max = 280.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        tonalElevation = 8.dp,
+        shadowElevation = 10.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp),
+                strokeWidth = 3.dp
+            )
+            Spacer(modifier = Modifier.size(14.dp))
+            Text(
+                text = "Importing model",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
     }
 }

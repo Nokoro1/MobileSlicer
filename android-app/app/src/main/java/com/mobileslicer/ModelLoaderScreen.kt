@@ -1,23 +1,46 @@
 package com.mobileslicer
 
+import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
+import androidx.browser.customtabs.CustomTabsIntent
 import com.mobileslicer.profiles.ProfileStore
+import com.mobileslicer.profiles.FilamentProfile
 import com.mobileslicer.profiles.PrintHostType
 import com.mobileslicer.profiles.PrinterProfile
+import com.mobileslicer.profiles.ProcessProfile
 import com.mobileslicer.profiles.ProfilesScreen
 import com.mobileslicer.profiles.activeConfiguration
 import com.mobileslicer.profiles.toNativeSliceConfigBuildResult
+import com.mobileslicer.profiles.upsert
+import com.mobileslicer.profiles.visibleProcessesForPrinter
+import com.mobileslicer.profiles.withSelectedProcessForCurrentPrinter
 import com.mobileslicer.printerconnection.PrinterConnectionChoicesResult
 import com.mobileslicer.printerconnection.PrinterConnectionResult
 import com.mobileslicer.printerconnection.BambuLanPrintOptions
 import com.mobileslicer.printerconnection.PrinterUploadAction
 import com.mobileslicer.printerconnection.SimplyPrintOAuthResult
+import com.mobileslicer.scanner.ScannerScreen
 import com.mobileslicer.calibration.CalibrationJob
 import com.mobileslicer.calibration.PrinterCalibrationsScreen
 import com.mobileslicer.calibration.unsupportedFirmwareMessage
+import com.mobileslicer.modelsearch.importflow.FindImportState
+import com.mobileslicer.modelsearch.importflow.ImportFailureReason
+import com.mobileslicer.modelsearch.sources.ModelSourcePolicy
+import com.mobileslicer.modelsearch.sources.SourceRegistry
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseApiClient
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseAuthSession
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseAuthStore
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseApiException
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseFileResult
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseOAuthConfig
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseOAuthRedirectResult
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseSearchResult
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseSearchUiState
+import com.mobileslicer.modelsearch.ui.FindAndImportModelScreen
 import com.mobileslicer.storage.GCODE_MIME_TYPE
 import com.mobileslicer.storage.SavedProject
 import com.mobileslicer.workspace.AppScreen
@@ -28,6 +51,9 @@ import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateFlushVolumes
 import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.workspace.PlateObjectGeometrySource
+import com.mobileslicer.workspace.PlateObjectModifierMesh
+import com.mobileslicer.workspace.PlateObjectProcessOverride
+import com.mobileslicer.workspace.PlateProfileState
 import com.mobileslicer.workspace.PrimeTowerPlacementOverride
 import com.mobileslicer.workspace.SliceResult
 import com.mobileslicer.workspace.WorkspaceMode
@@ -55,8 +81,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,6 +94,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.StlMesh
 import com.mobileslicer.viewer.GcodePreviewPerformanceMode
@@ -117,6 +148,7 @@ private fun ViewerPaintMode.toWorkspacePaintMode(): PaintMode = when (this) {
 private fun PlateObject.splitSourcePath(): String =
     when (val source = geometrySource) {
         is PlateObjectGeometrySource.ThreeMfMeshExtract -> source.originalPath
+        is PlateObjectGeometrySource.StepMeshConvert -> source.originalPath
         else -> filePath
     }
 
@@ -219,6 +251,7 @@ private fun nativeCutGrooveJson(request: WorkspaceCutRequest): JSONObject? =
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
+@SuppressLint("SuspiciousIndentation")
 internal fun ModelLoaderScreen(
     initialOutput: String,
     initialProfileStore: ProfileStore,
@@ -242,11 +275,18 @@ internal fun ModelLoaderScreen(
     onProfileStoreChanged: (ProfileStore) -> Unit,
     onSavedProjectsChanged: (List<SavedProject>) -> Unit,
     workspaceSession: WorkspaceSessionViewModel,
+    externalModelImportUri: Uri?,
+    thingiverseOAuthRedirectUri: Uri?,
+    onExternalModelImportUriConsumed: () -> Unit,
+    onThingiverseOAuthRedirectConsumed: () -> Unit,
+    onFreshWorkspaceStarted: () -> Unit,
     onModelSelected: (Uri) -> ModelLoadResult,
+    onScannerWorkspaceModelSelected: (File) -> ModelLoadResult,
     onWorkspaceMeshPreparationRequested: (String) -> WorkspacePreparationResult,
     onSliceRequested: (String, List<PlateObject>, String?, StlMesh?, MeshBounds?, PrinterBedSpec, ViewerModelTransform?, String?) -> SliceResult,
     onNativeAutoArrangeRequested: suspend (String, List<PlateObject>, PrinterBedSpec, Boolean) -> PlatePlanningOutcome<PlateAutoArrangeResult>,
     onNativeAutoOrientRequested: suspend (String, List<PlateObject>, Long?, PrinterBedSpec) -> PlatePlanningOutcome<PlateAutoOrientResult>,
+    onNativePlatePlanningPrewarmRequested: suspend (List<PlateObject>, PrinterBedSpec) -> Boolean,
     onNativePlatePlanningCancelRequested: () -> Unit,
     onExportRequested: (Uri, String) -> String,
     onSavedProjectNativeLoadRequested: (SavedProject?, List<PlateObject>, PrinterBedSpec) -> Boolean,
@@ -261,6 +301,7 @@ internal fun ModelLoaderScreen(
     onShareRequested: (String, String) -> String
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var modelLoaded by workspaceSession.modelLoaded
     var currentModelLabel by workspaceSession.currentModelLabel
     var currentModelFilePath by workspaceSession.currentModelFilePath
@@ -286,6 +327,7 @@ internal fun ModelLoaderScreen(
     val plateObjects = workspaceSession.plateObjects
     val plateFilamentSlots = workspaceSession.plateFilamentSlots
     var plateFlushVolumes by workspaceSession.plateFlushVolumes
+    var activePlateProfileState by workspaceSession.activePlateProfileState
     var selectedPlateObjectId by workspaceSession.selectedPlateObjectId
     var nextPlateObjectId by workspaceSession.nextPlateObjectId
     var primeTowerPlacementOverride by remember { mutableStateOf<PrimeTowerPlacementOverride?>(null) }
@@ -305,8 +347,13 @@ internal fun ModelLoaderScreen(
     var savedProjects by remember { mutableStateOf(initialSavedProjects) }
     var currentScreen by workspaceSession.currentScreen
     var profilesReturnScreenName by workspaceSession.profilesReturnScreenName
+    var objectProcessEditorObjectId by remember { mutableStateOf<Long?>(null) }
+    var objectProcessEditorModifierId by remember { mutableStateOf<Long?>(null) }
+    var pendingModifierObjectId by remember { mutableStateOf<Long?>(null) }
     var currentSavedProjectId by workspaceSession.currentSavedProjectId
     var importInProgress by rememberSaveable { mutableStateOf(false) }
+    var importAndAutoArrangeInProgress by remember { mutableStateOf(false) }
+    var pendingOrcaMultiPlateArrangement by remember { mutableStateOf<PendingOrcaMultiPlateArrangement?>(null) }
     var appendNextImportToPlate by remember { mutableStateOf(false) }
     var missingProfileDialogMessage by remember { mutableStateOf<String?>(null) }
     var printerBrowserUrl by rememberSaveable { mutableStateOf<String?>(null) }
@@ -318,9 +365,46 @@ internal fun ModelLoaderScreen(
     var lastPrinterUploadRequest by remember { mutableStateOf<PrinterUploadRequest?>(null) }
     var transformInvalidationKey by remember { mutableLongStateOf(0L) }
     val coroutineScope = rememberCoroutineScope()
+    var cachedPlatePlanningConfigSignature by remember { mutableStateOf<String?>(null) }
+    var cachedPlatePlanningConfigJson by remember { mutableStateOf<String?>(null) }
+    var lastPlatePlanningPrewarmSignature by remember { mutableStateOf<String?>(null) }
+    var activePlatePlanningPrewarmSignature by remember { mutableStateOf<String?>(null) }
+    var findImportState by remember { mutableStateOf<FindImportState>(FindImportState.SourcePicker) }
+    var findImportPendingSourceId by rememberSaveable { mutableStateOf<String?>(null) }
+    var findImportPendingSourceOpenedAt by rememberSaveable { mutableStateOf<Long?>(null) }
+    val thingiverseAuthStore = remember { ThingiverseAuthStore(context) }
+    var thingiverseAuthSession by remember { mutableStateOf<ThingiverseAuthSession?>(thingiverseAuthStore.loadSession()) }
+    var thingiverseAuthMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var thingiverseOAuthBrowserOpen by rememberSaveable { mutableStateOf(false) }
+    var thingiverseOAuthAutoContinueAttempted by rememberSaveable { mutableStateOf(false) }
+    val thingiverseOAuthConfig = remember {
+        ThingiverseOAuthConfig(
+            clientId = BuildConfig.THINGIVERSE_CLIENT_ID,
+            backendBaseUrl = BuildConfig.THINGIVERSE_AUTH_BACKEND_URL,
+            redirectUri = BuildConfig.THINGIVERSE_REDIRECT_URI
+        )
+    }
+    val thingiverseApiToken = thingiverseAuthSession?.takeIf { it.isUsable }?.accessToken
+        ?: BuildConfig.THINGIVERSE_APP_TOKEN
+    val thingiverseApiClient = remember(thingiverseApiToken) { ThingiverseApiClient(thingiverseApiToken) }
+    var thingiverseQuery by rememberSaveable { mutableStateOf("") }
+    var thingiverseState by remember { mutableStateOf<ThingiverseSearchUiState>(ThingiverseSearchUiState.Idle) }
+    var thingiverseSearchPage by rememberSaveable { mutableIntStateOf(1) }
+    var lastThingiverseResults by remember { mutableStateOf<List<ThingiverseSearchResult>>(emptyList()) }
+    var lastThingiverseFiles by remember { mutableStateOf<List<ThingiverseFileResult>>(emptyList()) }
 
     if (workspaceStatus.isBlank()) {
         workspaceStatus = initialOutput
+    }
+
+    LaunchedEffect(findImportPendingSourceId, findImportPendingSourceOpenedAt) {
+        val sourceId = findImportPendingSourceId ?: return@LaunchedEffect
+        if (findImportState == FindImportState.SourcePicker) {
+            findImportState = FindImportState.AwaitingUserFile(
+                sourceId = sourceId,
+                openedAtEpochMs = findImportPendingSourceOpenedAt
+            )
+        }
     }
 
     LaunchedEffect(transformInvalidationKey) {
@@ -402,6 +486,10 @@ internal fun ModelLoaderScreen(
         )
     }
 
+    if (importAndAutoArrangeInProgress) {
+        ModelLoaderImportAutoArrangeProgressDialog()
+    }
+
     fun updateProfileStore(transform: (ProfileStore) -> ProfileStore) {
         val next = transform(profileStore)
         profileStore = next
@@ -458,10 +546,30 @@ internal fun ModelLoaderScreen(
     }
 
     val sliceReadyProfileStore = profileStore
-    val activeConfiguration = sliceReadyProfileStore.activeConfiguration()
+    val libraryConfiguration = sliceReadyProfileStore.activeConfiguration()
+    fun processForPlateState(state: PlateProfileState): ProcessProfile {
+        val selectedProcessId = state.selectedProcessIdOr(libraryConfiguration.process.id)
+        val libraryProcess = sliceReadyProfileStore
+            .visibleProcessesForPrinter(libraryConfiguration.printer.id)
+            .firstOrNull { process -> process.id == selectedProcessId }
+            ?: libraryConfiguration.process
+        return state.effectiveProcess(libraryProcess)
+    }
+    val activeConfiguration = libraryConfiguration.copy(
+        process = processForPlateState(activePlateProfileState)
+    )
     val selectedPrinter = activeConfiguration.printer
     val selectedFilament = activeConfiguration.filament
     val selectedProcess = activeConfiguration.process
+    fun applyWorkspaceProcessState(state: PlateProfileState, status: String) {
+        activePlateProfileState = state
+        workspaceSession.clearGeneratedPreviewState()
+        workspacePlates.replaceAll { plate ->
+            plate.copy(profileState = state)
+        }
+        workspaceStatus = status
+    }
+
     LaunchedEffect(
         selectedPrinter.id,
         selectedPrinter.hashCode(),
@@ -540,16 +648,18 @@ internal fun ModelLoaderScreen(
                     id = activePlateId,
                     label = defaultWorkspacePlateLabel(1),
                     objects = plateObjects.toList(),
-                    selectedObjectId = selectedPlateObjectId
+                    selectedObjectId = selectedPlateObjectId,
+                    profileState = activePlateProfileState
                 )
             )
         }
         val activeIndex = activePlateIndex()
-        return workspacePlates.mapIndexed { index, plate ->
+        return normalizeDefaultWorkspacePlateLabels(workspacePlates.mapIndexed { index, plate ->
             if (index == activeIndex) {
                 plate.copy(
                     objects = plateObjects.toList(),
                     selectedObjectId = selectedPlateObjectId,
+                    profileState = activePlateProfileState,
                     gcodeFilePath = null,
                     sliceSummary = null,
                     sliceTiming = null,
@@ -557,9 +667,9 @@ internal fun ModelLoaderScreen(
                     slicePreviewKey = 0L
                 )
             } else {
-                plate
+                plate.copy(profileState = activePlateProfileState)
             }
-        }
+        })
     }
 
     fun saveActivePlateSnapshot() {
@@ -569,7 +679,8 @@ internal fun ModelLoaderScreen(
                     id = activePlateId,
                     label = defaultWorkspacePlateLabel(1),
                     objects = plateObjects.toList(),
-                    selectedObjectId = selectedPlateObjectId
+                    selectedObjectId = selectedPlateObjectId,
+                    profileState = activePlateProfileState
                 )
             )
             nextPlateId = (activePlateId + 1L).coerceAtLeast(nextPlateId)
@@ -580,12 +691,16 @@ internal fun ModelLoaderScreen(
         workspacePlates[index] = workspacePlates[index].copy(
             objects = plateObjects.toList(),
             selectedObjectId = selectedPlateObjectId,
+            profileState = activePlateProfileState,
             gcodeFilePath = null,
             sliceSummary = null,
             sliceTiming = null,
             gcodeFileName = "mobile_slicer_output.gcode",
             slicePreviewKey = 0L
         )
+        workspacePlates.replaceAll { plate ->
+            plate.copy(profileState = activePlateProfileState)
+        }
     }
 
     fun syncSelectedObjectToLegacyState(objectOnPlate: PlateObject?) {
@@ -604,12 +719,183 @@ internal fun ModelLoaderScreen(
         currentModelTransform = syncPlan.modelTransform
     }
 
+    fun selectedObjectForProcessEditor(): PlateObject? =
+        objectProcessEditorObjectId?.let { objectId ->
+            plateObjects.firstOrNull { it.id == objectId }
+        }
+
+    fun selectedModifierForProcessEditor(): Pair<PlateObject, PlateObjectModifierMesh>? {
+        val objectId = objectProcessEditorObjectId ?: return null
+        val modifierId = objectProcessEditorModifierId ?: return null
+        val objectOnPlate = plateObjects.firstOrNull { it.id == objectId } ?: return null
+        val modifier = objectOnPlate.modifiers.firstOrNull { it.id == modifierId } ?: return null
+        return objectOnPlate to modifier
+    }
+
+    fun objectProcessForEditor(objectOnPlate: PlateObject?): ProcessProfile? =
+        objectOnPlate?.processOverride?.let { processState ->
+            val selectedId = processState.selectedProcessIdOr(selectedProcess.id)
+            val libraryProcess = sliceReadyProfileStore
+                .visibleProcessesForPrinter(selectedPrinter.id)
+                .firstOrNull { process -> process.id == selectedId }
+                ?: selectedProcess
+            processState.effectiveProcess(libraryProcess)
+        } ?: selectedProcess
+
+    fun modifierProcessForEditor(modifier: PlateObjectModifierMesh?): ProcessProfile? =
+        modifier?.processOverride?.let { processState ->
+            val selectedId = processState.selectedProcessIdOr(selectedProcess.id)
+            val libraryProcess = sliceReadyProfileStore
+                .visibleProcessesForPrinter(selectedPrinter.id)
+                .firstOrNull { process -> process.id == selectedId }
+                ?: selectedProcess
+            processState.effectiveProcess(libraryProcess)
+        } ?: selectedProcess
+
+    fun applyPlateObjectUpdate(objectId: Long, transform: (PlateObject) -> PlateObject) {
+        val index = plateObjects.indexOfFirst { it.id == objectId }
+        if (index >= 0) {
+            val updated = transform(plateObjects[index])
+            plateObjects[index] = updated
+            if (selectedPlateObjectId == objectId) {
+                syncSelectedObjectToLegacyState(updated)
+            }
+            saveActivePlateSnapshot()
+        }
+    }
+
+    fun openObjectProcessEditor(objectId: Long?) {
+        val objectOnPlate = objectId?.let { id -> plateObjects.firstOrNull { it.id == id } }
+            ?: selectedPlateObjectId?.let { id -> plateObjects.firstOrNull { it.id == id } }
+            ?: return
+        objectProcessEditorObjectId = objectOnPlate.id
+        objectProcessEditorModifierId = null
+        selectedPlateObjectId = objectOnPlate.id
+        profilesReturnScreenName = AppScreen.Workspace.name
+        currentScreen = AppScreen.Profiles
+    }
+
+    fun openModifierProcessEditor(objectId: Long, modifierId: Long) {
+        val objectOnPlate = plateObjects.firstOrNull { it.id == objectId } ?: return
+        if (objectOnPlate.modifiers.none { it.id == modifierId }) return
+        objectProcessEditorObjectId = objectId
+        objectProcessEditorModifierId = modifierId
+        selectedPlateObjectId = objectId
+        profilesReturnScreenName = AppScreen.Workspace.name
+        currentScreen = AppScreen.Profiles
+    }
+
+    fun applyObjectProcessOverride(objectId: Long?, process: ProcessProfile, statusPrefix: String) {
+        val targetId = objectId ?: return
+        applyPlateObjectUpdate(targetId) { objectOnPlate ->
+            objectOnPlate.copy(
+                processOverride = (objectOnPlate.processOverride ?: PlateObjectProcessOverride())
+                    .withEditedProcess(process)
+            )
+        }
+        workspaceSession.clearGeneratedPreviewState()
+        workspaceStatus = "$statusPrefix\n${process.name}"
+    }
+
+    fun applyModifierProcessOverride(objectId: Long?, modifierId: Long?, process: ProcessProfile, statusPrefix: String) {
+        val targetObjectId = objectId ?: return
+        val targetModifierId = modifierId ?: return
+        applyPlateObjectUpdate(targetObjectId) { objectOnPlate ->
+            objectOnPlate.copy(
+                modifiers = objectOnPlate.modifiers.map { modifier ->
+                    if (modifier.id == targetModifierId) {
+                        modifier.copy(
+                            processOverride = modifier.processOverride.withEditedProcess(process)
+                        )
+                    } else {
+                        modifier
+                    }
+                }
+            )
+        }
+        workspaceSession.clearGeneratedPreviewState()
+        workspaceStatus = "$statusPrefix\n${process.name}"
+    }
+
+    fun selectObjectProcessBase(objectId: Long?, process: ProcessProfile, statusPrefix: String) {
+        val targetId = objectId ?: return
+        applyPlateObjectUpdate(targetId) { objectOnPlate ->
+            objectOnPlate.copy(
+                processOverride = (objectOnPlate.processOverride ?: PlateObjectProcessOverride())
+                    .withSelectedProcess(process)
+            )
+        }
+        workspaceSession.clearGeneratedPreviewState()
+        workspaceStatus = "$statusPrefix\n${process.name}"
+    }
+
+    fun selectModifierProcessBase(objectId: Long?, modifierId: Long?, process: ProcessProfile, statusPrefix: String) {
+        val targetObjectId = objectId ?: return
+        val targetModifierId = modifierId ?: return
+        applyPlateObjectUpdate(targetObjectId) { objectOnPlate ->
+            objectOnPlate.copy(
+                modifiers = objectOnPlate.modifiers.map { modifier ->
+                    if (modifier.id == targetModifierId) {
+                        modifier.copy(
+                            processOverride = modifier.processOverride.withSelectedProcess(process)
+                        )
+                    } else {
+                        modifier
+                    }
+                }
+            )
+        }
+        workspaceSession.clearGeneratedPreviewState()
+        workspaceStatus = "$statusPrefix\n${process.name}"
+    }
+
+    fun resetObjectProcessOverride(objectId: Long?) {
+        val targetId = objectId ?: return
+        val objectName = plateObjects.firstOrNull { it.id == targetId }?.label ?: "Object"
+        applyPlateObjectUpdate(targetId) { objectOnPlate ->
+            objectOnPlate.copy(processOverride = null)
+        }
+        objectProcessEditorObjectId = null
+        objectProcessEditorModifierId = null
+        workspaceSession.clearGeneratedPreviewState()
+        workspaceStatus = "Object process reset\n$objectName"
+        currentScreen = AppScreen.Workspace
+    }
+
+    fun resetModifierProcessOverride(objectId: Long?, modifierId: Long?) {
+        val targetObjectId = objectId ?: return
+        val targetModifierId = modifierId ?: return
+        val modifierName = plateObjects
+            .firstOrNull { it.id == targetObjectId }
+            ?.modifiers
+            ?.firstOrNull { it.id == targetModifierId }
+            ?.label
+            ?: "Modifier"
+        applyPlateObjectUpdate(targetObjectId) { objectOnPlate ->
+            objectOnPlate.copy(
+                modifiers = objectOnPlate.modifiers.map { modifier ->
+                    if (modifier.id == targetModifierId) {
+                        modifier.copy(processOverride = PlateObjectProcessOverride())
+                    } else {
+                        modifier
+                    }
+                }
+            )
+        }
+        objectProcessEditorObjectId = null
+        objectProcessEditorModifierId = null
+        workspaceSession.clearGeneratedPreviewState()
+        workspaceStatus = "Modifier process reset\n$modifierName"
+        currentScreen = AppScreen.Workspace
+    }
+
     fun applyWorkspacePlateMutation(mutation: WorkspacePlateMutation) {
         if (mutation.clearGeneratedPreviewState) {
             workspaceSession.clearGeneratedPreviewState()
         }
+        val normalizedPlates = normalizeDefaultWorkspacePlateLabels(mutation.plates)
         workspacePlates.clear()
-        workspacePlates.addAll(mutation.plates)
+        workspacePlates.addAll(normalizedPlates.map { it.copy(profileState = activePlateProfileState) })
         activePlateId = mutation.activePlateId
         plateObjects.clear()
         plateObjects.addAll(mutation.activeObjects)
@@ -619,6 +905,20 @@ internal fun ModelLoaderScreen(
                 ?: mutation.activeObjects.firstOrNull()
         )
         workspaceStatus = mutation.statusMessage
+    }
+
+    pendingOrcaMultiPlateArrangement?.let { arrangement ->
+        ModelLoaderOrcaMultiPlateArrangeDialog(
+            arrangement = arrangement,
+            onArrangeAcrossPlates = {
+                applyWorkspacePlateMutation(arrangement.mutation)
+                pendingOrcaMultiPlateArrangement = null
+            },
+            onKeepCurrentPlate = {
+                workspaceStatus = "Kept on current plate\nObjects were not moved to additional plates"
+                pendingOrcaMultiPlateArrangement = null
+            }
+        )
     }
 
     fun loadWorkspacePlate(plate: WorkspacePlate) {
@@ -649,7 +949,8 @@ internal fun ModelLoaderScreen(
                 activePlateId = activePlateId,
                 activeObjects = plateObjects.toList(),
                 selectedObjectId = selectedPlateObjectId,
-                nextPlateId = nextPlateId
+                nextPlateId = nextPlateId,
+                profileState = activePlateProfileState
             )
         )
     }
@@ -688,7 +989,8 @@ internal fun ModelLoaderScreen(
             activeObjects = plateObjects.toList(),
             selectedObjectId = selectedPlateObjectId,
             objectId = objectId,
-            nextPlateId = nextPlateId
+            nextPlateId = nextPlateId,
+            profileState = activePlateProfileState
         ) ?: return
         applyWorkspacePlateMutation(mutation)
     }
@@ -714,6 +1016,24 @@ internal fun ModelLoaderScreen(
         val nextName = name.trim().ifBlank { fallback }
         if (workspacePlates[index].label == nextName) return
         workspacePlates[index] = workspacePlates[index].copy(label = nextName)
+    }
+
+    fun resetWorkspaceForFreshImport() {
+        workspaceSession.clearForFreshWorkspace()
+        onFreshWorkspaceStarted()
+        workspacePreparationTargetKey = null
+        currentScreen = AppScreen.Workspace
+        modelLoaded = false
+        currentModelLabel = "No model imported"
+        currentModelFilePath = null
+        currentPreparedMesh = null
+        currentModelBounds = null
+        currentViewerPreparationError = null
+        currentImportTiming = null
+        currentWorkspacePreparationTiming = null
+        currentModelFormatName = null
+        workspaceStatus = ""
+        currentModelTransform = null
     }
 
     fun saveCurrentPlate(projectName: String, thumbnailBitmap: Bitmap?) {
@@ -773,9 +1093,11 @@ internal fun ModelLoaderScreen(
             profileStore = project.profileStore
             onProfileStoreChanged(project.profileStore)
             currentCalibrationJob = null
+            val restoredProfileState = openedProject.plates.firstOrNull()?.profileState ?: PlateProfileState()
             workspacePlates.clear()
-            workspacePlates.addAll(openedProject.plates)
+            workspacePlates.addAll(synchronizeWorkspaceProcessState(openedProject.plates, restoredProfileState))
             activePlateId = openedProject.plates.firstOrNull()?.id ?: 1L
+            activePlateProfileState = restoredProfileState
             nextPlateId = ((openedProject.plates.maxOfOrNull { it.id } ?: 0L) + 1L).coerceAtLeast(2L)
             plateObjects.clear()
             plateObjects.addAll(openedProject.plateObjects)
@@ -814,7 +1136,11 @@ internal fun ModelLoaderScreen(
             calibrationJob = currentCalibrationJob,
             plateObjects = plateObjects.toList(),
             summary = currentSliceSummary,
-            filamentMaterial = selectedFilament.materialType,
+            filamentMaterial = activeExportFilamentMaterial(
+                plateObjects = plateObjects.toList(),
+                plateFilamentSlots = plateFilamentSlots.toList(),
+                fallbackFilament = selectedFilament
+            ),
             fallbackName = currentGcodeFileName
         )
     }
@@ -896,7 +1222,7 @@ internal fun ModelLoaderScreen(
     }
 
     fun currentPlatePlanningSignature(selectedObjectIdForPlanning: Long?): String {
-        val currentConfiguration = profileStore.activeConfiguration()
+        val currentConfiguration = activeConfiguration
         val currentPrinter = currentConfiguration.printer
         val currentFilament = currentConfiguration.filament
         val currentProcess = currentConfiguration.process
@@ -909,6 +1235,7 @@ internal fun ModelLoaderScreen(
             append("printer=").append(currentPrinter.id).append(':').append(currentPrinter.hashCode()).append('|')
             append("filament=").append(currentFilament.id).append(':').append(currentFilament.hashCode()).append('|')
             append("process=").append(currentProcess.id).append(':').append(currentProcess.contentHash()).append('|')
+            append("plateProfile=").append(activePlateProfileState).append('|')
             append("bed=").append(currentBed.originXmm).append(',')
                 .append(currentBed.originYmm).append(',')
                 .append(currentBed.widthMm).append(',')
@@ -944,6 +1271,95 @@ internal fun ModelLoaderScreen(
         return true
     }
 
+    fun currentPlatePlanningPrewarmSignature(): String {
+        val bed = selectedPrinter.toBedSpec()
+        return buildString {
+            append("bed=").append(bed.originXmm).append(',')
+                .append(bed.originYmm).append(',')
+                .append(bed.widthMm).append(',')
+                .append(bed.depthMm).append(',')
+                .append(bed.maxHeightMm).append('|')
+            append("objects=").append(
+                plateObjects.joinToString(";") { objectOnPlate ->
+                    val file = File(objectOnPlate.filePath)
+                    listOf(
+                        objectOnPlate.id,
+                        objectOnPlate.filePath,
+                        objectOnPlate.format,
+                        objectOnPlate.nativeSourceKey,
+                        file.length(),
+                        file.lastModified()
+                    ).joinToString(":")
+                }
+            )
+        }
+    }
+
+    fun scheduleNativePlatePlanningPrewarm(reason: String) {
+        if (plateObjects.isEmpty()) return
+        val signature = currentPlatePlanningPrewarmSignature()
+        if (lastPlatePlanningPrewarmSignature == signature || activePlatePlanningPrewarmSignature == signature) {
+            return
+        }
+        val capturedObjects = plateObjects.toList()
+        val capturedBed = selectedPrinter.toBedSpec()
+        activePlatePlanningPrewarmSignature = signature
+        coroutineScope.launch {
+            val success = try {
+                onNativePlatePlanningPrewarmRequested(capturedObjects, capturedBed)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                Log.w("MobileSlicer", "plate planning prewarm failed", error)
+                false
+            }
+            if (activePlatePlanningPrewarmSignature == signature) {
+                activePlatePlanningPrewarmSignature = null
+            }
+            if (success) {
+                lastPlatePlanningPrewarmSignature = signature
+            }
+            Log.i(
+                "MobileSlicerPerf",
+                "plate_planning_prewarm_request reason=$reason success=$success objects=${capturedObjects.size}"
+            )
+        }
+    }
+
+    suspend fun prepareCachedNativePlatePlanningConfig(
+        signature: String,
+        objects: List<PlateObject>,
+        slots: List<PlateFilamentSlot>,
+        filaments: List<FilamentProfile>,
+        flushVolumes: PlateFlushVolumes?
+    ): String {
+        cachedPlatePlanningConfigJson?.takeIf { cachedPlatePlanningConfigSignature == signature }?.let { cachedJson ->
+            Log.i("MobileSlicerPerf", "plate_planning_config_cache hit signature=${signature.hashCode()}")
+            return cachedJson
+        }
+        val startedAtMs = SystemClock.elapsedRealtime()
+        val configJson = withContext(Dispatchers.Default) {
+            prepareNativeConfigForPlatePlanning(
+                context = context,
+                configuration = activeConfiguration,
+                plateObjects = objects,
+                processProfiles = sliceReadyProfileStore.processes,
+                profileFilaments = filaments,
+                activePlateSlots = slots,
+                flushVolumes = flushVolumes,
+                primeTowerPlacementOverride = primeTowerPlacementOverride,
+                printer = selectedPrinter
+            )
+        }
+        cachedPlatePlanningConfigSignature = signature
+        cachedPlatePlanningConfigJson = configJson
+        Log.i(
+            "MobileSlicerPerf",
+            "plate_planning_config_cache miss signature=${signature.hashCode()} prepMs=${SystemClock.elapsedRealtime() - startedAtMs}"
+        )
+        return configJson
+    }
+
     fun autoOrientPlateObjects() {
         if (platePlanningInProgress) {
             workspaceStatus = "Planning already in progress\nWaiting for native planner"
@@ -964,23 +1380,25 @@ internal fun ModelLoaderScreen(
         }
         val capturedFilaments = sliceReadyProfileStore.filaments.toList()
         val capturedFlushVolumes = plateFlushVolumes
+        val capturedConfigSignature = currentPlatePlanningSignature(selectedObjectIdForPlanning = null)
         coroutineScope.launch {
             platePlanningInProgress = true
             workspaceStatus = progressStatus
+            val requestStartedAtMs = SystemClock.elapsedRealtime()
             try {
                 val nativeOutcome = try {
-                    val configJson = withContext(Dispatchers.Default) {
-                        prepareNativeConfigForPlatePlanning(
-                            context = context,
-                            configuration = activeConfiguration,
-                            plateObjects = capturedObjects,
-                            profileFilaments = capturedFilaments,
-                            activePlateSlots = capturedSlots,
-                            flushVolumes = capturedFlushVolumes,
-                            primeTowerPlacementOverride = primeTowerPlacementOverride,
-                            printer = selectedPrinter
-                        )
-                    }
+                    val configJson = prepareCachedNativePlatePlanningConfig(
+                        signature = capturedConfigSignature,
+                        objects = capturedObjects,
+                        slots = capturedSlots,
+                        filaments = capturedFilaments,
+                        flushVolumes = capturedFlushVolumes
+                    )
+                    Log.i(
+                        "MobileSlicer",
+                        "autoOrient native request objects=${capturedObjects.size} selected=$capturedSelectedId " +
+                            "bed=${bed.widthMm}x${bed.depthMm}x${bed.maxHeightMm}"
+                    )
                     onNativeAutoOrientRequested(configJson, capturedObjects, capturedSelectedId, bed)
                 } catch (cancellation: CancellationException) {
                     throw cancellation
@@ -988,10 +1406,17 @@ internal fun ModelLoaderScreen(
                     Log.w("MobileSlicer", "autoOrient native planning failed", error)
                     PlatePlanningOutcome.Failure(nativeAutoOrientPlateObjectsFailureStatus(error.message))
                 }
+                Log.i(
+                    "MobileSlicerPerf",
+                    "autoOrient ui totalMs=${SystemClock.elapsedRealtime() - requestStartedAtMs} objects=${capturedObjects.size} selected=${capturedSelectedId != null}"
+                )
                 if (abandonStalePlanningResult(capturedSignature, capturedSelectedId, previousStatus, progressStatus)) return@launch
                 when (nativeOutcome) {
                     is PlatePlanningOutcome.Success -> applyAutoOrientResult(nativeOutcome.result, source = "native")
-                    is PlatePlanningOutcome.Failure -> workspaceStatus = nativeOutcome.statusMessage
+                    is PlatePlanningOutcome.Failure -> {
+                        Log.w("MobileSlicer", "autoOrient failed: ${nativeOutcome.statusMessage}")
+                        workspaceStatus = nativeOutcome.statusMessage
+                    }
                 }
             } finally {
                 platePlanningInProgress = false
@@ -1000,6 +1425,28 @@ internal fun ModelLoaderScreen(
     }
 
     fun applyAutoArrangeResult(result: PlateAutoArrangeResult, source: String) {
+        if (result.usesMultipleBeds) {
+            saveActivePlateSnapshot()
+            val mutation = orcaMultiPlateWorkspaceMutation(
+                result = result,
+                plates = currentWorkspacePlatesSnapshot(),
+                activePlateId = activePlateId,
+                selectedObjectId = selectedPlateObjectId,
+                nextPlateId = nextPlateId,
+                profileState = activePlateProfileState
+            )
+            if (mutation == null) {
+                workspaceStatus = "Auto-arrange failed\nOrca returned a multi-plate layout MobileSlicer could not apply."
+                return
+            }
+            pendingOrcaMultiPlateArrangement = PendingOrcaMultiPlateArrangement(
+                objectCount = result.objects.size,
+                plateCount = result.arrangedPlateCount,
+                mutation = mutation
+            )
+            workspaceStatus = "Objects need ${result.arrangedPlateCount} plates\nChoose how to continue"
+            return
+        }
         plateObjects.clear()
         plateObjects.addAll(result.objects)
         workspaceSession.clearGeneratedPreviewState()
@@ -1015,14 +1462,19 @@ internal fun ModelLoaderScreen(
         workspaceStatus = autoArrangePlateObjectsStatus(plateObjects.size, result)
     }
 
-    fun arrangePlateObjects(allowRotation: Boolean) {
+    fun arrangePlateObjects(
+        allowRotation: Boolean,
+        onComplete: (() -> Unit)? = null
+    ) {
         val bed = selectedPrinter.toBedSpec()
         if (platePlanningInProgress) {
             workspaceStatus = "Planning already in progress\nWaiting for native planner"
+            onComplete?.invoke()
             return
         }
         if (plateObjects.isEmpty()) {
             workspaceStatus = autoArrangePlateObjectsFailureStatus(plateObjects.size, bed)
+            onComplete?.invoke()
             return
         }
         val capturedObjects = plateObjects.toList()
@@ -1034,23 +1486,20 @@ internal fun ModelLoaderScreen(
         }
         val capturedFilaments = sliceReadyProfileStore.filaments.toList()
         val capturedFlushVolumes = plateFlushVolumes
+        val capturedConfigSignature = currentPlatePlanningSignature(selectedObjectIdForPlanning = null)
         coroutineScope.launch {
             platePlanningInProgress = true
             workspaceStatus = progressStatus
+            val requestStartedAtMs = SystemClock.elapsedRealtime()
             try {
                 val nativeOutcome = try {
-                    val configJson = withContext(Dispatchers.Default) {
-                        prepareNativeConfigForPlatePlanning(
-                            context = context,
-                            configuration = activeConfiguration,
-                            plateObjects = capturedObjects,
-                            profileFilaments = capturedFilaments,
-                            activePlateSlots = capturedSlots,
-                            flushVolumes = capturedFlushVolumes,
-                            primeTowerPlacementOverride = primeTowerPlacementOverride,
-                            printer = selectedPrinter
-                        )
-                    }
+                    val configJson = prepareCachedNativePlatePlanningConfig(
+                        signature = capturedConfigSignature,
+                        objects = capturedObjects,
+                        slots = capturedSlots,
+                        filaments = capturedFilaments,
+                        flushVolumes = capturedFlushVolumes
+                    )
                     onNativeAutoArrangeRequested(configJson, capturedObjects, bed, allowRotation)
                 } catch (cancellation: CancellationException) {
                     throw cancellation
@@ -1058,6 +1507,10 @@ internal fun ModelLoaderScreen(
                     Log.w("MobileSlicer", "autoArrange native planning failed", error)
                     PlatePlanningOutcome.Failure(nativeAutoArrangePlateObjectsFailureStatus(error.message))
                 }
+                Log.i(
+                    "MobileSlicerPerf",
+                    "autoArrange ui totalMs=${SystemClock.elapsedRealtime() - requestStartedAtMs} objects=${capturedObjects.size} allowRotation=$allowRotation"
+                )
                 if (abandonStalePlanningResult(capturedSignature, selectedObjectIdForPlanning = null, previousStatus, progressStatus)) return@launch
                 when (nativeOutcome) {
                     is PlatePlanningOutcome.Success -> applyAutoArrangeResult(nativeOutcome.result, source = "native")
@@ -1065,6 +1518,7 @@ internal fun ModelLoaderScreen(
                 }
             } finally {
                 platePlanningInProgress = false
+                onComplete?.invoke()
             }
         }
     }
@@ -1136,7 +1590,7 @@ internal fun ModelLoaderScreen(
                                         viewerMeshPrepMs = 0L,
                                         sourceTriangleCount = it.sourceTriangleCount,
                                         displayTriangleCount = it.displayTriangleCount,
-                                        reducedForDisplay = it.reducedForDisplay
+                                        renderArrayBytes = it.renderArrayBytes
                                     )
                                 },
                                 transform = objectOnPlate.transform,
@@ -1277,8 +1731,10 @@ internal fun ModelLoaderScreen(
         )
     }
 
-    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
+    suspend fun importPickedModelUriInternal(uri: Uri, appendRequestedForImport: Boolean): Boolean {
+            if (!appendRequestedForImport) {
+                resetWorkspaceForFreshImport()
+            }
             val importStartState = planModelImportStart()
             importStartedAtMs = SystemClock.elapsedRealtime()
             importInProgress = importStartState.importInProgress
@@ -1295,51 +1751,270 @@ internal fun ModelLoaderScreen(
             }
             if (importStartState.clearFirstFrameTimings) firstVisibleWorkspaceFrameMs = null
             if (importStartState.clearWorkspacePreparationTarget) workspacePreparationTargetKey = null
-            coroutineScope.launch {
-                val result = withContext(Dispatchers.Default) {
-                    onModelSelected(uri)
+            val result = withContext(Dispatchers.Default) {
+                onModelSelected(uri)
+            }
+            val importApplication = planModelImportApplication(
+                result = result,
+                currentScreen = currentScreen,
+                existingPlateObjects = plateObjects.toList(),
+                appendRequested = appendRequestedForImport,
+                nextPlateObjectId = nextPlateObjectId,
+                defaultTransform = ::defaultPlateObjectTransform
+            )
+            if (importApplication.replacePlate) {
+                plateObjects.clear()
+            }
+            if (importApplication.clearSavedProject) {
+                currentSavedProjectId = null
+            }
+            nextPlateObjectId = importApplication.nextPlateObjectId
+            importApplication.importedPlateObject?.let { objectOnPlate ->
+                plateObjects.add(objectOnPlate)
+                syncSelectedObjectToLegacyState(objectOnPlate)
+            }
+            importApplication.legacyState?.let { legacyState ->
+                modelLoaded = legacyState.modelLoaded
+                currentModelLabel = legacyState.modelLabel
+                currentModelFilePath = legacyState.modelFilePath
+                currentImportTiming = legacyState.importTiming
+                currentModelBounds = legacyState.modelBounds
+                currentModelFormatName = legacyState.modelFormatName
+            }
+            saveActivePlateSnapshot()
+            logResponsivenessEvent("model_import_completed")
+            workspaceStatus = importApplication.statusMessage
+            val completionPlan = planModelImportCompletionUi(importApplication)
+            importInProgress = completionPlan.importInProgress
+            appendNextImportToPlate = completionPlan.appendNextImportToPlate
+            if (completionPlan.clearGeneratedPreviewState) {
+                workspaceSession.clearGeneratedPreviewState()
+            }
+            completionPlan.screen?.let { screen ->
+                currentScreen = screen
+            }
+            return result.loaded
+    }
+
+    suspend fun importScannerWorkspaceModelInternal(modelFile: File): ModelLoadResult {
+            resetWorkspaceForFreshImport()
+            val importStartState = planModelImportStart()
+            importStartedAtMs = SystemClock.elapsedRealtime()
+            importInProgress = importStartState.importInProgress
+            if (importStartState.currentCalibrationJobCleared) currentCalibrationJob = null
+            workspaceStatus = importStartState.statusMessage
+            if (importStartState.clearGeneratedPreviewState) workspaceSession.clearGeneratedPreviewState()
+            if (importStartState.clearPreparedMeshState) {
+                currentPreparedMesh = null
+                currentModelBounds = null
+                currentViewerPreparationError = null
+                currentImportTiming = null
+                currentWorkspacePreparationTiming = null
+                currentModelTransform = null
+            }
+            if (importStartState.clearFirstFrameTimings) firstVisibleWorkspaceFrameMs = null
+            if (importStartState.clearWorkspacePreparationTarget) workspacePreparationTargetKey = null
+            val result = withContext(Dispatchers.Default) {
+                onScannerWorkspaceModelSelected(modelFile)
+            }
+            val importApplication = planModelImportApplication(
+                result = result,
+                currentScreen = currentScreen,
+                existingPlateObjects = plateObjects.toList(),
+                appendRequested = false,
+                nextPlateObjectId = nextPlateObjectId,
+                defaultTransform = ::defaultPlateObjectTransform
+            )
+            if (importApplication.replacePlate) {
+                plateObjects.clear()
+            }
+            if (importApplication.clearSavedProject) {
+                currentSavedProjectId = null
+            }
+            nextPlateObjectId = importApplication.nextPlateObjectId
+            importApplication.importedPlateObject?.let { objectOnPlate ->
+                plateObjects.add(objectOnPlate)
+                syncSelectedObjectToLegacyState(objectOnPlate)
+            }
+            importApplication.legacyState?.let { legacyState ->
+                modelLoaded = legacyState.modelLoaded
+                currentModelLabel = legacyState.modelLabel
+                currentModelFilePath = legacyState.modelFilePath
+                currentImportTiming = legacyState.importTiming
+                currentModelBounds = legacyState.modelBounds
+                currentModelFormatName = legacyState.modelFormatName
+            }
+            saveActivePlateSnapshot()
+            logResponsivenessEvent("scanner_workspace_import_completed")
+            workspaceStatus = importApplication.statusMessage
+            val completionPlan = planModelImportCompletionUi(importApplication)
+            importInProgress = completionPlan.importInProgress
+            appendNextImportToPlate = completionPlan.appendNextImportToPlate
+            if (completionPlan.clearGeneratedPreviewState) {
+                workspaceSession.clearGeneratedPreviewState()
+            }
+            completionPlan.screen?.let { screen ->
+                currentScreen = screen
+            }
+            return result
+    }
+
+    fun importPickedModelUris(uris: List<Uri>) {
+        val selectedUris = uris.distinct()
+        if (selectedUris.isEmpty()) return
+        val appendRequestedForImport = appendNextImportToPlate
+        val shouldAutoArrangeAfterImport = selectedUris.size > 1 || (appendRequestedForImport && plateObjects.isNotEmpty())
+        if (shouldAutoArrangeAfterImport) {
+            importAndAutoArrangeInProgress = true
+        }
+        coroutineScope.launch {
+            var importedCount = 0
+            var arrangeStarted = false
+            try {
+                selectedUris.forEachIndexed { index, uri ->
+                    if (selectedUris.size > 1) {
+                        workspaceStatus = "Importing ${index + 1} of ${selectedUris.size}"
+                    }
+                    val appendThisImport = appendRequestedForImport || importedCount > 0
+                    val imported = importPickedModelUriInternal(uri, appendThisImport)
+                    if (!imported) {
+                        if (importedCount > 0) {
+                            workspaceStatus = "Imported $importedCount of ${selectedUris.size}. One file could not be loaded."
+                        }
+                        return@launch
+                    }
+                    importedCount += 1
                 }
-                val importApplication = planModelImportApplication(
-                    result = result,
-                    currentScreen = currentScreen,
-                    existingPlateObjects = plateObjects.toList(),
-                    appendRequested = appendNextImportToPlate,
-                    nextPlateObjectId = nextPlateObjectId,
-                    defaultTransform = ::defaultPlateObjectTransform
-                )
-                if (importApplication.replacePlate) {
-                    plateObjects.clear()
+                if (shouldAutoArrangeAfterImport && importedCount > 0 && plateObjects.size > 1) {
+                    arrangeStarted = true
+                    workspaceStatus = "Importing and auto-arranging\nPlacing ${plateObjects.size} objects"
+                    arrangePlateObjects(allowRotation = false) {
+                        importAndAutoArrangeInProgress = false
+                    }
+                } else {
+                    importAndAutoArrangeInProgress = false
                 }
-                if (importApplication.clearSavedProject) {
-                    currentSavedProjectId = null
-                }
-                nextPlateObjectId = importApplication.nextPlateObjectId
-                importApplication.importedPlateObject?.let { objectOnPlate ->
-                    plateObjects.add(objectOnPlate)
-                    syncSelectedObjectToLegacyState(objectOnPlate)
-                }
-                importApplication.legacyState?.let { legacyState ->
-                    modelLoaded = legacyState.modelLoaded
-                    currentModelLabel = legacyState.modelLabel
-                    currentModelFilePath = legacyState.modelFilePath
-                    currentImportTiming = legacyState.importTiming
-                    currentModelBounds = legacyState.modelBounds
-                    currentModelFormatName = legacyState.modelFormatName
-                }
-                saveActivePlateSnapshot()
-                logResponsivenessEvent("model_import_completed")
-                workspaceStatus = importApplication.statusMessage
-                val completionPlan = planModelImportCompletionUi(importApplication)
-                importInProgress = completionPlan.importInProgress
-                appendNextImportToPlate = completionPlan.appendNextImportToPlate
-                if (completionPlan.clearGeneratedPreviewState) {
-                    workspaceSession.clearGeneratedPreviewState()
-                }
-                completionPlan.screen?.let { screen ->
-                    currentScreen = screen
+            } finally {
+                if (!arrangeStarted) {
+                    importAndAutoArrangeInProgress = false
                 }
             }
         }
+    }
+
+    fun importPickedModelUri(uri: Uri) {
+        importPickedModelUris(listOf(uri))
+    }
+
+    fun nextModifierId(): Long =
+        (plateObjects.flatMap { it.modifiers }.maxOfOrNull { it.id } ?: 0L) + 1L
+
+    fun updatePlateObjectModifier(objectId: Long, modifierId: Long, transform: (PlateObjectModifierMesh) -> PlateObjectModifierMesh) {
+        applyPlateObjectUpdate(objectId) { objectOnPlate ->
+            objectOnPlate.copy(
+                modifiers = objectOnPlate.modifiers.map { modifier ->
+                    if (modifier.id == modifierId) transform(modifier) else modifier
+                }
+            )
+        }
+        workspaceSession.clearGeneratedPreviewState()
+    }
+
+    fun deletePlateObjectModifier(objectId: Long, modifierId: Long) {
+        val modifierName = plateObjects.firstOrNull { it.id == objectId }
+            ?.modifiers
+            ?.firstOrNull { it.id == modifierId }
+            ?.label
+            ?: "Modifier"
+        applyPlateObjectUpdate(objectId) { objectOnPlate ->
+            objectOnPlate.copy(modifiers = objectOnPlate.modifiers.filterNot { it.id == modifierId })
+        }
+        workspaceSession.clearGeneratedPreviewState()
+        workspaceStatus = "Modifier removed\n$modifierName"
+    }
+
+    fun centerPlateObjectModifier(objectId: Long, modifierId: Long) {
+        val objectOnPlate = plateObjects.firstOrNull { it.id == objectId } ?: return
+        updatePlateObjectModifier(objectId, modifierId) { modifier ->
+            modifier.copy(
+                transform = modifier.transform.copy(
+                    centerXmm = objectOnPlate.transform.centerXmm,
+                    centerYmm = objectOnPlate.transform.centerYmm,
+                    zOffsetMm = objectOnPlate.transform.zOffsetMm
+                )
+            )
+        }
+        workspaceStatus = "Modifier centered\n${objectOnPlate.label}"
+    }
+
+    fun rotatePlateObjectModifier(objectId: Long, modifierId: Long) {
+        updatePlateObjectModifier(objectId, modifierId) { modifier ->
+            modifier.copy(
+                transform = modifier.transform.copy(
+                    rotationZDegrees = (modifier.transform.rotationZDegrees + 90f) % 360f,
+                    orientationMatrix = null
+                )
+            )
+        }
+        workspaceStatus = "Modifier rotated\n90 degrees"
+    }
+
+    fun importModifierMesh(uri: Uri, objectId: Long) {
+        val parent = plateObjects.firstOrNull { it.id == objectId } ?: return
+        coroutineScope.launch {
+            workspaceStatus = "Loading modifier\n${parent.label}"
+            val result = withContext(Dispatchers.Default) { onModelSelected(uri) }
+            val stagedPath = result.stagedFilePath
+            if (!result.loaded || stagedPath == null || result.format != ImportedModelFormat.Stl) {
+                workspaceStatus = "Modifier import failed\nUse STL, 3MF, STEP, or STP mesh input."
+                return@launch
+            }
+            val stagedFile = File(stagedPath)
+            val prepared = withContext(Dispatchers.Default) {
+                runCatching { StlMeshParser.parseForDisplay(stagedFile) }.getOrNull()
+            }
+            val mesh = prepared?.mesh
+            val bounds = mesh?.bounds ?: result.bounds
+            if (bounds == null) {
+                workspaceStatus = "Modifier import failed\nCould not read mesh bounds."
+                return@launch
+            }
+            val modifier = PlateObjectModifierMesh(
+                id = nextModifierId(),
+                label = modelLoadResultLabel(result),
+                filePath = stagedFile.absolutePath,
+                bounds = bounds,
+                mesh = mesh,
+                transform = ViewerModelTransform(
+                    centerXmm = parent.transform.centerXmm,
+                    centerYmm = parent.transform.centerYmm
+                )
+            )
+            applyPlateObjectUpdate(objectId) { objectOnPlate ->
+                objectOnPlate.copy(modifiers = objectOnPlate.modifiers + modifier)
+            }
+            workspaceSession.clearGeneratedPreviewState()
+            workspaceStatus = "Modifier added\n${modifier.label}"
+        }
+    }
+
+    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
+            importPickedModelUris(uris)
+        }
+    }
+
+    val modifierPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val objectId = pendingModifierObjectId
+        pendingModifierObjectId = null
+        if (uri != null && objectId != null) {
+            importModifierMesh(uri, objectId)
+        }
+    }
+
+    val findImportFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        importPickedModelUris(uris)
     }
 
     fun launchModelPickerOrPromptForProfiles(appendToPlate: Boolean) {
@@ -1351,6 +2026,511 @@ internal fun ModelLoaderScreen(
         modelPicker.launch(arrayOf("*/*"))
     }
 
+    fun launchModifierPicker(objectId: Long) {
+        pendingModifierObjectId = objectId
+        modifierPicker.launch(arrayOf("*/*"))
+    }
+
+    LaunchedEffect(externalModelImportUri) {
+        val uri = externalModelImportUri ?: return@LaunchedEffect
+        profileStore.profileRequirementMessage()?.let { message ->
+            missingProfileDialogMessage = message
+            onExternalModelImportUriConsumed()
+            return@LaunchedEffect
+        }
+        appendNextImportToPlate = false
+        importPickedModelUri(uri)
+        onExternalModelImportUriConsumed()
+    }
+
+    fun signInToThingiverse(autoContinue: Boolean = false) {
+        val start = thingiverseAuthStore.buildOAuthStart(thingiverseOAuthConfig)
+        if (start == null) {
+            thingiverseAuthMessage = "Thingiverse sign-in is not configured for this build."
+            thingiverseState = ThingiverseSearchUiState.MissingToken
+            return
+        }
+        thingiverseOAuthBrowserOpen = true
+        if (!autoContinue) {
+            thingiverseOAuthAutoContinueAttempted = false
+        }
+        thingiverseAuthMessage = if (autoContinue) {
+            "Continuing Thingiverse authorization..."
+        } else {
+            "Opening Thingiverse sign-in..."
+        }
+        val authUri = Uri.parse(start.url)
+        runCatching {
+            CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .build()
+                .launchUrl(context, authUri)
+        }.onFailure {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, authUri))
+            }.onFailure { error ->
+                Log.w("MobileSlicer", "Unable to open Thingiverse sign-in", error)
+                thingiverseOAuthBrowserOpen = false
+                thingiverseAuthMessage = "Could not open Thingiverse sign-in."
+                thingiverseState = ThingiverseSearchUiState.Error(
+                    message = "Could not open Thingiverse sign-in.",
+                    canRetry = false
+                )
+            }
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, thingiverseAuthSession) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
+            if (!thingiverseOAuthBrowserOpen) return@LifecycleEventObserver
+            if (thingiverseAuthSession?.isUsable == true) {
+                thingiverseOAuthBrowserOpen = false
+                return@LifecycleEventObserver
+            }
+            if (!thingiverseAuthStore.hasPendingOAuthState()) {
+                thingiverseOAuthBrowserOpen = false
+                return@LifecycleEventObserver
+            }
+            if (thingiverseOAuthAutoContinueAttempted) {
+                thingiverseOAuthBrowserOpen = false
+                thingiverseAuthMessage = "Thingiverse is signed in. Tap Sign in once more to finish authorization."
+                return@LifecycleEventObserver
+            }
+            thingiverseOAuthAutoContinueAttempted = true
+            coroutineScope.launch {
+                delay(350)
+                if (thingiverseAuthSession?.isUsable == true || !thingiverseAuthStore.hasPendingOAuthState()) {
+                    thingiverseOAuthBrowserOpen = false
+                    return@launch
+                }
+                signInToThingiverse(autoContinue = true)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(thingiverseOAuthRedirectUri) {
+        val uri = thingiverseOAuthRedirectUri ?: return@LaunchedEffect
+        thingiverseOAuthBrowserOpen = false
+        thingiverseOAuthAutoContinueAttempted = false
+        when (val result = thingiverseAuthStore.consumeOAuthRedirect(
+            uri = uri,
+            expectedScheme = Uri.parse(BuildConfig.THINGIVERSE_REDIRECT_URI).scheme.orEmpty(),
+            expectedHost = Uri.parse(BuildConfig.THINGIVERSE_REDIRECT_URI).host.orEmpty()
+        )) {
+            is ThingiverseOAuthRedirectResult.Success -> {
+                thingiverseAuthSession = result.session
+                thingiverseAuthMessage = null
+                thingiverseState = ThingiverseSearchUiState.Idle
+                currentScreen = AppScreen.ModelSearch
+            }
+            is ThingiverseOAuthRedirectResult.Handoff -> {
+                thingiverseAuthMessage = "Finishing Thingiverse sign-in..."
+                currentScreen = AppScreen.ModelSearch
+                val redeemed = withContext(Dispatchers.IO) {
+                    thingiverseAuthStore.redeemOAuthHandoff(thingiverseOAuthConfig, result.code)
+                }
+                when (redeemed) {
+                    is ThingiverseOAuthRedirectResult.Success -> {
+                        thingiverseAuthSession = redeemed.session
+                        thingiverseAuthMessage = null
+                        thingiverseState = ThingiverseSearchUiState.Idle
+                    }
+                    is ThingiverseOAuthRedirectResult.Failure -> {
+                        thingiverseAuthMessage = redeemed.message
+                        thingiverseState = ThingiverseSearchUiState.Error(
+                            message = redeemed.message,
+                            canRetry = false
+                        )
+                    }
+                    is ThingiverseOAuthRedirectResult.Handoff,
+                    ThingiverseOAuthRedirectResult.NotThingiverseRedirect -> Unit
+                }
+            }
+            is ThingiverseOAuthRedirectResult.Failure -> {
+                thingiverseAuthMessage = result.message
+                thingiverseState = ThingiverseSearchUiState.Error(
+                    message = result.message,
+                    canRetry = false
+                )
+                currentScreen = AppScreen.ModelSearch
+            }
+            ThingiverseOAuthRedirectResult.NotThingiverseRedirect -> Unit
+        }
+        onThingiverseOAuthRedirectConsumed()
+    }
+
+    fun launchFindImportOrPromptForProfiles() {
+        profileStore.profileRequirementMessage()?.let { message ->
+            missingProfileDialogMessage = message
+            return
+        }
+        findImportState = FindImportState.SourcePicker
+        currentScreen = AppScreen.ModelSearch
+    }
+
+    fun openModelSource(source: ModelSourcePolicy) {
+        val externalUrl = source.externalUrl ?: return
+        val openedAt = SystemClock.elapsedRealtime()
+        findImportPendingSourceId = source.id
+        findImportPendingSourceOpenedAt = openedAt
+        findImportState = FindImportState.ExternalSiteOpened(source.id, openedAt)
+        runCatching {
+            CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .build()
+                .launchUrl(context, Uri.parse(externalUrl))
+            findImportState = FindImportState.AwaitingUserFile(source.id, openedAt)
+        }.onFailure {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(externalUrl)))
+                findImportState = FindImportState.AwaitingUserFile(source.id, openedAt)
+            }.onFailure { error ->
+                Log.w("MobileSlicer", "Unable to open model source $externalUrl", error)
+                findImportState = FindImportState.ImportBlocked(ImportFailureReason.FILE_UNAVAILABLE)
+            }
+        }
+    }
+
+    fun openThingiverseSourcePage(url: String) {
+        val parsedUri = runCatching { Uri.parse(url) }.getOrNull() ?: return
+        val host = parsedUri.host.orEmpty().lowercase(Locale.US)
+        if (parsedUri.scheme != "https" || (host != "thingiverse.com" && !host.endsWith(".thingiverse.com"))) {
+            thingiverseState = ThingiverseSearchUiState.Error(
+                message = "Thingiverse returned an unsupported original-page URL.",
+                canRetry = false
+            )
+            return
+        }
+        runCatching {
+            CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .build()
+                .launchUrl(context, parsedUri)
+        }.onFailure {
+            runCatching {
+                context.startActivity(Intent(Intent.ACTION_VIEW, parsedUri))
+            }.onFailure { error ->
+                Log.w("MobileSlicer", "Unable to open Thingiverse page $url", error)
+                thingiverseState = ThingiverseSearchUiState.Error(
+                    message = "Could not open the original Thingiverse page.",
+                    canRetry = false
+                )
+            }
+        }
+    }
+
+    fun signOutOfThingiverse() {
+        thingiverseAuthStore.clearSession()
+        thingiverseAuthSession = null
+        thingiverseOAuthBrowserOpen = false
+        thingiverseOAuthAutoContinueAttempted = false
+        thingiverseAuthMessage = "Signed out of Thingiverse."
+        thingiverseState = ThingiverseSearchUiState.Idle
+    }
+
+    fun launchFindImportFilePicker() {
+        appendNextImportToPlate = false
+        findImportFilePicker.launch(arrayOf("*/*"))
+    }
+
+    fun searchThingiverse() {
+        val query = thingiverseQuery.trim()
+        if (query.isBlank()) return
+        if (!thingiverseApiClient.isConfigured) {
+            thingiverseState = ThingiverseSearchUiState.MissingToken
+            return
+        }
+        thingiverseState = ThingiverseSearchUiState.Searching
+        coroutineScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    thingiverseApiClient.searchThings(query = query, page = 1)
+                }
+            }
+            thingiverseState = result.fold(
+                onSuccess = { results ->
+                    thingiverseSearchPage = 1
+                    lastThingiverseResults = results
+                    ThingiverseSearchUiState.SearchResults(
+                        query = query,
+                        results = results,
+                        page = 1,
+                        canLoadMore = results.size >= ThingiverseApiClient.DEFAULT_SEARCH_PAGE_SIZE
+                    )
+                },
+                onFailure = { error ->
+                    if (error is ThingiverseApiException && error.statusCode == 401) {
+                        thingiverseAuthStore.clearSession()
+                        thingiverseAuthSession = null
+                        thingiverseAuthMessage = "Thingiverse sign-in expired. Sign in again."
+                    }
+                    ThingiverseSearchUiState.Error(
+                        message = error.message ?: "Thingiverse search failed.",
+                        canRetry = true
+                    )
+                }
+            )
+        }
+    }
+
+    fun loadMoreThingiverseResults() {
+        val currentState = thingiverseState as? ThingiverseSearchUiState.SearchResults ?: return
+        if (!currentState.canLoadMore || currentState.isLoadingMore) return
+        val query = currentState.query.ifBlank { thingiverseQuery.trim() }
+        if (query.isBlank() || !thingiverseApiClient.isConfigured) return
+        val nextPage = currentState.page + 1
+        thingiverseState = currentState.copy(isLoadingMore = true)
+        coroutineScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    thingiverseApiClient.searchThings(query = query, page = nextPage)
+                }
+            }
+            thingiverseState = result.fold(
+                onSuccess = { moreResults ->
+                    val combined = (currentState.results + moreResults).distinctBy { it.thingId }
+                    thingiverseSearchPage = nextPage
+                    lastThingiverseResults = combined
+                    currentState.copy(
+                        results = combined,
+                        page = nextPage,
+                        canLoadMore = moreResults.size >= ThingiverseApiClient.DEFAULT_SEARCH_PAGE_SIZE,
+                        isLoadingMore = false
+                    )
+                },
+                onFailure = { error ->
+                    ThingiverseSearchUiState.Error(
+                        message = error.message ?: "Thingiverse search failed.",
+                        canRetry = true
+                    )
+                }
+            )
+        }
+    }
+
+    fun loadThingiverseFiles(thing: ThingiverseSearchResult) {
+        if (!thingiverseApiClient.isConfigured) {
+            thingiverseState = ThingiverseSearchUiState.MissingToken
+            return
+        }
+        lastThingiverseFiles = emptyList()
+        thingiverseState = ThingiverseSearchUiState.LoadingFiles(thing)
+        coroutineScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    thingiverseApiClient.filesForThing(thing.thingId)
+                }
+            }
+            thingiverseState = result.fold(
+                onSuccess = { files ->
+                    lastThingiverseFiles = files
+                    ThingiverseSearchUiState.FileResults(
+                        thing = thing,
+                        files = files
+                    )
+                },
+                onFailure = { error ->
+                    if (error is ThingiverseApiException && error.statusCode == 401) {
+                        thingiverseAuthStore.clearSession()
+                        thingiverseAuthSession = null
+                        thingiverseAuthMessage = "Thingiverse sign-in expired. Sign in again."
+                    }
+                    ThingiverseSearchUiState.Error(
+                        message = error.message ?: "Could not load Thingiverse files.",
+                        canRetry = true
+                    )
+                }
+            )
+        }
+    }
+
+    fun restoreThingiverseBrowsingStateAfterImport() {
+        val importingState = thingiverseState as? ThingiverseSearchUiState.ImportingFile ?: return
+        thingiverseState = if (lastThingiverseFiles.isNotEmpty()) {
+            ThingiverseSearchUiState.FileResults(
+                thing = importingState.thing,
+                files = lastThingiverseFiles
+            )
+        } else {
+            ThingiverseSearchUiState.SearchResults(
+                query = thingiverseQuery.trim(),
+                results = lastThingiverseResults,
+                page = thingiverseSearchPage,
+                canLoadMore = lastThingiverseResults.size >= ThingiverseApiClient.DEFAULT_SEARCH_PAGE_SIZE
+            )
+        }
+    }
+
+    fun importThingiverseFile(
+        thing: ThingiverseSearchResult,
+        file: ThingiverseFileResult
+    ) {
+        if (!thingiverseApiClient.isConfigured) {
+            thingiverseState = ThingiverseSearchUiState.MissingToken
+            return
+        }
+        if (!file.isSupportedModelFile) {
+            thingiverseState = ThingiverseSearchUiState.Error(
+                message = "Only STL, 3MF, STEP, and STP files can be imported.",
+                canRetry = false
+            )
+            return
+        }
+        appendNextImportToPlate = false
+        thingiverseState = ThingiverseSearchUiState.ImportingFile(thing, file)
+        coroutineScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    thingiverseApiClient.downloadFile(
+                        context = context.applicationContext,
+                        file = file
+                    )
+                }
+            }
+            result.fold(
+                onSuccess = { downloadedFile ->
+                    restoreThingiverseBrowsingStateAfterImport()
+                    importPickedModelUri(Uri.fromFile(downloadedFile))
+                },
+                onFailure = { error ->
+                    if (error is ThingiverseApiException && error.statusCode == 401) {
+                        thingiverseAuthStore.clearSession()
+                        thingiverseAuthSession = null
+                        thingiverseAuthMessage = "Thingiverse sign-in expired. Sign in again."
+                    }
+                    thingiverseState = ThingiverseSearchUiState.Error(
+                        message = error.message ?: "Thingiverse import failed.",
+                        canRetry = true
+                    )
+                }
+            )
+        }
+    }
+
+    fun importThingiverseFiles(
+        thing: ThingiverseSearchResult,
+        files: List<ThingiverseFileResult>
+    ) {
+        if (!thingiverseApiClient.isConfigured) {
+            thingiverseState = ThingiverseSearchUiState.MissingToken
+            return
+        }
+        val supportedFiles = files.filter { it.isSupportedModelFile }
+        if (supportedFiles.isEmpty()) {
+            thingiverseState = ThingiverseSearchUiState.Error(
+                message = "No STL or 3MF files were selected.",
+                canRetry = false
+            )
+            return
+        }
+        val appendFirstImport = false
+        appendNextImportToPlate = appendFirstImport
+        val autoArrangeAfterImport = supportedFiles.size > 1
+        if (autoArrangeAfterImport) {
+            importAndAutoArrangeInProgress = true
+        }
+        coroutineScope.launch {
+            var importedCount = 0
+            try {
+                supportedFiles.forEachIndexed { index, file ->
+                    thingiverseState = ThingiverseSearchUiState.ImportingFiles(
+                        thing = thing,
+                        files = supportedFiles,
+                        currentIndex = index
+                    )
+                    workspaceStatus = "Importing ${index + 1} of ${supportedFiles.size}\n${file.displayName}"
+                    val downloadedFile = runCatching {
+                        withContext(Dispatchers.IO) {
+                            thingiverseApiClient.downloadFile(
+                                context = context.applicationContext,
+                                file = file
+                            )
+                        }
+                    }.getOrElse { error ->
+                        if (error is ThingiverseApiException && error.statusCode == 401) {
+                            thingiverseAuthStore.clearSession()
+                            thingiverseAuthSession = null
+                            thingiverseAuthMessage = "Thingiverse sign-in expired. Sign in again."
+                        }
+                        importInProgress = false
+                        appendNextImportToPlate = false
+                        val message = if (importedCount > 0) {
+                            "Imported $importedCount of ${supportedFiles.size}. ${file.displayName} failed."
+                        } else {
+                            error.message ?: "Thingiverse import failed."
+                        }
+                        workspaceStatus = message
+                        thingiverseState = ThingiverseSearchUiState.Error(
+                            message = message,
+                            canRetry = true
+                        )
+                        return@launch
+                    }
+                    val shouldAppend = appendFirstImport || importedCount > 0
+                    val imported = importPickedModelUriInternal(
+                        uri = Uri.fromFile(downloadedFile),
+                        appendRequestedForImport = shouldAppend
+                    )
+                    if (!imported) {
+                        appendNextImportToPlate = false
+                        val message = if (importedCount > 0) {
+                            "Imported $importedCount of ${supportedFiles.size}. ${file.displayName} could not be loaded."
+                        } else {
+                            "Thingiverse file could not be loaded."
+                        }
+                        workspaceStatus = message
+                        thingiverseState = ThingiverseSearchUiState.Error(
+                            message = message,
+                            canRetry = true
+                        )
+                        return@launch
+                    }
+                    importedCount += 1
+                }
+                appendNextImportToPlate = false
+                workspaceStatus = "Imported $importedCount Thingiverse files"
+                thingiverseState = ThingiverseSearchUiState.FileResults(
+                    thing = thing,
+                    files = lastThingiverseFiles.ifEmpty { supportedFiles }
+                )
+                if (importedCount > 1) {
+                    workspaceStatus = "Importing and auto-arranging\nPlacing $importedCount files"
+                    arrangePlateObjects(allowRotation = false) {
+                        importAndAutoArrangeInProgress = false
+                    }
+                } else {
+                    importAndAutoArrangeInProgress = false
+                }
+            } finally {
+                if (importedCount <= 1 || thingiverseState is ThingiverseSearchUiState.Error) {
+                    importAndAutoArrangeInProgress = false
+                }
+            }
+        }
+    }
+
+    fun backToThingiverseResults() {
+        thingiverseState = ThingiverseSearchUiState.SearchResults(
+            query = thingiverseQuery.trim(),
+            results = lastThingiverseResults,
+            page = thingiverseSearchPage,
+            canLoadMore = lastThingiverseResults.size >= ThingiverseApiClient.DEFAULT_SEARCH_PAGE_SIZE
+        )
+    }
+
+    fun clearThingiverseSearch() {
+        thingiverseQuery = ""
+        thingiverseSearchPage = 1
+        lastThingiverseResults = emptyList()
+        lastThingiverseFiles = emptyList()
+        thingiverseState = ThingiverseSearchUiState.Idle
+    }
+
     fun openCalibrationsOrPromptForProfiles() {
         profileStore.profileRequirementMessage()?.let { message ->
             missingProfileDialogMessage = message
@@ -1359,9 +2539,16 @@ internal fun ModelLoaderScreen(
         currentScreen = AppScreen.Calibrations
     }
 
-    val workspacePreparationObject = selectedPlateObjectId?.let { objectId ->
+    val selectedWorkspacePreparationObject = selectedPlateObjectId?.let { objectId ->
         plateObjects.firstOrNull { it.id == objectId }
     }
+    val workspacePreparationObject = selectedWorkspacePreparationObject
+        ?.takeIf { it.mesh == null && it.viewerPreparationError.isNullOrBlank() }
+        ?: plateObjects.firstOrNull { objectOnPlate ->
+            objectOnPlate.format == ImportedModelFormat.Stl &&
+                objectOnPlate.mesh == null &&
+                objectOnPlate.viewerPreparationError.isNullOrBlank()
+        }
     val workspacePreparationKey = workspacePreparationTargetKey(workspacePreparationObject, currentModelFilePath)
 
     LaunchedEffect(currentScreen, modelLoaded, currentModelFilePath, currentModelFormatName, workspacePreparationKey) {
@@ -1406,6 +2593,7 @@ internal fun ModelLoaderScreen(
                 workspaceStatus = statusMessage
             }
             logResponsivenessEvent("workspace_mesh_prepared")
+            scheduleNativePlatePlanningPrewarm("workspace_mesh_prepared")
         } finally {
             workspacePreparationTargetKey = clearedWorkspacePreparationTarget(
                 currentTargetKey = workspacePreparationTargetKey,
@@ -1474,6 +2662,12 @@ internal fun ModelLoaderScreen(
                 onSelectModel = {
                     launchModelPickerOrPromptForProfiles(appendToPlate = false)
                 },
+                onFindAndImportModel = {
+                    launchFindImportOrPromptForProfiles()
+                },
+                onScannerClick = {
+                    currentScreen = AppScreen.Scanner
+                },
                 onCalibrationsClick = ::openCalibrationsOrPromptForProfiles,
                 onProfilesClick = {
                     profilesReturnScreenName = AppScreen.Home.name
@@ -1481,6 +2675,45 @@ internal fun ModelLoaderScreen(
                 },
                 onOpenProject = ::openSavedProject,
                 onDeleteProject = ::deleteSavedProject,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+            AppScreen.ModelSearch -> FindAndImportModelScreen(
+                state = findImportState,
+                sources = SourceRegistry.defaultSources,
+                thingiverseState = thingiverseState,
+                thingiverseQuery = thingiverseQuery,
+                thingiverseSignedInLabel = thingiverseAuthSession?.displayName
+                    ?.let { "Signed in to Thingiverse as $it" }
+                    ?: thingiverseAuthSession?.let { "Signed in to Thingiverse" },
+                thingiverseAuthMessage = thingiverseAuthMessage,
+                thingiverseSignInAvailable = thingiverseOAuthConfig.isConfigured,
+                importInProgress = importInProgress,
+                onOpenSource = ::openModelSource,
+                onThingiverseQueryChange = { query -> thingiverseQuery = query },
+                onThingiverseSearch = ::searchThingiverse,
+                onThingiverseLoadMore = ::loadMoreThingiverseResults,
+                onThingiverseOpenFiles = ::loadThingiverseFiles,
+                onThingiverseOpenPage = ::openThingiverseSourcePage,
+                onThingiverseImportFile = ::importThingiverseFile,
+                onThingiverseImportFiles = ::importThingiverseFiles,
+                onThingiverseBackToResults = ::backToThingiverseResults,
+                onThingiverseClearSearch = ::clearThingiverseSearch,
+                onThingiverseSignIn = ::signInToThingiverse,
+                onThingiverseSignOut = ::signOutOfThingiverse,
+                onImportDownloadedFile = ::launchFindImportFilePicker,
+                onBack = {
+                    restoreThingiverseBrowsingStateAfterImport()
+                    currentScreen = AppScreen.Home
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+            AppScreen.Scanner -> ScannerScreen(
+                onBack = { currentScreen = AppScreen.Home },
+                onWorkspaceImportRequested = ::importScannerWorkspaceModelInternal,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
@@ -1500,8 +2733,10 @@ internal fun ModelLoaderScreen(
                 selectedPrinter = selectedPrinter,
                 activeConfiguration = activeConfiguration,
                 workspaceStatus = workspaceStatus,
+                showModelImportOverlay = importInProgress || workspacePreparationTargetKey != null,
                 workspaceMode = workspaceMode,
                 sliceInProgress = sliceInProgress,
+                platePlanningInProgress = platePlanningInProgress,
                 sendToPrinterInProgress = sendToPrinterInProgress,
                 hasGeneratedGcode = currentGcodeFilePath != null,
                 canSendToPrinter = selectedPrinter.printHost.isNotBlank() ||
@@ -1771,7 +3006,7 @@ internal fun ModelLoaderScreen(
                                                         viewerMeshPrepMs = 0L,
                                                         sourceTriangleCount = it.sourceTriangleCount,
                                                         displayTriangleCount = it.displayTriangleCount,
-                                                        reducedForDisplay = it.reducedForDisplay
+                                                        renderArrayBytes = it.renderArrayBytes
                                                     )
                                                 },
                                                 transform = cutTransform,
@@ -1824,8 +3059,38 @@ internal fun ModelLoaderScreen(
                     workspaceMode = mode
                 },
                 onOpenProfiles = {
+                    objectProcessEditorObjectId = null
                     profilesReturnScreenName = AppScreen.Workspace.name
                     currentScreen = AppScreen.Profiles
+                },
+                onOpenObjectProcess = { objectId ->
+                    openObjectProcessEditor(objectId)
+                },
+                onAddModifierToObject = { objectId ->
+                    launchModifierPicker(objectId)
+                },
+                onOpenModifierProcess = { objectId, modifierId ->
+                    openModifierProcessEditor(objectId, modifierId)
+                },
+                onToggleModifier = { objectId, modifierId, enabled ->
+                    updatePlateObjectModifier(objectId, modifierId) { modifier ->
+                        modifier.copy(enabled = enabled)
+                    }
+                    workspaceStatus = if (enabled) "Modifier enabled" else "Modifier disabled"
+                },
+                onDeleteModifier = { objectId, modifierId ->
+                    deletePlateObjectModifier(objectId, modifierId)
+                },
+                onCenterModifierOnObject = { objectId, modifierId ->
+                    centerPlateObjectModifier(objectId, modifierId)
+                },
+                onRotateModifier = { objectId, modifierId ->
+                    rotatePlateObjectModifier(objectId, modifierId)
+                },
+                onModifierTransformChanged = { objectId, modifierId, transform ->
+                    updatePlateObjectModifier(objectId, modifierId) { modifier ->
+                        modifier.copy(transform = transform)
+                    }
                 },
                 onSavePlate = {
                     val projectObjects = currentWorkspacePlatesSnapshot().flatMap { it.objects }
@@ -1898,6 +3163,7 @@ internal fun ModelLoaderScreen(
                                 configuration = activeConfiguration,
                                 calibrationJob = currentCalibrationJob,
                                 plateObjects = plateObjects.toList(),
+                                processProfiles = sliceReadyProfileStore.processes,
                                 profileFilaments = sliceReadyProfileStore.filaments,
                                 plateFilamentSlots = plateFilamentSlots.toList(),
                                 fallbackFilament = selectedFilament,
@@ -1917,6 +3183,7 @@ internal fun ModelLoaderScreen(
                                         configuration = sliceInputs.configuration,
                                         calibrationJob = sliceInputs.calibrationJob,
                                         plateObjects = sliceInputs.plateObjects,
+                                        processProfiles = sliceInputs.processProfiles,
                                         profileFilaments = sliceInputs.profileFilaments,
                                         activePlateSlots = sliceInputs.activePlateSlots,
                                         flushVolumes = sliceInputs.flushVolumes,
@@ -1955,7 +3222,11 @@ internal fun ModelLoaderScreen(
                         calibrationJob = currentCalibrationJob,
                         plateObjects = plateObjects.toList(),
                         summary = currentSliceSummary,
-                        filamentMaterial = selectedFilament.materialType,
+                        filamentMaterial = activeExportFilamentMaterial(
+                            plateObjects = plateObjects.toList(),
+                            plateFilamentSlots = plateFilamentSlots.toList(),
+                            fallbackFilament = selectedFilament
+                        ),
                         fallbackName = currentGcodeFileName
                     )?.let { action ->
                         currentGcodeFileName = action.fileName
@@ -1996,7 +3267,11 @@ internal fun ModelLoaderScreen(
                         calibrationJob = currentCalibrationJob,
                         plateObjects = plateObjects.toList(),
                         summary = currentSliceSummary,
-                        filamentMaterial = selectedFilament.materialType,
+                        filamentMaterial = activeExportFilamentMaterial(
+                            plateObjects = plateObjects.toList(),
+                            plateFilamentSlots = plateFilamentSlots.toList(),
+                            fallbackFilament = selectedFilament
+                        ),
                         fallbackName = currentGcodeFileName
                     )?.let { action ->
                         currentGcodeFileName = action.fileName
@@ -2027,26 +3302,133 @@ internal fun ModelLoaderScreen(
                 },
                 modifier = Modifier.padding(innerPadding)
             )
-            AppScreen.Profiles -> ProfilesScreen(
-                store = profileStore,
-                showAdvancedProfileSettings = showAdvancedProfileSettings,
-                onStoreChanged = { updated -> updateProfileStore { updated } },
-                onTestPrinterConnection = onTestPrinterConnectionRequested,
-                onPrinterStatus = onPrinterStatusRequested,
-                onDiscoverPrinterHosts = onDiscoverPrinterHostsRequested,
-                onBrowsePrinterConnectionTargets = onBrowsePrinterConnectionTargetsRequested,
-                onBrowsePrinterConnectionGroups = onBrowsePrinterConnectionGroupsRequested,
-                onSimplyPrintLogin = onSimplyPrintLoginRequested,
-                onOpenPrinterUi = { printer ->
-                    printerOpenPlan(printer).onSuccess { url ->
-                        printerBrowserUrl = url
-                        printerBrowserReturnScreenName = AppScreen.Profiles.name
-                        currentScreen = AppScreen.PrinterBrowser
-                    }
-                },
-                onBack = { handleBackNavigation() },
-                modifier = Modifier.padding(innerPadding)
-            )
+            AppScreen.Profiles -> {
+                val objectProcessObject = selectedObjectForProcessEditor()
+                val modifierProcessTarget = selectedModifierForProcessEditor()
+                val modifierParentObject = modifierProcessTarget?.first
+                val modifierProcess = modifierProcessTarget?.second
+                val objectProcessMode = objectProcessObject != null || modifierProcess != null
+                val objectProcessScopeLabel = if (modifierProcess != null) "Modifier" else "Object"
+                ProfilesScreen(
+                    store = profileStore,
+                    showAdvancedProfileSettings = showAdvancedProfileSettings,
+                    onStoreChanged = { updated -> updateProfileStore { updated } },
+                    onTestPrinterConnection = onTestPrinterConnectionRequested,
+                    onPrinterStatus = onPrinterStatusRequested,
+                    onDiscoverPrinterHosts = onDiscoverPrinterHostsRequested,
+                    onBrowsePrinterConnectionTargets = onBrowsePrinterConnectionTargetsRequested,
+                    onBrowsePrinterConnectionGroups = onBrowsePrinterConnectionGroupsRequested,
+                    onSimplyPrintLogin = onSimplyPrintLoginRequested,
+                    onOpenPrinterUi = { printer ->
+                        printerOpenPlan(printer).onSuccess { url ->
+                            printerBrowserUrl = url
+                            printerBrowserReturnScreenName = AppScreen.Profiles.name
+                            currentScreen = AppScreen.PrinterBrowser
+                        }
+                    },
+                    workspaceProcessMode = profilesReturnScreenName == AppScreen.Workspace.name && !objectProcessMode,
+                    workspaceProcess = selectedProcess,
+                    workspaceHasProcessOverrides = activePlateProfileState.hasProcessOverrides,
+                    objectProcessMode = objectProcessMode,
+                    objectProcessLabel = modifierProcess?.label ?: objectProcessObject?.label,
+                    objectProcessScopeLabel = objectProcessScopeLabel,
+                    objectProcess = modifierProcessForEditor(modifierProcess) ?: objectProcessForEditor(objectProcessObject),
+                    objectHasProcessOverrides = modifierProcess?.processOverride?.hasProcessOverrides
+                        ?: (objectProcessObject?.processOverride?.hasProcessOverrides == true),
+                    objectHasProcessState = modifierProcess?.processOverride != null || objectProcessObject?.processOverride != null,
+                    onWorkspaceProcessSelected = { process ->
+                        applyWorkspaceProcessState(
+                            activePlateProfileState.withSelectedProcess(process),
+                            "Process selected\n${process.name}"
+                        )
+                    },
+                    onWorkspaceProcessTransferred = { process ->
+                        applyWorkspaceProcessState(
+                            activePlateProfileState.transferProcessOverridesTo(process),
+                            "Process changes transferred\n${process.name}"
+                        )
+                    },
+                    onWorkspaceProcessApplied = { process ->
+                        applyWorkspaceProcessState(
+                            activePlateProfileState.withEditedProcess(process),
+                            "Process applied\n${process.name}"
+                        )
+                    },
+                    onWorkspaceProcessSaved = { process ->
+                        updateProfileStore {
+                            it.copy(
+                                processes = it.processes.upsert(process),
+                                selectedProcessId = process.id
+                            ).withSelectedProcessForCurrentPrinter(process.id)
+                        }
+                        applyWorkspaceProcessState(
+                            PlateProfileState().withSelectedProcess(process),
+                            "Process preset saved\n${process.name}"
+                        )
+                    },
+                    onObjectProcessApplied = { process ->
+                        if (modifierProcess != null) {
+                            applyModifierProcessOverride(objectProcessObject?.id, modifierProcess.id, process, "Modifier process applied")
+                        } else {
+                            applyObjectProcessOverride(objectProcessObject?.id, process, "Object process applied")
+                        }
+                        currentScreen = AppScreen.Workspace
+                    },
+                    onObjectProcessSelected = { process ->
+                        if (modifierProcess != null) {
+                            selectModifierProcessBase(objectProcessObject?.id, modifierProcess.id, process, "Modifier process selected")
+                        } else {
+                            selectObjectProcessBase(objectProcessObject?.id, process, "Object process selected")
+                        }
+                        currentScreen = AppScreen.Workspace
+                    },
+                    onObjectProcessSaved = { process ->
+                        updateProfileStore {
+                            it.copy(
+                                processes = it.processes.upsert(process)
+                            )
+                        }
+                        if (modifierProcess != null) {
+                            modifierParentObject?.id?.let { parentObjectId ->
+                                updatePlateObjectModifier(parentObjectId, modifierProcess.id) { modifier ->
+                                    modifier.copy(processOverride = modifier.processOverride.withSelectedProcess(process))
+                                }
+                            }
+                        } else {
+                            objectProcessObject?.id?.let { objectId ->
+                                updatePlateObject(objectId) { objectOnPlate ->
+                                    objectOnPlate.copy(
+                                        processOverride = (objectOnPlate.processOverride ?: PlateObjectProcessOverride())
+                                            .withSelectedProcess(process)
+                                    )
+                                }
+                            }
+                        }
+                        objectProcessEditorObjectId = null
+                        objectProcessEditorModifierId = null
+                        workspaceSession.clearGeneratedPreviewState()
+                        workspaceStatus = if (modifierProcess != null) {
+                            "Modifier process saved to preset\n${process.name}"
+                        } else {
+                            "Object process saved to preset\n${process.name}"
+                        }
+                        currentScreen = AppScreen.Workspace
+                    },
+                    onObjectProcessReset = {
+                        if (modifierProcess != null) {
+                            resetModifierProcessOverride(objectProcessObject?.id, modifierProcess.id)
+                        } else {
+                            resetObjectProcessOverride(objectProcessObject?.id)
+                        }
+                    },
+                    onBack = {
+                        objectProcessEditorObjectId = null
+                        objectProcessEditorModifierId = null
+                        handleBackNavigation()
+                    },
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
             AppScreen.Calibrations -> PrinterCalibrationsScreen(
                 store = profileStore,
                 onBack = { handleBackNavigation() },

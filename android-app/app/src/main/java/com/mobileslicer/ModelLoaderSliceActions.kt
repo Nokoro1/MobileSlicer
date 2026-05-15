@@ -4,6 +4,7 @@ import com.mobileslicer.calibration.CalibrationJob
 import com.mobileslicer.profiles.ActiveSlicerConfiguration
 import com.mobileslicer.profiles.FilamentProfile
 import com.mobileslicer.profiles.PrinterProfile
+import com.mobileslicer.profiles.ProcessProfile
 import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.StlMesh
 import com.mobileslicer.viewer.ViewerModelTransform
@@ -68,6 +69,7 @@ internal data class ModelLoaderSliceRunInputs(
     val configuration: ActiveSlicerConfiguration,
     val calibrationJob: CalibrationJob?,
     val plateObjects: List<PlateObject>,
+    val processProfiles: List<ProcessProfile>,
     val profileFilaments: List<FilamentProfile>,
     val activePlateSlots: List<PlateFilamentSlot>,
     val flushVolumes: PlateFlushVolumes?,
@@ -109,6 +111,7 @@ internal fun captureModelLoaderSliceRunInputs(
     configuration: ActiveSlicerConfiguration,
     calibrationJob: CalibrationJob?,
     plateObjects: List<PlateObject>,
+    processProfiles: List<ProcessProfile>,
     profileFilaments: List<FilamentProfile>,
     plateFilamentSlots: List<PlateFilamentSlot>,
     fallbackFilament: FilamentProfile,
@@ -125,6 +128,7 @@ internal fun captureModelLoaderSliceRunInputs(
         configuration = configuration,
         calibrationJob = calibrationJob,
         plateObjects = plateObjects.toList(),
+        processProfiles = processProfiles.toList(),
         profileFilaments = profileFilaments.toList(),
         activePlateSlots = plateFilamentSlots.toList().ifEmpty {
             listOf(fallbackFilament.toPlateFilamentSlot(index = 1))

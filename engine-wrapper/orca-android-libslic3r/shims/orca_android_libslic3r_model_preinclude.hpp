@@ -3,6 +3,5 @@
 
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/3mf.hpp"
-#include "libslic3r/Format/STEP.hpp"
 
 #endif

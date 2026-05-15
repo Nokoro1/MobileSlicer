@@ -159,7 +159,7 @@ internal fun ViewerStatePanel(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         val (title, body) = when (state) {
-            WorkspaceViewerState.Empty -> "No model on the plate" to "Import an STL or 3MF from Home to start preparing it."
+            WorkspaceViewerState.Empty -> "No model on the plate" to "Import an STL, 3MF, STEP, or STP from Home to start preparing it."
             WorkspaceViewerState.Preparing -> "Preparing workspace" to "Loading the model and getting the first view ready."
             WorkspaceViewerState.Unsupported -> "Preview unavailable" to "This model imported, but the workspace preview could not be prepared."
             is WorkspaceViewerState.Error -> state.title to state.message

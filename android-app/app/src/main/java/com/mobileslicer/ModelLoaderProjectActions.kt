@@ -13,6 +13,7 @@ import com.mobileslicer.workspace.PlateFilamentSlot
 import com.mobileslicer.workspace.PlateFlushVolumes
 import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.workspace.PlateObjectGeometrySource
+import com.mobileslicer.workspace.PlateProfileState
 import com.mobileslicer.workspace.WorkspacePlate
 import com.mobileslicer.workspace.computeSourceMeshFingerprint
 import com.mobileslicer.workspace.defaultWorkspacePlateLabel
@@ -33,6 +34,13 @@ internal data class ModelLoaderSavedProjectOpenResult(
     val nextPlateObjectId: Long,
     val printerBed: PrinterBedSpec
 )
+
+internal fun synchronizeWorkspaceProcessState(
+    plates: List<WorkspacePlate>,
+    profileState: PlateProfileState
+): List<WorkspacePlate> = plates.map { plate ->
+    plate.copy(profileState = profileState)
+}
 
 internal data class ModelLoaderSavedProjectsUpdate(
     val projects: List<SavedProject>,
@@ -210,7 +218,21 @@ internal fun buildSavedProject(
             bounds = objectOnPlate.mesh?.bounds ?: objectOnPlate.bounds,
             transform = objectOnPlate.transform,
             paint = objectOnPlate.paint.rebasedForSource(sourceKey, savedFingerprint),
-            geometrySource = savedGeometrySource
+            geometrySource = savedGeometrySource,
+            processOverride = objectOnPlate.processOverride,
+            modifiers = objectOnPlate.modifiers.map { modifier ->
+                val modifierFile = File(modifier.filePath)
+                val modifierExtension = modifierFile.extension.ifBlank { "stl" }
+                val modifierTargetFile = File(
+                    modelDir,
+                    "modifier_${modifier.id}_${safeProjectFileName(objectOnPlate.label)}_${safeProjectFileName(modifier.label)}.$modifierExtension"
+                )
+                if (modifierFile.exists() && modifierFile.absolutePath != modifierTargetFile.absolutePath) {
+                    runCatching { modifierFile.copyTo(modifierTargetFile, overwrite = true) }
+                }
+                modifier.copy(filePath = if (modifierTargetFile.exists()) modifierTargetFile.absolutePath else modifier.filePath)
+            },
+            attribution = objectOnPlate.attribution
         )
     }
     val normalizedWorkspacePlates = workspacePlates.ifEmpty {
@@ -219,7 +241,8 @@ internal fun buildSavedProject(
     val savedPlates = normalizedWorkspacePlates.mapIndexed { index, plate ->
         SavedProjectPlate(
             label = plate.label.ifBlank { defaultWorkspacePlateLabel(index + 1) },
-            plateObjects = savePlateObjects(plate.objects)
+            plateObjects = savePlateObjects(plate.objects),
+            profileState = plate.profileState
         )
     }
     val savedObjects = savedPlates.flatMap { it.plateObjects }.ifEmpty { savePlateObjects(plateObjects) }
@@ -262,7 +285,30 @@ private fun PlateObjectGeometrySource.rebasedForSavedProject(
         }
         PlateObjectGeometrySource.ThreeMfMeshExtract(
             originalPath = savedOriginal,
-            extractedStlPath = savedFilePath
+            extractedStlPath = savedFilePath,
+            projectMetadata = projectMetadata?.copy(
+                sourcePath = savedOriginal,
+                nativeProjectFilePath = projectMetadata.nativeProjectFilePath
+                    ?.takeIf { File(it).exists() }
+                    ?: projectMetadata.nativeProjectFilePath
+            )
+        )
+    }
+    is PlateObjectGeometrySource.StepMeshConvert -> {
+        val original = File(originalPath)
+        val extension = original.extension.takeIf { it.equals("stp", ignoreCase = true) } ?: "step"
+        val savedOriginal = if (original.exists()) {
+            val target = File(modelDir, "${safeProjectFileName(objectLabel)}-source.$extension")
+            runCatching { original.copyTo(target, overwrite = true) }
+            if (target.exists()) target.absolutePath else originalPath
+        } else {
+            originalPath
+        }
+        PlateObjectGeometrySource.StepMeshConvert(
+            originalPath = savedOriginal,
+            convertedStlPath = savedFilePath,
+            linearDeflection = linearDeflection,
+            angleDeflection = angleDeflection
         )
     }
 }
@@ -285,6 +331,18 @@ private fun loadSavedProjectPlateObjects(
             val objectId = nextObjectId++
             val preparedMesh = runCatching { StlMeshParser.parseForDisplay(sourceFile) }.getOrNull()
             val mesh = preparedMesh?.mesh
+            val modifiers = savedObject.modifiers.map { modifier ->
+                val modifierFile = File(modifier.filePath)
+                val preparedModifier = if (modifier.enabled && modifierFile.exists()) {
+                    runCatching { StlMeshParser.parseForDisplay(modifierFile) }.getOrNull()
+                } else {
+                    null
+                }
+                modifier.copy(
+                    bounds = preparedModifier?.mesh?.bounds ?: modifier.bounds,
+                    mesh = preparedModifier?.mesh
+                )
+            }
             val fingerprint = computeSourceMeshFingerprint(
                 file = sourceFile,
                 bounds = mesh?.bounds ?: savedObject.bounds,
@@ -304,7 +362,10 @@ private fun loadSavedProjectPlateObjects(
                 workspacePreparationTiming = null,
                 transform = savedObject.transform,
                 paint = savedObject.paint.validatedAgainst(fingerprint),
-                geometrySource = savedObject.geometrySource
+                geometrySource = savedObject.geometrySource,
+                processOverride = savedObject.processOverride,
+                modifiers = modifiers,
+                attribution = savedObject.attribution
             )
         }
     }
@@ -328,7 +389,8 @@ internal fun openSavedProjectState(project: SavedProject): ModelLoaderSavedProje
             id = index + 1L,
             label = savedPlate.label.ifBlank { defaultWorkspacePlateLabel(index + 1) },
             objects = loaded.objects,
-            selectedObjectId = loaded.objects.firstOrNull()?.id
+            selectedObjectId = loaded.objects.firstOrNull()?.id,
+            profileState = savedPlate.profileState
         )
     }
     if (loadedPlates.sumOf { it.objects.size } != savedPlates.sumOf { it.plateObjects.size }) return null

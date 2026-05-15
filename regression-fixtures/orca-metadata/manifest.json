@@ -1,0 +1,277 @@
+{
+  "schema_version": 1,
+  "orca_reference": {
+    "status": "cli-metadata-plus-source-thumbnail-contract",
+    "required_for_strict_gate": true,
+    "notes": "Official OrcaSlicer CLI calls export_gcode with a null thumbnail callback, so CLI references validate print-time and filament metadata while thumbnail block parity is validated from Orca source contracts and MobileSlicer outputs."
+  },
+  "cases": [
+    {
+      "id": "simple-cube-png-gcode",
+      "kind": "gcode",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "paths": {
+        "mobile_gcode": "regression-fixtures/orca-metadata/mobile/simple-cube-png.gcode",
+        "orca_gcode": "regression-fixtures/orca-metadata/references/simple-cube-png.gcode"
+      },
+      "mobile_capture": {
+        "verify_android_label": "simple-cube-png",
+        "config_overrides": {
+          "thumbnails": "128x128",
+          "thumbnails_format": "PNG",
+          "filament_type": "PLA"
+        }
+      },
+      "expectations": {
+        "expect_thumbnails": [
+          "thumbnail:128x128"
+        ],
+        "require_gcode_thumbnail_visuals": true,
+        "require_gcode_thumbnail_antialias": true,
+        "require_print_time": true,
+        "require_filament": true,
+        "validate_orca_thumbnails": false,
+        "require_stripped_hash_match": false
+      }
+    },
+    {
+      "id": "qidi-q2-legacy-png-gcode",
+      "kind": "gcode",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "paths": {
+        "mobile_gcode": "regression-fixtures/orca-metadata/mobile/qidi-q2-legacy-png.gcode",
+        "orca_gcode": "regression-fixtures/orca-metadata/references/qidi-q2-legacy-png.gcode"
+      },
+      "mobile_capture": {
+        "verify_android_label": "qidi-q2-legacy-png",
+        "config_overrides": {
+          "thumbnails": "150x150",
+          "thumbnails_format": "PNG",
+          "filament_type": "PLA"
+        },
+        "notes": "Mobile automation currently forces the normalized Orca request. Desktop reference generation must use the actual Qidi Q2 profile legacy thumbnail_size path."
+      },
+      "expectations": {
+        "expect_thumbnails": [
+          "thumbnail:150x150"
+        ],
+        "forbid_thumbnail_tags": [
+          "gimage",
+          "simage"
+        ],
+        "require_gcode_thumbnail_visuals": true,
+        "require_gcode_thumbnail_antialias": true,
+        "require_print_time": true,
+        "require_filament": true,
+        "validate_orca_thumbnails": false,
+        "require_stripped_hash_match": false
+      }
+    },
+    {
+      "id": "non-qidi-qoi-gcode",
+      "kind": "gcode",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "paths": {
+        "mobile_gcode": "regression-fixtures/orca-metadata/mobile/non-qidi-qoi.gcode",
+        "orca_gcode": "regression-fixtures/orca-metadata/references/non-qidi-qoi.gcode"
+      },
+      "mobile_capture": {
+        "verify_android_label": "non-qidi-qoi",
+        "config_overrides": {
+          "thumbnails": "96x96",
+          "thumbnails_format": "QOI",
+          "filament_type": "PLA"
+        }
+      },
+      "expectations": {
+        "expect_thumbnails": [
+          "thumbnail_QOI:96x96"
+        ],
+        "require_gcode_thumbnail_payload_signatures": true,
+        "require_print_time": true,
+        "require_filament": true,
+        "validate_orca_thumbnails": false,
+        "require_stripped_hash_match": false
+      }
+    },
+    {
+      "id": "jpg-gcode",
+      "kind": "gcode",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "paths": {
+        "mobile_gcode": "regression-fixtures/orca-metadata/mobile/jpg.gcode"
+      },
+      "mobile_capture": {
+        "verify_android_label": "jpg",
+        "config_overrides": {
+          "thumbnails": "96x96",
+          "thumbnails_format": "JPG",
+          "filament_type": "PLA"
+        }
+      },
+      "expectations": {
+        "expect_thumbnails": [
+          "thumbnail_JPG:96x96"
+        ],
+        "require_gcode_thumbnail_payload_signatures": true,
+        "require_print_time": true,
+        "require_filament": true,
+        "validate_orca_thumbnails": false,
+        "require_stripped_hash_match": false
+      }
+    },
+    {
+      "id": "btt-tft-gcode",
+      "kind": "gcode",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "paths": {
+        "mobile_gcode": "regression-fixtures/orca-metadata/mobile/btt-tft.gcode"
+      },
+      "mobile_capture": {
+        "verify_android_label": "btt-tft",
+        "config_overrides": {
+          "thumbnails": "70x70",
+          "thumbnails_format": "BTT_TFT",
+          "filament_type": "PLA"
+        }
+      },
+      "expectations": {
+        "expect_thumbnails": [
+          "thumbnail_BTT:70x70"
+        ],
+        "require_print_time": true,
+        "require_filament": true,
+        "validate_orca_thumbnails": false,
+        "require_stripped_hash_match": false
+      }
+    },
+    {
+      "id": "qidi-colpic-gimage-simage-gcode",
+      "kind": "gcode",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "paths": {
+        "mobile_gcode": "regression-fixtures/orca-metadata/mobile/qidi-colpic-gimage-simage.gcode"
+      },
+      "mobile_capture": {
+        "verify_android_label": "qidi-colpic-gimage-simage",
+        "config_overrides": {
+          "thumbnails": "380x380,210x210",
+          "thumbnails_format": "COLPIC",
+          "filament_type": "PLA"
+        }
+      },
+      "expectations": {
+        "expect_thumbnails": [
+          "gimage",
+          "simage"
+        ],
+        "require_print_time": true,
+        "require_filament": true,
+        "validate_orca_thumbnails": false,
+        "require_stripped_hash_match": false
+      }
+    },
+    {
+      "id": "sliced-3mf-metadata",
+      "kind": "3mf",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "paths": {
+        "mobile_3mf": "regression-fixtures/orca-metadata/mobile/simple-cube.gcode.3mf",
+        "orca_3mf": "regression-fixtures/orca-metadata/references/simple-cube.gcode.3mf"
+      },
+      "mobile_capture": {
+        "verify_android_label": "sliced-3mf-metadata",
+        "output_suffix": ".gcode.3mf",
+        "config_overrides": {
+          "thumbnails": "128x128",
+          "thumbnails_format": "PNG",
+          "filament_type": "PLA"
+        }
+      },
+      "expectations": {
+        "expect_3mf_entries": [
+          "Metadata/plate_1.json"
+        ],
+        "expect_3mf_thumbnail_entries": [
+          "Metadata/plate_1.png",
+          "Metadata/plate_1_small.png",
+          "Metadata/plate_no_light_1.png",
+          "Metadata/top_1.png",
+          "Metadata/pick_1.png"
+        ],
+        "expect_3mf_relationship_targets": [
+          "/Metadata/plate_1.png",
+          "/Metadata/plate_1_small.png"
+        ],
+        "expect_3mf_bbox_json": [
+          "Metadata/plate_1.json"
+        ],
+        "require_distinct_3mf_thumbnail_entries": true,
+        "require_3mf_thumbnail_visuals": true,
+        "validate_orca_3mf_thumbnails": false,
+        "validate_orca_3mf_relationship_targets": false
+      }
+    },
+    {
+      "id": "multi-filament-gcode",
+      "kind": "gcode",
+      "notes": "MobileSlicer automation loads the same deterministic STL twice with extruder IDs 1 and 2 to validate Orca object-level tool assignment and emitted toolchange metadata. Desktop Orca CLI reference generation cannot assign per-object extruders without a project fixture, so this case validates the MobileSlicer export contract directly.",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "paths": {
+        "mobile_gcode": "regression-fixtures/orca-metadata/mobile/multi-filament.gcode"
+      },
+      "mobile_capture": {
+        "verify_android_label": "multi-filament",
+        "config_overrides": {
+          "thumbnails": "128x128",
+          "thumbnails_format": "PNG",
+          "filament_type": [
+            "PLA",
+            "PLA"
+          ],
+          "filament_settings_id": [
+            "Generic PLA A",
+            "Generic PLA B"
+          ],
+          "filament_colour": [
+            "#F2754E",
+            "#4EA3F2"
+          ],
+          "filament_diameter": [
+            1.75,
+            1.75
+          ],
+          "nozzle_temperature_initial_layer": [
+            210,
+            210
+          ],
+          "nozzle_temperature": [
+            210,
+            210
+          ],
+          "filament_max_volumetric_speed": [
+            50,
+            50
+          ],
+          "flush_multiplier": [
+            1,
+            1
+          ],
+          "flush_volumes_matrix": "0,0,0,0,0,0,0,0"
+        },
+        "automation_two_filament_objects": true
+      },
+      "expectations": {
+        "expect_thumbnails": [
+          "thumbnail:128x128"
+        ],
+        "require_gcode_thumbnail_visuals": true,
+        "require_gcode_thumbnail_antialias": true,
+        "require_print_time": true,
+        "require_filament": true,
+        "require_toolchange": true,
+        "require_stripped_hash_match": false
+      }
+    }
+  ]
+}

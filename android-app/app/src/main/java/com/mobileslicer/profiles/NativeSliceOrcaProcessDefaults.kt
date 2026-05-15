@@ -19,8 +19,6 @@ internal fun JSONObject.applyOrcaProcessTemplateDefaults(printer: PrinterProfile
     putIfBlankOrZero("bridge_speed", "50")
     putIfBlankOrValue("filter_out_gap_fill", "0.5", "0")
     putIfBlankOrValue("filter_out_gap_fill", "0.5", "0.0")
-    putIfBlankOrValue("gcode_label_objects", "0", "1")
-    putIfBlankOrValue("gcode_label_objects", "0", "true")
     if (printer.printerAgent.equals("qidi", ignoreCase = true) || printer.orcaFamily.equals("Qidi", ignoreCase = true)) {
         putIfBlankOrZero("filter_out_gap_fill", "2")
         putIfBlankOrValue("filter_out_gap_fill", "2", "0.5")
@@ -35,8 +33,6 @@ internal fun JSONObject.applyOrcaProcessTemplateDefaults(printer: PrinterProfile
     if ("max_bridge_length" !in processKeys) {
         putIfBlankOrZero("max_bridge_length", "10")
     }
-    putIfBlankOrValue("exclude_object", "1", "0")
-    putIfBlankOrValue("exclude_object", "1", "false")
     putIfBlankOrValue("ooze_prevention", "1", "0")
     putIfBlankOrValue("ooze_prevention", "1", "false")
     putIfBlankOrValue("prime_volume", "15", "45")

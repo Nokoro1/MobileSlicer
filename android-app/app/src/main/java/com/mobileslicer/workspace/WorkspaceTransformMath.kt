@@ -4,8 +4,10 @@ import com.mobileslicer.viewer.MeshBounds
 import com.mobileslicer.viewer.StlMesh
 import com.mobileslicer.viewer.StlModelPlacement
 import com.mobileslicer.viewer.ViewerModelTransform
+import com.mobileslicer.viewer.forEachTriangleVertexOffsets
 import com.mobileslicer.viewer.transformPoint
 import com.mobileslicer.viewer.transformedBounds
+import com.mobileslicer.viewer.vertexOffset
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -54,32 +56,33 @@ internal fun clusteredLayFaceNormal(
         fallbackWorldNormal.zMm
     ) ?: return fallbackWorldNormal
     val vertices = mesh.vertices
-    val tappedVertexOffset = triangleIndex * 9
-    if (tappedVertexOffset < 0 || tappedVertexOffset + 8 >= vertices.size) {
+    if (triangleIndex !in 0 until mesh.triangleCount) {
         return fallbackWorldNormal
     }
 
-    val tappedNormal = triangleNormalLocal(vertices, tappedVertexOffset) ?: return fallbackWorldNormal
-    val planePointX = vertices[tappedVertexOffset]
-    val planePointY = vertices[tappedVertexOffset + 1]
-    val planePointZ = vertices[tappedVertexOffset + 2]
+    val tappedA = mesh.vertexOffset(triangleIndex, 0)
+    val tappedB = mesh.vertexOffset(triangleIndex, 1)
+    val tappedC = mesh.vertexOffset(triangleIndex, 2)
+    val tappedNormal = triangleNormalLocal(vertices, tappedA, tappedB, tappedC) ?: return fallbackWorldNormal
+    val planePointX = vertices[tappedA]
+    val planePointY = vertices[tappedA + 1]
+    val planePointZ = vertices[tappedA + 2]
     val planeD = tappedNormal[0] * planePointX + tappedNormal[1] * planePointY + tappedNormal[2] * planePointZ
     var sumX = 0f
     var sumY = 0f
     var sumZ = 0f
     var areaSum = 0f
-    var offset = 0
-    while (offset + 8 < vertices.size) {
-        val normal = triangleNormalLocal(vertices, offset)
+    mesh.forEachTriangleVertexOffsets { _, a, b, c ->
+        val normal = triangleNormalLocal(vertices, a, b, c)
         if (normal != null) {
             val dot = normal[0] * tappedNormal[0] + normal[1] * tappedNormal[1] + normal[2] * tappedNormal[2]
             if (dot >= LayFacePlanarNormalDotThreshold) {
-                val centroidX = (vertices[offset] + vertices[offset + 3] + vertices[offset + 6]) / 3f
-                val centroidY = (vertices[offset + 1] + vertices[offset + 4] + vertices[offset + 7]) / 3f
-                val centroidZ = (vertices[offset + 2] + vertices[offset + 5] + vertices[offset + 8]) / 3f
+                val centroidX = (vertices[a] + vertices[b] + vertices[c]) / 3f
+                val centroidY = (vertices[a + 1] + vertices[b + 1] + vertices[c + 1]) / 3f
+                val centroidZ = (vertices[a + 2] + vertices[b + 2] + vertices[c + 2]) / 3f
                 val distance = abs(tappedNormal[0] * centroidX + tappedNormal[1] * centroidY + tappedNormal[2] * centroidZ - planeD)
                 if (distance <= LayFacePlanarDistanceToleranceMm) {
-                    val area = triangleAreaLocal(vertices, offset)
+                    val area = triangleAreaLocal(vertices, a, b, c)
                     sumX += normal[0] * area
                     sumY += normal[1] * area
                     sumZ += normal[2] * area
@@ -87,7 +90,6 @@ internal fun clusteredLayFaceNormal(
                 }
             }
         }
-        offset += 9
     }
     if (areaSum < LayFaceMinimumClusterAreaMm2) {
         return fallbackWorldNormal
@@ -207,13 +209,13 @@ private fun normalize3(x: Float, y: Float, z: Float): FloatArray? {
     return floatArrayOf(x / length, y / length, z / length)
 }
 
-private fun triangleNormalLocal(vertices: FloatArray, offset: Int): FloatArray? {
-    val abX = vertices[offset + 3] - vertices[offset]
-    val abY = vertices[offset + 4] - vertices[offset + 1]
-    val abZ = vertices[offset + 5] - vertices[offset + 2]
-    val acX = vertices[offset + 6] - vertices[offset]
-    val acY = vertices[offset + 7] - vertices[offset + 1]
-    val acZ = vertices[offset + 8] - vertices[offset + 2]
+private fun triangleNormalLocal(vertices: FloatArray, a: Int, b: Int, c: Int): FloatArray? {
+    val abX = vertices[b] - vertices[a]
+    val abY = vertices[b + 1] - vertices[a + 1]
+    val abZ = vertices[b + 2] - vertices[a + 2]
+    val acX = vertices[c] - vertices[a]
+    val acY = vertices[c + 1] - vertices[a + 1]
+    val acZ = vertices[c + 2] - vertices[a + 2]
     return normalize3(
         abY * acZ - abZ * acY,
         abZ * acX - abX * acZ,
@@ -221,13 +223,13 @@ private fun triangleNormalLocal(vertices: FloatArray, offset: Int): FloatArray? 
     )
 }
 
-private fun triangleAreaLocal(vertices: FloatArray, offset: Int): Float {
-    val abX = vertices[offset + 3] - vertices[offset]
-    val abY = vertices[offset + 4] - vertices[offset + 1]
-    val abZ = vertices[offset + 5] - vertices[offset + 2]
-    val acX = vertices[offset + 6] - vertices[offset]
-    val acY = vertices[offset + 7] - vertices[offset + 1]
-    val acZ = vertices[offset + 8] - vertices[offset + 2]
+private fun triangleAreaLocal(vertices: FloatArray, a: Int, b: Int, c: Int): Float {
+    val abX = vertices[b] - vertices[a]
+    val abY = vertices[b + 1] - vertices[a + 1]
+    val abZ = vertices[b + 2] - vertices[a + 2]
+    val acX = vertices[c] - vertices[a]
+    val acY = vertices[c + 1] - vertices[a + 1]
+    val acZ = vertices[c + 2] - vertices[a + 2]
     val crossX = abY * acZ - abZ * acY
     val crossY = abZ * acX - abX * acZ
     val crossZ = abX * acY - abY * acX

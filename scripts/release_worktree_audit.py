@@ -24,6 +24,22 @@ GROUP_RULES = (
         exact=(".gitignore",),
     ),
     GroupRule(
+        name="website-and-oauth-backend",
+        prefixes=("Website/",),
+    ),
+    GroupRule(
+        name="project-plans",
+        prefixes=("README/",),
+    ),
+    GroupRule(
+        name="android-build-and-manifest",
+        prefixes=(
+            "android-app/gradle/",
+            "android-app/app/src/main/AndroidManifest.xml",
+            "android-app/app/src/main/res/xml/",
+        ),
+    ),
+    GroupRule(
         name="native-orca-wrapper",
         prefixes=("engine-wrapper/", "android-app/app/src/main/cpp/"),
     ),

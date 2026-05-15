@@ -119,6 +119,7 @@ internal data class ViewerPaintRay(
 internal data class ViewerModelTransform(
     val centerXmm: Float,
     val centerYmm: Float,
+    val zOffsetMm: Float = 0f,
     val rotationXDegrees: Float = 0f,
     val rotationYDegrees: Float = 0f,
     val rotationZDegrees: Float = 0f,

@@ -40,7 +40,7 @@ internal fun nativeModelTransformFromArray(
     stride: Int = inferNativeModelTransformStride(values, offset)
 ): NativeModelTransform {
     require(offset >= 0 && offset + NativeModelTransformInputStride - 1 < values.size) { "Native transform offset is outside the source array." }
-    if (stride == NativeModelTransformOutputStride && offset + NativeModelTransformOutputStride - 1 < values.size) {
+    if (stride >= NativeModelTransformOutputStride && offset + NativeModelTransformOutputStride - 1 < values.size) {
         val matrix = List(9) { index -> values[offset + 3 + index] }
         return NativeModelTransform(
             xMm = values[offset + 0],
@@ -73,7 +73,7 @@ internal fun NativeModelTransform.writeTo(
     values[offset + 0] = xMm
     values[offset + 1] = yMm
     values[offset + 2] = zMm
-    if (stride == NativeModelTransformOutputStride) {
+    if (stride >= NativeModelTransformOutputStride) {
         require(offset + NativeModelTransformOutputStride - 1 < values.size) { "Native matrix transform offset is outside the target array." }
         val matrix = orientationMatrix
             ?.takeIf { it.size == 9 && it.all(Double::isFinite) }
@@ -142,7 +142,7 @@ internal fun defaultNativeModelTransform(
     return NativeModelTransform(
         xMm = printerBed.originXmm.toDouble() + transform.centerXmm.toDouble() - transformedCenter.xMm,
         yMm = printerBed.originYmm.toDouble() + transform.centerYmm.toDouble() - transformedCenter.yMm,
-        zMm = -transformedBounds.minZ,
+        zMm = transform.zOffsetMm.toDouble() - transformedBounds.minZ,
         rotationXRadians = rotationXRadians,
         rotationYRadians = rotationYRadians,
         rotationZRadians = rotationZRadians,
@@ -169,6 +169,14 @@ internal fun nativeModelTransformToViewerTransform(
     return ViewerModelTransform(
         centerXmm = (nativeTransform.xMm - printerBed.originXmm.toDouble() + transformedCenter.xMm).toFloat(),
         centerYmm = (nativeTransform.yMm - printerBed.originYmm.toDouble() + transformedCenter.yMm).toFloat(),
+        zOffsetMm = (nativeTransform.zMm + transformedBounds(
+            bounds = bounds,
+            scale = nativeTransform.uniformScale,
+            rotationXRadians = nativeTransform.rotationXRadians,
+            rotationYRadians = nativeTransform.rotationYRadians,
+            rotationZRadians = nativeTransform.rotationZRadians,
+            orientationMatrix = nativeTransform.orientationMatrix
+        ).minZ).toFloat(),
         rotationXDegrees = Math.toDegrees(nativeTransform.rotationXRadians).toFloat(),
         rotationYDegrees = Math.toDegrees(nativeTransform.rotationYRadians).toFloat(),
         rotationZDegrees = Math.toDegrees(nativeTransform.rotationZRadians).toFloat(),

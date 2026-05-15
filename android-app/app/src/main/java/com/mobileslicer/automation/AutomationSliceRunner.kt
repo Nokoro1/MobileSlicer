@@ -6,21 +6,31 @@ import android.util.Log
 import com.mobileslicer.nativebridge.NativeEngineCallResult
 import com.mobileslicer.nativebridge.NativeEngineCalls
 import com.mobileslicer.nativebridge.NativeEngineHandle
-import com.mobileslicer.nativebridge.isSuccess
 import com.mobileslicer.workspace.GcodeSummaryParser
 import com.mobileslicer.workspace.ModelImportTiming
 import com.mobileslicer.workspace.NativeModelTransform
+import com.mobileslicer.workspace.NativeModelTransformInputStride
+import com.mobileslicer.workspace.OffscreenEglSliceThumbnailRenderer
 import com.mobileslicer.workspace.SlicePipelineTiming
+import com.mobileslicer.workspace.SourceModelFileFormat
 import com.mobileslicer.workspace.defaultNativeModelTransform
+import com.mobileslicer.workspace.detectSourceModelFileFormat
+import com.mobileslicer.workspace.nativeModelTransformToViewerTransform
+import com.mobileslicer.workspace.renderSliceThumbnails
+import com.mobileslicer.workspace.writeTo
 import com.mobileslicer.workspace.workspaceResponsivenessLogLine
 import com.mobileslicer.viewer.DefaultPreviewVertexBudget
 import com.mobileslicer.viewer.PrinterBedSpec
 import com.mobileslicer.viewer.parsePreviewRangePlan
 import com.mobileslicer.viewer.StlMeshParser
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+
+private const val AUTOMATION_STEP_LINEAR_DEFLECTION = 0.003
+private const val AUTOMATION_STEP_ANGLE_DEFLECTION = 0.5
 
 internal data class AutomationSlicePaths(
     val modelPath: String,
@@ -39,6 +49,10 @@ internal data class AutomationSliceRequest(
         const val EXTRA_MODEL_PATH = "automation_model_path"
         const val EXTRA_OUTPUT_PATH = "automation_output_path"
         const val EXTRA_STATUS_PATH = "automation_status_path"
+        const val EXTRA_PRESERVE_PROJECT_OBJECTS = "automation_preserve_project_objects"
+        const val EXTRA_TWO_FILAMENT_OBJECTS = "automation_two_filament_objects"
+        const val EXTRA_MULTI_PLATE_PACKAGE = "automation_multi_plate_package"
+        const val EXTRA_EXPORT_PROJECT_3MF = "automation_export_project_3mf"
 
         fun fromIntent(intent: Intent): AutomationSliceRequest? {
             val paths = pathsFromValues(
@@ -79,6 +93,7 @@ internal data class AutomationSliceTiming(
     val placementMs: Long,
     val configMs: Long,
     val nativeSliceMs: Long,
+    val thumbnailMs: Long,
     val writeGcodeMs: Long,
     val totalMs: Long
 )
@@ -140,7 +155,8 @@ internal fun automationSliceSuccessStatus(
     nativeMetrics: AutomationSliceNativeMetrics = AutomationSliceNativeMetrics(),
     previewInfoMetrics: AutomationSlicePreviewInfoMetrics = AutomationSlicePreviewInfoMetrics(),
     previewLoadMetrics: AutomationSlicePreviewLoadMetrics = AutomationSlicePreviewLoadMetrics(),
-    configJson: String
+    configJson: String,
+    thumbnailAudit: String = ""
 ): String =
     "success: model=${modelFile.absolutePath} " +
         "staged=${stagedModel.absolutePath} " +
@@ -151,6 +167,7 @@ internal fun automationSliceSuccessStatus(
         "placementMs=${timing.placementMs} " +
         "configMs=${timing.configMs} " +
         "nativeSliceMs=${timing.nativeSliceMs} " +
+        "thumbnailMs=${timing.thumbnailMs} " +
         "writeGcodeMs=${timing.writeGcodeMs} " +
         "previewMoves=${nativeMetrics.previewMoves} " +
         "previewCacheBuilt=${if (nativeMetrics.previewCacheBuilt) 1 else 0} " +
@@ -192,6 +209,7 @@ internal fun automationSliceSuccessStatus(
         "previewLoadSuccess=${if (previewLoadMetrics.success) 1 else 0} " +
         "previewLoadGlUnavailable=${if (previewLoadMetrics.unavailableWithoutGlContext) 1 else 0} " +
         previewLoadMetrics.failure.takeIf { it.isNotBlank() }?.let { "previewLoadFailure=${it.sanitizeStatusToken()} " }.orEmpty() +
+        thumbnailAudit.takeIf { it.isNotBlank() }?.let { "thumbnailAudit=${it.sanitizeStatusToken()} " }.orEmpty() +
         "elapsedMs=${timing.totalMs} " +
         "config=$configJson"
 
@@ -328,25 +346,48 @@ internal class AutomationSliceRunner(
             return false
         }
         val stagingMs = SystemClock.elapsedRealtime() - stagingStartedAt
-        val nativeLoadStartedAt = SystemClock.elapsedRealtime()
-        val loadResult = NativeEngineCalls.loadModel(engineHandle, stagedModel.absolutePath)
-        if (loadResult !is NativeEngineCallResult.Success) {
-            NativeEngineCalls.clearGeneratedGcode(engineHandle)
-            writeStatus("failed: ${loadResult.statusMessage} path=${request.modelPath} staged=${stagedModel.absolutePath}")
+        val exportProject3mf = request.intent.getBooleanExtra(
+            AutomationSliceRequest.EXTRA_EXPORT_PROJECT_3MF,
+            false
+        )
+        if (exportProject3mf) {
+            return runProject3mfRoundTripExport(
+                request = request,
+                modelFile = modelFile,
+                stagedModel = stagedModel,
+                outputFile = outputFile,
+                startedAt = startedAt,
+                stagingMs = stagingMs,
+                engineHandle = engineHandle,
+                writeStatus = ::writeStatus
+            )
+        }
+        val preparedModel = prepareAutomationWorkspaceModel(engineHandle, stagedModel, ::writeStatus) ?: run {
             onModelLoadRejected()
             return false
         }
-        val nativeLoadMs = SystemClock.elapsedRealtime() - nativeLoadStartedAt
-        onModelLoaded(stagedModel)
-
+        val preserveProjectObjects = request.intent.getBooleanExtra(
+            AutomationSliceRequest.EXTRA_PRESERVE_PROJECT_OBJECTS,
+            false
+        )
+        val sourceFormat = detectSourceModelFileFormat(stagedModel.name)
+        val modelToLoad = if (preserveProjectObjects && sourceFormat == SourceModelFileFormat.ThreeMf) {
+            stagedModel
+        } else {
+            preparedModel
+        }
         val configJson = runCatching { resolveConfigJson(request.intent) }.getOrElse { exception ->
             Log.e(TAG, "automation:failed config resolution", exception)
             writeStatus("failed: config resolution ${exception.javaClass.simpleName}: ${exception.message.orEmpty()}")
             return false
         }
         val placementStartedAt = SystemClock.elapsedRealtime()
-        val placement = automationNativeTransform(stagedModel, configJson)
-        val placementSummary = placement?.let {
+        val placement = automationNativeTransform(preparedModel, configJson) ?: run {
+            onModelLoadRejected()
+            writeStatus("failed: model load failed: native plate transform could not be computed staged=${preparedModel.absolutePath}")
+            return false
+        }
+        val placementSummary = placement.let {
             String.format(
                 Locale.US,
                 " placement=(%.6f,%.6f,%.6f;rx=%.6f,ry=%.6f,rz=%.6f;s=%.6f)",
@@ -359,23 +400,51 @@ internal class AutomationSliceRunner(
                 it.uniformScale
             )
         }.orEmpty()
-        if (
-            placement != null &&
-            !NativeEngineCalls.setModelTransform(
-                engineHandle,
-                placement.xMm,
-                placement.yMm,
-                placement.zMm,
-                placement.rotationXRadians,
-                placement.rotationYRadians,
-                placement.rotationZRadians,
-                placement.uniformScale
-            ).isSuccess()
-        ) {
-            writeStatus("failed: nativeSetModelTransform rejected staged=${stagedModel.absolutePath}")
+        val transforms = DoubleArray(NativeModelTransformInputStride)
+        placement.writeTo(transforms, stride = NativeModelTransformInputStride)
+        val placementMs = SystemClock.elapsedRealtime() - placementStartedAt
+
+        val twoFilamentObjects = request.intent.getBooleanExtra(
+            AutomationSliceRequest.EXTRA_TWO_FILAMENT_OBJECTS,
+            false
+        )
+        val loadPaths: Array<String>
+        val loadTransforms: DoubleArray
+        val extruderIds: IntArray
+        val mobileObjectIds: LongArray
+        if (twoFilamentObjects) {
+            val spacingMm = 24.0
+            loadPaths = arrayOf(modelToLoad.absolutePath, modelToLoad.absolutePath)
+            loadTransforms = DoubleArray(NativeModelTransformInputStride * 2)
+            placement.copy(xMm = placement.xMm - spacingMm / 2.0)
+                .writeTo(loadTransforms, offset = 0, stride = NativeModelTransformInputStride)
+            placement.copy(xMm = placement.xMm + spacingMm / 2.0)
+                .writeTo(loadTransforms, offset = NativeModelTransformInputStride, stride = NativeModelTransformInputStride)
+            extruderIds = intArrayOf(1, 2)
+            mobileObjectIds = longArrayOf(1L, 2L)
+        } else {
+            loadPaths = arrayOf(modelToLoad.absolutePath)
+            loadTransforms = transforms
+            extruderIds = intArrayOf(1)
+            mobileObjectIds = longArrayOf(1L)
+        }
+        val nativeLoadStartedAt = SystemClock.elapsedRealtime()
+        val loadResult = NativeEngineCalls.loadPlateModelsV2(
+            handle = engineHandle,
+            paths = loadPaths,
+            transforms = loadTransforms,
+            extruderIds = extruderIds,
+            mobileObjectIds = mobileObjectIds,
+            paintPayloadJson = ""
+        )
+        if (loadResult !is NativeEngineCallResult.Success) {
+            NativeEngineCalls.clearGeneratedGcode(engineHandle)
+            writeStatus("failed: ${loadResult.statusMessage} path=${request.modelPath} staged=${preparedModel.absolutePath} loaded=${modelToLoad.absolutePath}")
+            onModelLoadRejected()
             return false
         }
-        val placementMs = SystemClock.elapsedRealtime() - placementStartedAt
+        val nativeLoadMs = SystemClock.elapsedRealtime() - nativeLoadStartedAt
+        onModelLoaded(preparedModel)
 
         val configStartedAt = SystemClock.elapsedRealtime()
         val configResult = NativeEngineCalls.setConfigJson(engineHandle, configJson)
@@ -384,6 +453,82 @@ internal class AutomationSliceRunner(
             return false
         }
         val configMs = SystemClock.elapsedRealtime() - configStartedAt
+
+        val writesSliced3mf = outputFile.name.lowercase(Locale.US).endsWith(".gcode.3mf")
+        val writesMultiPlatePackage = writesSliced3mf && request.intent.getBooleanExtra(
+            AutomationSliceRequest.EXTRA_MULTI_PLATE_PACKAGE,
+            false
+        )
+        val thumbnailRequests = NativeEngineCalls.getThumbnailRequests(engineHandle)
+        NativeEngineCalls.clearSliceThumbnails(engineHandle)
+        if (thumbnailRequests == null) {
+            Log.w(
+                TAG,
+                "automation:slice_thumbnail_requests unavailable error=${NativeEngineCalls.getLastErrorMessage(engineHandle)}"
+            )
+        } else {
+            Log.i(
+                TAG,
+                "automation:slice_thumbnail_requests count=${thumbnailRequests.requests.size} " +
+                    "errors=${thumbnailRequests.hasErrors} thumbnails=${thumbnailRequests.thumbnails} " +
+                    "format=${thumbnailRequests.thumbnailsFormat} errorText=${thumbnailRequests.errorText.replace('\n', ' ').trim()}"
+            )
+        }
+        val thumbnailStartedAt = SystemClock.elapsedRealtime()
+        var thumbnailMs = 0L
+        var uploadedThumbnails = 0
+        val thumbnailPrinterBed = automationPrinterBed(configJson)
+        val thumbnailMesh = runCatching { StlMeshParser.parseForDisplay(preparedModel).mesh }.getOrNull()
+        val thumbnailViewerTransform = thumbnailMesh?.let { mesh ->
+            nativeModelTransformToViewerTransform(
+                bounds = mesh.bounds,
+                printerBed = thumbnailPrinterBed,
+                nativeTransform = placement
+            )
+        }
+        if (thumbnailRequests?.requests?.isNotEmpty() == true) {
+            val thumbnailRenderResult = renderSliceThumbnails(
+                requestSummary = thumbnailRequests,
+                plateObjects = emptyList(),
+                fallbackMesh = thumbnailMesh,
+                fallbackTransform = thumbnailViewerTransform,
+                printerBed = thumbnailPrinterBed,
+                includePackageThumbnails = writesSliced3mf,
+                renderer = OffscreenEglSliceThumbnailRenderer()
+            )
+            thumbnailRenderResult.thumbnails.forEach { thumbnail ->
+                val uploadResult = NativeEngineCalls.addSliceThumbnailRgba(
+                    handle = engineHandle,
+                    width = thumbnail.width,
+                    height = thumbnail.height,
+                    format = thumbnail.format,
+                    role = thumbnail.role,
+                    rgba = thumbnail.rgba
+                )
+                if (uploadResult is NativeEngineCallResult.Success) {
+                    uploadedThumbnails++
+                } else {
+                    Log.w(TAG, "automation:slice_thumbnail_upload failed ${uploadResult.statusMessage}")
+                }
+            }
+            thumbnailMs = SystemClock.elapsedRealtime() - thumbnailStartedAt
+            val thumbnailBytes = thumbnailRenderResult.thumbnails.sumOf { it.rgba.size.toLong() }
+            val renderedTriangles = thumbnailRenderResult.thumbnails.sumOf { it.renderedTriangleCount.toLong() }
+            val sourceTriangles = thumbnailRenderResult.thumbnails.maxOfOrNull { it.sourceTriangleCount } ?: 0
+            val renderers = thumbnailRenderResult.thumbnails
+                .map { it.renderer }
+                .distinct()
+                .joinToString(",")
+            Log.i(
+                TAG,
+                "automation:slice_thumbnail_render requested=${thumbnailRenderResult.requests.size} " +
+                    "rendered=${thumbnailRenderResult.thumbnails.size} uploaded=$uploadedThumbnails thumbnailMs=$thumbnailMs " +
+                    "packageThumbnails=${thumbnailRenderResult.includePackageThumbnails} " +
+                    "renderers=$renderers " +
+                    "bytes=$thumbnailBytes sourceTriangles=$sourceTriangles renderedTriangles=$renderedTriangles " +
+                    "skip=${thumbnailRenderResult.skippedReason.orEmpty()}"
+            )
+        }
 
         val nativeSliceStartedAt = SystemClock.elapsedRealtime()
         val sliceResult = NativeEngineCalls.slice(engineHandle)
@@ -400,16 +545,166 @@ internal class AutomationSliceRunner(
 
         outputFile.parentFile?.mkdirs()
         val writeGcodeStartedAt = SystemClock.elapsedRealtime()
-        val writeResult = NativeEngineCalls.writeGcodeToFile(engineHandle, outputFile.absolutePath)
+        val temporaryPackageSourceGcodes = mutableListOf<File>()
+        val writeResult = when {
+            writesMultiPlatePackage -> {
+                val tempGcodeParent = outputFile.parentFile ?: outputFile.absoluteFile.parentFile ?: File(".")
+                val plateOneGcode = File(tempGcodeParent, "${outputFile.name}.plate-1-source.gcode")
+                val plateTwoGcode = File(tempGcodeParent, "${outputFile.name}.plate-2-source.gcode")
+                temporaryPackageSourceGcodes += plateOneGcode
+                temporaryPackageSourceGcodes += plateTwoGcode
+                val firstWriteResult = NativeEngineCalls.writeGcodeToFile(engineHandle, plateOneGcode.absolutePath)
+                if (firstWriteResult !is NativeEngineCallResult.Success) {
+                    firstWriteResult
+                } else {
+                    val plateOneBboxJson = NativeEngineCalls.getSlicedPlateBboxJson(engineHandle).orEmpty()
+                    val secondPlacement = placement.copy(xMm = placement.xMm + 32.0)
+                    val secondTransforms = DoubleArray(NativeModelTransformInputStride)
+                    secondPlacement.writeTo(secondTransforms, stride = NativeModelTransformInputStride)
+                    val secondLoadResult = NativeEngineCalls.loadPlateModelsV2(
+                        handle = engineHandle,
+                        paths = arrayOf(modelToLoad.absolutePath),
+                        transforms = secondTransforms,
+                        extruderIds = intArrayOf(1),
+                        mobileObjectIds = longArrayOf(2L),
+                        paintPayloadJson = ""
+                    )
+                    if (secondLoadResult !is NativeEngineCallResult.Success) {
+                        secondLoadResult
+                    } else {
+                        val secondConfig = runCatching {
+                            JSONObject(configJson)
+                                .put("layer_height", 0.28)
+                                .put("first_layer_height", 0.28)
+                                .toString()
+                        }.getOrDefault(configJson)
+                        val secondConfigResult = NativeEngineCalls.setConfigJson(engineHandle, secondConfig)
+                        if (secondConfigResult !is NativeEngineCallResult.Success) {
+                            secondConfigResult
+                        } else {
+                            val secondSliceResult = NativeEngineCalls.slice(engineHandle)
+                            if (secondSliceResult !is NativeEngineCallResult.Success) {
+                                secondSliceResult
+                            } else {
+                                val plateTwoBboxJson = NativeEngineCalls.getSlicedPlateBboxJson(engineHandle).orEmpty()
+                                val secondWriteResult = NativeEngineCalls.writeGcodeToFile(engineHandle, plateTwoGcode.absolutePath)
+                                if (secondWriteResult !is NativeEngineCallResult.Success) {
+                                    secondWriteResult
+                                } else {
+                                    if (thumbnailRequests?.requests?.isNotEmpty() == true && thumbnailMesh != null) {
+                                        val secondViewerTransform = nativeModelTransformToViewerTransform(
+                                            bounds = thumbnailMesh.bounds,
+                                            printerBed = thumbnailPrinterBed,
+                                            nativeTransform = secondPlacement
+                                        )
+                                        val secondThumbnailRenderStartedAt = SystemClock.elapsedRealtime()
+                                        val secondThumbnailRenderResult = renderSliceThumbnails(
+                                            requestSummary = thumbnailRequests,
+                                            plateObjects = emptyList(),
+                                            fallbackMesh = thumbnailMesh,
+                                            fallbackTransform = secondViewerTransform,
+                                            printerBed = thumbnailPrinterBed,
+                                            includePackageThumbnails = true,
+                                            renderer = OffscreenEglSliceThumbnailRenderer()
+                                        )
+                                        secondThumbnailRenderResult.thumbnails
+                                            .filter { it.role in setOf("plate", "no_light", "top", "pick") }
+                                            .forEach { thumbnail ->
+                                                val uploadResult = NativeEngineCalls.addSliceThumbnailRgba(
+                                                    handle = engineHandle,
+                                                    width = thumbnail.width,
+                                                    height = thumbnail.height,
+                                                    format = thumbnail.format,
+                                                    role = "${thumbnail.role}:2",
+                                                    rgba = thumbnail.rgba
+                                                )
+                                                if (uploadResult is NativeEngineCallResult.Success) {
+                                                    uploadedThumbnails++
+                                                }
+                                            }
+                                        thumbnailMs += SystemClock.elapsedRealtime() - secondThumbnailRenderStartedAt
+                                    }
+
+                                    val finalTransforms = DoubleArray(NativeModelTransformInputStride * 2)
+                                    placement.writeTo(finalTransforms, offset = 0, stride = NativeModelTransformInputStride)
+                                    secondPlacement.writeTo(
+                                        finalTransforms,
+                                        offset = NativeModelTransformInputStride,
+                                        stride = NativeModelTransformInputStride
+                                    )
+                                    val combinedLoadResult = NativeEngineCalls.loadPlateModelsV2(
+                                        handle = engineHandle,
+                                        paths = arrayOf(modelToLoad.absolutePath, modelToLoad.absolutePath),
+                                        transforms = finalTransforms,
+                                        extruderIds = intArrayOf(1, 1),
+                                        mobileObjectIds = longArrayOf(1L, 2L),
+                                        paintPayloadJson = ""
+                                    )
+                                    if (combinedLoadResult !is NativeEngineCallResult.Success) {
+                                        combinedLoadResult
+                                    } else {
+                                        val finalConfigResult = NativeEngineCalls.setConfigJson(engineHandle, configJson)
+                                        if (finalConfigResult !is NativeEngineCallResult.Success) {
+                                            finalConfigResult
+                                        } else {
+                                            val manifest = JSONObject()
+                                                .put(
+                                                    "plates",
+                                                    JSONArray()
+                                                        .put(
+                                                            JSONObject()
+                                                                .put("plate_index", 0)
+                                                                .put("plate_name", "Plate 1")
+                                                                .put("gcode_file", plateOneGcode.absolutePath)
+                                                                .put("bbox_json", plateOneBboxJson)
+                                                                .put("mobile_object_ids", JSONArray().put(1L))
+                                                        )
+                                                        .put(
+                                                            JSONObject()
+                                                                .put("plate_index", 1)
+                                                                .put("plate_name", "Plate 2")
+                                                                .put("gcode_file", plateTwoGcode.absolutePath)
+                                                                .put("bbox_json", plateTwoBboxJson)
+                                                                .put("mobile_object_ids", JSONArray().put(2L))
+                                                        )
+                                                )
+                                                .toString()
+                                            NativeEngineCalls.writeMultiPlateBambuGcode3mfToFile(
+                                                engineHandle,
+                                                outputFile.absolutePath,
+                                                manifest
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            writesSliced3mf -> NativeEngineCalls.writeBambuGcode3mfToFile(engineHandle, outputFile.absolutePath)
+            else -> NativeEngineCalls.writeGcodeToFile(engineHandle, outputFile.absolutePath)
+        }
         val writeGcodeMs = SystemClock.elapsedRealtime() - writeGcodeStartedAt
         if (writeResult !is NativeEngineCallResult.Success) {
             writeStatus("failed: ${writeResult.statusMessage} elapsedMs=${SystemClock.elapsedRealtime() - startedAt}")
             return false
         }
         if (!outputFile.exists() || outputFile.length() <= 0L) {
-            writeStatus("failed: nativeWriteGcodeToFile produced empty output elapsedMs=${SystemClock.elapsedRealtime() - startedAt}")
+            val writer = when {
+                writesMultiPlatePackage -> "nativeWriteMultiPlateBambuGcode3mfToFile"
+                writesSliced3mf -> "nativeWriteBambuGcode3mfToFile"
+                else -> "nativeWriteGcodeToFile"
+            }
+            writeStatus("failed: $writer produced empty output elapsedMs=${SystemClock.elapsedRealtime() - startedAt}")
             return false
         }
+        val outputThumbnailAudit = if (writesSliced3mf) {
+            if (writesMultiPlatePackage) "package=3mf,multiPlate=1" else "package=3mf"
+        } else {
+            auditGcodeThumbnailMarkers(outputFile)
+        }
+        Log.i(TAG, "automation:slice_thumbnail_output $outputThumbnailAudit")
         val nativeMetrics = parseAutomationSliceNativeMetrics(NativeEngineCalls.getSliceMetrics(engineHandle))
         val previewInfoMetrics = automationSlicePreviewInfoMetrics(
             summaryText = NativeEngineCalls.getGcodeSummary(engineHandle),
@@ -419,6 +714,7 @@ internal class AutomationSliceRunner(
             engineHandle = engineHandle,
             layerCount = previewInfoMetrics.layerCount
         )
+        temporaryPackageSourceGcodes.forEach { it.delete() }
         val totalMs = SystemClock.elapsedRealtime() - startedAt
         val timing = AutomationSliceTiming(
             stagingMs = stagingMs,
@@ -426,6 +722,7 @@ internal class AutomationSliceRunner(
             placementMs = placementMs,
             configMs = configMs,
             nativeSliceMs = nativeSliceMs,
+            thumbnailMs = thumbnailMs,
             writeGcodeMs = writeGcodeMs,
             totalMs = totalMs
         )
@@ -443,23 +740,133 @@ internal class AutomationSliceRunner(
                     nativeSliceMs = nativeSliceMs,
                     writeGcodeMs = writeGcodeMs,
                     summaryMs = 0L,
-                    totalMs = totalMs
+                    totalMs = totalMs,
+                    thumbnailMs = thumbnailMs
                 )
             )
         )
         writeStatus(
             automationSliceSuccessStatus(
                 modelFile = modelFile,
-                stagedModel = stagedModel,
+                stagedModel = preparedModel,
                 outputFile = outputFile,
                 timing = timing,
                 nativeMetrics = nativeMetrics,
                 previewInfoMetrics = previewInfoMetrics,
                 previewLoadMetrics = previewLoadMetrics,
-                configJson = configJson
+                configJson = configJson,
+                thumbnailAudit = outputThumbnailAudit
             )
         )
         return true
+    }
+
+    private fun runProject3mfRoundTripExport(
+        request: AutomationSliceRequest,
+        modelFile: File,
+        stagedModel: File,
+        outputFile: File,
+        startedAt: Long,
+        stagingMs: Long,
+        engineHandle: NativeEngineHandle,
+        writeStatus: (String) -> Unit
+    ): Boolean {
+        if (detectSourceModelFileFormat(stagedModel.name) != SourceModelFileFormat.ThreeMf) {
+            writeStatus("failed: project 3MF export requires a .3mf source path=${request.modelPath} staged=${stagedModel.absolutePath}")
+            return false
+        }
+        val nativeLoadStartedAt = SystemClock.elapsedRealtime()
+        val mobileObjectIds = LongArray(256) { index -> index.toLong() + 1L }
+        val loadResult = NativeEngineCalls.loadProject3mf(
+            handle = engineHandle,
+            path = stagedModel.absolutePath,
+            mobileObjectIds = mobileObjectIds
+        )
+        val nativeLoadMs = SystemClock.elapsedRealtime() - nativeLoadStartedAt
+        if (loadResult !is NativeEngineCallResult.Success) {
+            NativeEngineCalls.clearGeneratedGcode(engineHandle)
+            writeStatus("failed: ${loadResult.statusMessage} path=${request.modelPath} staged=${stagedModel.absolutePath}")
+            onModelLoadRejected()
+            return false
+        }
+        onModelLoaded(stagedModel)
+
+        outputFile.parentFile?.mkdirs()
+        val writeStartedAt = SystemClock.elapsedRealtime()
+        val writeResult = NativeEngineCalls.writeProject3mfToFile(engineHandle, outputFile.absolutePath)
+        val writeMs = SystemClock.elapsedRealtime() - writeStartedAt
+        if (writeResult !is NativeEngineCallResult.Success) {
+            writeStatus("failed: ${writeResult.statusMessage} elapsedMs=${SystemClock.elapsedRealtime() - startedAt}")
+            return false
+        }
+        if (!outputFile.exists() || outputFile.length() <= 0L) {
+            writeStatus("failed: nativeWriteProject3mfToFile produced empty output elapsedMs=${SystemClock.elapsedRealtime() - startedAt}")
+            return false
+        }
+
+        val totalMs = SystemClock.elapsedRealtime() - startedAt
+        writeStatus(
+            "success: model=${modelFile.absolutePath} " +
+                "staged=${stagedModel.absolutePath} " +
+                "output=${outputFile.absolutePath} " +
+                "bytes=${outputFile.length()} " +
+                "stagingMs=$stagingMs " +
+                "nativeLoadMs=$nativeLoadMs " +
+                "placementMs=0 " +
+                "configMs=0 " +
+                "nativeSliceMs=0 " +
+                "thumbnailMs=0 " +
+                "writeGcodeMs=$writeMs " +
+                "projectRoundTrip=1 " +
+                "elapsedMs=$totalMs"
+        )
+        return true
+    }
+
+    private fun prepareAutomationWorkspaceModel(
+        handle: NativeEngineHandle,
+        stagedModel: File,
+        writeStatus: (String) -> Unit
+    ): File? {
+        val sourceFormat = detectSourceModelFileFormat(stagedModel.name)
+            ?: return stagedModel
+        if (sourceFormat == SourceModelFileFormat.Stl) {
+            return stagedModel
+        }
+
+        val convertedName = stagedModel.nameWithoutExtension + when (sourceFormat) {
+            SourceModelFileFormat.ThreeMf -> "-3mf-mesh.stl"
+            SourceModelFileFormat.Step -> "-step-mesh.stl"
+            SourceModelFileFormat.Stl -> ".stl"
+        }
+        val converted = File(stagedModel.parentFile ?: stagedModel.absoluteFile.parentFile, convertedName)
+        val result = when (sourceFormat) {
+            SourceModelFileFormat.ThreeMf -> NativeEngineCalls.extractModelMeshToStl(
+                handle = handle,
+                inputPath = stagedModel.absolutePath,
+                outputStlPath = converted.absolutePath
+            )
+            SourceModelFileFormat.Step -> NativeEngineCalls.convertStepToStl(
+                handle = handle,
+                inputPath = stagedModel.absolutePath,
+                outputStlPath = converted.absolutePath,
+                linearDeflection = AUTOMATION_STEP_LINEAR_DEFLECTION,
+                angleDeflection = AUTOMATION_STEP_ANGLE_DEFLECTION
+            )
+            SourceModelFileFormat.Stl -> NativeEngineCallResult.Success
+        }
+
+        if (result !is NativeEngineCallResult.Success) {
+            writeStatus("failed: ${sourceFormat.name} mesh conversion failed: ${result.statusMessage} staged=${stagedModel.absolutePath}")
+            converted.delete()
+            return null
+        }
+        if (!converted.isFile || converted.length() <= 84L) {
+            writeStatus("failed: ${sourceFormat.name} mesh conversion produced invalid STL bytes=${converted.length()} staged=${stagedModel.absolutePath}")
+            converted.delete()
+            return null
+        }
+        return converted
     }
 
     private fun automationNativeTransform(stagedModel: File, configJson: String): NativeModelTransform? {
@@ -491,4 +898,29 @@ internal class AutomationSliceRunner(
         private const val TAG = "MobileSlicer"
         private const val PERF_TAG = "MobileSlicerPerf"
     }
+}
+
+private fun auditGcodeThumbnailMarkers(outputFile: File): String {
+    var pngBlocks = 0
+    var qoiBlocks = 0
+    var jpgBlocks = 0
+    var gimageBlocks = 0
+    var simageBlocks = 0
+    var thumbnailsConfig = ""
+    var thumbnailsFormatConfig = ""
+    outputFile.bufferedReader(StandardCharsets.UTF_8).useLines { lines ->
+        lines.forEach { line ->
+            when {
+                line.startsWith("; thumbnail begin ") -> pngBlocks++
+                line.startsWith("; thumbnail_QOI begin ") -> qoiBlocks++
+                line.startsWith("; thumbnail_JPG begin ") -> jpgBlocks++
+                line.startsWith(";gimage:") -> gimageBlocks++
+                line.startsWith(";simage:") -> simageBlocks++
+                line.startsWith("; thumbnails = ") -> thumbnailsConfig = line.substringAfter("= ").trim()
+                line.startsWith("; thumbnails_format = ") -> thumbnailsFormatConfig = line.substringAfter("= ").trim()
+            }
+        }
+    }
+    return "png=$pngBlocks qoi=$qoiBlocks jpg=$jpgBlocks gimage=$gimageBlocks simage=$simageBlocks " +
+        "thumbnails=$thumbnailsConfig thumbnailsFormat=$thumbnailsFormatConfig"
 }

@@ -13,6 +13,26 @@ import org.junit.Test
 
 class MainActivityHelpersTest {
     @Test
+    fun modelDisplayNameStripsInternalStagingPrefixOnly() {
+        assertEquals(
+            "flower_v1_pot.stl",
+            displayNameForModelFileName("selected-model-123456-flower_v1_pot.stl")
+        )
+        assertEquals(
+            "thingiverse_part.stl",
+            displayNameForModelFileName("thingiverse_part.stl")
+        )
+    }
+
+    @Test
+    fun modelDisplayStemKeepsThingiverseImportNameForExport() {
+        assertEquals(
+            "flower_v1_pot",
+            displayStemForModelFile(File("/tmp/selected-model-123456-flower_v1_pot.stl"))
+        )
+    }
+
+    @Test
     fun exportFilamentMaterialKeepsTypeOnly() {
         assertEquals("ABS", normalizedExportFilamentMaterial("Bambu ABS"))
         assertEquals("PETG-CF", normalizedExportFilamentMaterial("Generic PETG-CF @System"))
@@ -105,6 +125,99 @@ class MainActivityHelpersTest {
 
             assertFalse(expired.exists())
             assertTrue(fresh.exists())
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun cleanupGeneratedGcodeCacheDeletesAllGeneratedSliceArtifacts() {
+        val cacheDir = Files.createTempDirectory("mobileslicer-cache-").toFile()
+        try {
+            val latestSlice = File(cacheDir, "latest-slice-benchy.gcode").apply {
+                writeText("stale slice")
+            }
+            val latestSend = File(cacheDir, "latest-send-benchy.gcode.3mf").apply {
+                writeText("stale send package")
+            }
+            val wrapperOutput = File(cacheDir, "orca_wrapper_123.gcode").apply {
+                writeText("stale wrapper")
+            }
+            val userFile = File(cacheDir, "user-export.gcode").apply {
+                writeText("keep")
+            }
+
+            cleanupGeneratedGcodeCache(cacheDir = cacheDir, retainedPaths = emptySet())
+
+            assertFalse(latestSlice.exists())
+            assertFalse(latestSend.exists())
+            assertFalse(wrapperOutput.exists())
+            assertTrue(userFile.exists())
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun cleanupGeneratedGcodeCacheRetainsCurrentGeneratedOutput() {
+        val cacheDir = Files.createTempDirectory("mobileslicer-cache-").toFile()
+        try {
+            val retained = File(cacheDir, "latest-slice-current.gcode").apply {
+                writeText("current")
+            }
+            val stale = File(cacheDir, "latest-slice-stale.gcode").apply {
+                writeText("stale")
+            }
+
+            cleanupGeneratedGcodeCache(
+                cacheDir = cacheDir,
+                retainedPaths = setOf(retained.absolutePath)
+            )
+
+            assertTrue(retained.exists())
+            assertFalse(stale.exists())
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun cleanupStagedModelCacheDeletesOnlyInternalStagedModels() {
+        val cacheDir = Files.createTempDirectory("mobileslicer-cache-").toFile()
+        try {
+            val staged = File(cacheDir, "selected-model-123-benchy.stl").apply {
+                writeText("stale staged model")
+            }
+            val normal = File(cacheDir, "benchy.stl").apply {
+                writeText("user model")
+            }
+
+            cleanupStagedModelCache(cacheDir = cacheDir, retainedPaths = emptySet())
+
+            assertFalse(staged.exists())
+            assertTrue(normal.exists())
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun cleanupThingiverseImportCacheDeletesTemporaryDownloads() {
+        val cacheDir = Files.createTempDirectory("mobileslicer-cache-").toFile()
+        try {
+            val importDir = File(cacheDir, "thingiverse-imports").apply { mkdirs() }
+            val downloaded = File(importDir, "3dbenchy-1.stl").apply {
+                writeText("stale thingiverse cache")
+            }
+            val unrelated = File(cacheDir, "selected-model-123-benchy.stl").apply {
+                writeText("staged model")
+            }
+
+            cleanupThingiverseImportCache(cacheDir)
+
+            assertFalse(downloaded.exists())
+            assertFalse(importDir.exists())
+            assertTrue(unrelated.exists())
         } finally {
             cacheDir.deleteRecursively()
         }

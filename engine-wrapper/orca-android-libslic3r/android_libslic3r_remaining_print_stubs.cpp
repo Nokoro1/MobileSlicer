@@ -43,9 +43,12 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/format.hpp>
 
+#include <jpeglib.h>
+
 #include <cassert>
 #include <cfloat>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -774,10 +777,28 @@ struct CompressedPNG : CompressedImageBuffer
     std::string_view tag() const override { return std::string_view("thumbnail"); }
 };
 
+struct CompressedJPG : CompressedImageBuffer
+{
+    ~CompressedJPG() override { if (data) std::free(data); }
+    std::string_view tag() const override { return std::string_view("thumbnail_JPG"); }
+};
+
+struct CompressedQOI : CompressedImageBuffer
+{
+    ~CompressedQOI() override { if (data) std::free(data); }
+    std::string_view tag() const override { return std::string_view("thumbnail_QOI"); }
+};
+
 struct CompressedColPic : CompressedImageBuffer
 {
     ~CompressedColPic() override { if (data) std::free(data); }
     std::string_view tag() const override { return std::string_view("thumbnail_QIDI"); }
+};
+
+struct CompressedBIQU : CompressedImageBuffer
+{
+    ~CompressedBIQU() override { if (data) std::free(data); }
+    std::string_view tag() const override { return std::string_view("thumbnail_BIQU"); }
 };
 
 std::pair<GCodeThumbnailDefinitionsList, ThumbnailErrors> make_and_check_thumbnail_list(const ConfigBase &config)
@@ -1016,6 +1037,179 @@ std::unique_ptr<CompressedImageBuffer> compress_thumbnail_png(const ThumbnailDat
     return out;
 }
 
+std::unique_ptr<CompressedImageBuffer> compress_thumbnail_jpg(const ThumbnailData &data)
+{
+    if (data.width == 0 || data.height == 0 || data.pixels.size() < static_cast<size_t>(data.width) * static_cast<size_t>(data.height) * 4) {
+        return {};
+    }
+
+    std::vector<unsigned char> rgba_pixels(data.pixels.size());
+    const unsigned int row_size = data.width * 4;
+    for (unsigned int y = 0; y < data.height; ++y) {
+        std::memcpy(
+            rgba_pixels.data() + static_cast<size_t>(data.height - y - 1) * row_size,
+            data.pixels.data() + static_cast<size_t>(y) * row_size,
+            row_size
+        );
+    }
+
+    std::vector<unsigned char*> row_pointers;
+    row_pointers.reserve(data.height);
+    for (unsigned int y = 0; y < data.height; ++y) {
+        row_pointers.emplace_back(rgba_pixels.data() + static_cast<size_t>(y) * row_size);
+    }
+
+    unsigned char* compressed_data = nullptr;
+    unsigned long compressed_size = 0;
+
+    jpeg_error_mgr error_manager;
+    jpeg_compress_struct compressor;
+    compressor.err = jpeg_std_error(&error_manager);
+    jpeg_create_compress(&compressor);
+    jpeg_mem_dest(&compressor, &compressed_data, &compressed_size);
+
+    compressor.image_width = data.width;
+    compressor.image_height = data.height;
+    compressor.input_components = 4;
+    compressor.in_color_space = JCS_EXT_RGBA;
+
+    jpeg_set_defaults(&compressor);
+    jpeg_set_quality(&compressor, 85, TRUE);
+    jpeg_start_compress(&compressor, TRUE);
+    jpeg_write_scanlines(&compressor, row_pointers.data(), data.height);
+    jpeg_finish_compress(&compressor);
+    jpeg_destroy_compress(&compressor);
+
+    if (compressed_data == nullptr || compressed_size == 0) {
+        std::free(compressed_data);
+        return {};
+    }
+
+    auto out = std::make_unique<CompressedJPG>();
+    out->data = std::malloc(static_cast<size_t>(compressed_size));
+    if (out->data == nullptr) {
+        std::free(compressed_data);
+        return {};
+    }
+    out->size = static_cast<size_t>(compressed_size);
+    std::memcpy(out->data, compressed_data, out->size);
+    std::free(compressed_data);
+    return out;
+}
+
+struct QoiPixel
+{
+    unsigned char r {0};
+    unsigned char g {0};
+    unsigned char b {0};
+    unsigned char a {255};
+};
+
+int qoi_hash(const QoiPixel& pixel)
+{
+    return (pixel.r * 3 + pixel.g * 5 + pixel.b * 7 + pixel.a * 11) % 64;
+}
+
+void qoi_write_u32(std::vector<unsigned char>& output, unsigned int value)
+{
+    output.push_back(static_cast<unsigned char>((value >> 24) & 0xff));
+    output.push_back(static_cast<unsigned char>((value >> 16) & 0xff));
+    output.push_back(static_cast<unsigned char>((value >> 8) & 0xff));
+    output.push_back(static_cast<unsigned char>(value & 0xff));
+}
+
+std::unique_ptr<CompressedImageBuffer> compress_thumbnail_qoi(const ThumbnailData &data)
+{
+    if (data.width == 0 || data.height == 0 || data.pixels.size() < static_cast<size_t>(data.width) * static_cast<size_t>(data.height) * 4) {
+        return {};
+    }
+
+    std::vector<unsigned char> output;
+    output.reserve(14 + data.pixels.size() + 8);
+    output.push_back('q');
+    output.push_back('o');
+    output.push_back('i');
+    output.push_back('f');
+    qoi_write_u32(output, data.width);
+    qoi_write_u32(output, data.height);
+    output.push_back(4);
+    output.push_back(0);
+
+    QoiPixel index[64];
+    QoiPixel previous;
+    int run = 0;
+
+    const auto flush_run = [&output, &run]() {
+        if (run > 0) {
+            output.push_back(static_cast<unsigned char>(0xc0 | (run - 1)));
+            run = 0;
+        }
+    };
+
+    for (int y = static_cast<int>(data.height) - 1; y >= 0; --y) {
+        for (unsigned int x = 0; x < data.width; ++x) {
+            const size_t pixel_index = (static_cast<size_t>(y) * data.width + x) * 4;
+            QoiPixel pixel{
+                data.pixels[pixel_index],
+                data.pixels[pixel_index + 1],
+                data.pixels[pixel_index + 2],
+                data.pixels[pixel_index + 3],
+            };
+            if (pixel.r == previous.r && pixel.g == previous.g && pixel.b == previous.b && pixel.a == previous.a) {
+                ++run;
+                if (run == 62) {
+                    flush_run();
+                }
+                continue;
+            }
+
+            flush_run();
+            const int hash = qoi_hash(pixel);
+            if (index[hash].r == pixel.r && index[hash].g == pixel.g && index[hash].b == pixel.b && index[hash].a == pixel.a) {
+                output.push_back(static_cast<unsigned char>(hash));
+            } else {
+                index[hash] = pixel;
+                if (pixel.a == previous.a) {
+                    const int dr = static_cast<int>(pixel.r) - static_cast<int>(previous.r);
+                    const int dg = static_cast<int>(pixel.g) - static_cast<int>(previous.g);
+                    const int db = static_cast<int>(pixel.b) - static_cast<int>(previous.b);
+                    const int dr_dg = dr - dg;
+                    const int db_dg = db - dg;
+                    if (dr >= -2 && dr <= 1 && dg >= -2 && dg <= 1 && db >= -2 && db <= 1) {
+                        output.push_back(static_cast<unsigned char>(0x40 | ((dr + 2) << 4) | ((dg + 2) << 2) | (db + 2)));
+                    } else if (dg >= -32 && dg <= 31 && dr_dg >= -8 && dr_dg <= 7 && db_dg >= -8 && db_dg <= 7) {
+                        output.push_back(static_cast<unsigned char>(0x80 | (dg + 32)));
+                        output.push_back(static_cast<unsigned char>(((dr_dg + 8) << 4) | (db_dg + 8)));
+                    } else {
+                        output.push_back(0xfe);
+                        output.push_back(pixel.r);
+                        output.push_back(pixel.g);
+                        output.push_back(pixel.b);
+                    }
+                } else {
+                    output.push_back(0xff);
+                    output.push_back(pixel.r);
+                    output.push_back(pixel.g);
+                    output.push_back(pixel.b);
+                    output.push_back(pixel.a);
+                }
+            }
+            previous = pixel;
+        }
+    }
+    flush_run();
+    output.insert(output.end(), {0, 0, 0, 0, 0, 0, 0, 1});
+
+    auto out = std::make_unique<CompressedQOI>();
+    out->size = output.size();
+    out->data = std::malloc(out->size);
+    if (out->data == nullptr) {
+        return {};
+    }
+    std::memcpy(out->data, output.data(), out->size);
+    return out;
+}
+
 std::unique_ptr<CompressedImageBuffer> compress_thumbnail_colpic(const ThumbnailData &data)
 {
     constexpr int max_size = 512;
@@ -1069,10 +1263,56 @@ std::unique_ptr<CompressedImageBuffer> compress_thumbnail_colpic(const Thumbnail
     std::memcpy(out->data, encoded.data(), out->size + 1);
     return out;
 }
+
+std::unique_ptr<CompressedImageBuffer> compress_thumbnail_btt_tft(const ThumbnailData &data)
+{
+    if (data.width == 0 || data.height == 0 || data.pixels.size() < static_cast<size_t>(data.width) * static_cast<size_t>(data.height) * 4) {
+        return {};
+    }
+
+    const unsigned int row_size = data.width * 4;
+    std::string encoded;
+    encoded.reserve(static_cast<size_t>(data.height) * (data.width * 4 + 3) + 1);
+    for (unsigned int y = 0; y < data.height; ++y) {
+        encoded.push_back(';');
+        const unsigned int source_y = data.height - y - 1;
+        for (unsigned int x = 0; x < data.width; ++x) {
+            const size_t pixel_index = static_cast<size_t>(source_y) * row_size + static_cast<size_t>(x) * 4;
+            const uint8_t alpha = data.pixels[pixel_index + 3];
+            const uint8_t red = static_cast<uint8_t>((alpha * data.pixels[pixel_index]) / 255);
+            const uint8_t green = static_cast<uint8_t>((alpha * data.pixels[pixel_index + 1]) / 255);
+            const uint8_t blue = static_cast<uint8_t>((alpha * data.pixels[pixel_index + 2]) / 255);
+            std::string color = rjust(get_hex(((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3)), 4, '0');
+            if (color == "0020" || color == "0841" || color == "0861") {
+                color = "0000";
+            }
+            encoded += color;
+        }
+        encoded += "\r\n";
+    }
+
+    auto out = std::make_unique<CompressedBIQU>();
+    out->size = encoded.size() + 1;
+    out->data = std::malloc(out->size);
+    if (out->data == nullptr) {
+        return {};
+    }
+    std::memcpy(out->data, encoded.c_str(), out->size);
+    return out;
+}
 } // namespace
 
 std::unique_ptr<CompressedImageBuffer> compress_thumbnail(const ThumbnailData &data, GCodeThumbnailsFormat format)
 {
+    if (format == GCodeThumbnailsFormat::BTT_TFT) {
+        return compress_thumbnail_btt_tft(data);
+    }
+    if (format == GCodeThumbnailsFormat::QOI) {
+        return compress_thumbnail_qoi(data);
+    }
+    if (format == GCodeThumbnailsFormat::JPG) {
+        return compress_thumbnail_jpg(data);
+    }
     if (format == GCodeThumbnailsFormat::ColPic) {
         return compress_thumbnail_colpic(data);
     }

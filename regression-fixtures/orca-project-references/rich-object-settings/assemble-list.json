@@ -1,0 +1,77 @@
+{
+  "plates": [
+    {
+      "plate_name": "Object settings plate",
+      "need_arrange": false,
+      "objects": [
+        {
+          "path": "/home/peanut/Development/MobileSlicer/artifacts/orca-project-fixtures/rich-object-settings-20260515-121137/work/left_cube.stl",
+          "count": 1,
+          "filaments": [
+            1
+          ],
+          "pos_x": [
+            120
+          ],
+          "pos_y": [
+            135
+          ],
+          "pos_z": [
+            0
+          ],
+          "assemble_index": [
+            0
+          ]
+        },
+        {
+          "path": "/home/peanut/Development/MobileSlicer/artifacts/orca-project-fixtures/rich-object-settings-20260515-121137/work/right_cube.stl",
+          "count": 1,
+          "filaments": [
+            2
+          ],
+          "pos_x": [
+            155
+          ],
+          "pos_y": [
+            135
+          ],
+          "pos_z": [
+            0
+          ],
+          "assemble_index": [
+            0
+          ],
+          "print_params": {
+            "sparse_infill_density": "35%",
+            "wall_loops": "4"
+          }
+        }
+      ]
+    },
+    {
+      "plate_name": "Second plate",
+      "need_arrange": false,
+      "objects": [
+        {
+          "path": "/home/peanut/Development/MobileSlicer/artifacts/orca-project-fixtures/rich-object-settings-20260515-121137/work/left_cube.stl",
+          "count": 1,
+          "filaments": [
+            1
+          ],
+          "pos_x": [
+            135
+          ],
+          "pos_y": [
+            140
+          ],
+          "pos_z": [
+            0
+          ],
+          "assemble_index": [
+            0
+          ]
+        }
+      ]
+    }
+  ]
+}

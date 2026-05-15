@@ -64,6 +64,7 @@ class ReleaseSmokeWorkflowContractTest {
             configuration = configuration,
             calibrationJob = null,
             plateObjects = listOf(objectOnPlate),
+            processProfiles = store.processes,
             profileFilaments = store.filaments,
             plateFilamentSlots = emptyList(),
             fallbackFilament = configuration.filament,

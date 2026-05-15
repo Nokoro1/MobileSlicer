@@ -57,6 +57,7 @@ internal fun FilamentProfile.toJson(): JSONObject = JSONObject()
     .put("bedTemperatureC", bedTemperatureC)
     .put("texturedPlateTemperatureInitialLayerC", texturedPlateTemperatureInitialLayerC)
     .put("texturedPlateTemperatureC", texturedPlateTemperatureC)
+    .put("minFanSpeedPercent", minFanSpeedPercent)
     .put("coolingPercent", coolingPercent)
     .put("noCoolingFirstLayers", noCoolingFirstLayers)
     .put("fullFanSpeedLayer", fullFanSpeedLayer)
@@ -208,6 +209,7 @@ internal fun JSONObject.toFilamentProfile(): FilamentProfile = FilamentProfile(
     bedTemperatureC = optInt("bedTemperatureC", 60),
     texturedPlateTemperatureInitialLayerC = optInt("texturedPlateTemperatureInitialLayerC", 45),
     texturedPlateTemperatureC = optInt("texturedPlateTemperatureC", 45),
+    minFanSpeedPercent = optInt("minFanSpeedPercent", 30),
     coolingPercent = optInt("coolingPercent", 100),
     noCoolingFirstLayers = optInt("noCoolingFirstLayers", 1),
     fullFanSpeedLayer = optInt("fullFanSpeedLayer", 0),

@@ -95,9 +95,9 @@ extern "C" void orca_clear_generated_gcode(OrcaEngine* engine)
     }
 }
 
-extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const* paths, const double* transforms, int, const int* extruder_ids, int count, const char*, int, double* out_transforms)
+extern "C" int orca_plan_plate_arrangement(OrcaEngine* engine, const char* const* paths, const double* transforms, int, const int* extruder_ids, int count, const char*, int, double* out_transforms, int* out_bed_indices)
 {
-    if (engine == nullptr || paths == nullptr || transforms == nullptr || extruder_ids == nullptr || out_transforms == nullptr || count <= 0) {
+    if (engine == nullptr || paths == nullptr || transforms == nullptr || extruder_ids == nullptr || out_transforms == nullptr || out_bed_indices == nullptr || count <= 0) {
         return ORCA_ERROR_INVALID_ARGUMENT;
     }
     engine->last_error = "native Orca arrangement is unavailable in the reduced Android wrapper";
@@ -110,6 +110,40 @@ extern "C" int orca_plan_auto_orientation(OrcaEngine* engine, const char* const*
         return ORCA_ERROR_INVALID_ARGUMENT;
     }
     engine->last_error = "native Orca auto-orient is unavailable in the reduced Android wrapper";
+    return ORCA_ERROR_LOAD_MODEL;
+}
+
+extern "C" int orca_prewarm_plate_planning_models(OrcaEngine* engine, const char* const* paths, int count)
+{
+    if (engine == nullptr || paths == nullptr || count <= 0) {
+        return ORCA_ERROR_INVALID_ARGUMENT;
+    }
+    engine->last_error = "native Orca planning prewarm is unavailable in the reduced Android wrapper";
+    return ORCA_ERROR_LOAD_MODEL;
+}
+
+extern "C" int orca_extract_model_mesh_to_stl(OrcaEngine* engine, const char* input_path, const char* output_stl_path)
+{
+    if (engine == nullptr || input_path == nullptr || input_path[0] == '\0' ||
+        output_stl_path == nullptr || output_stl_path[0] == '\0') {
+        return ORCA_ERROR_INVALID_ARGUMENT;
+    }
+    engine->last_error = "Mesh extraction requires the real libslic3r wrapper.";
+    return ORCA_ERROR_LOAD_MODEL;
+}
+
+extern "C" int orca_convert_step_to_stl(
+    OrcaEngine* engine,
+    const char* input_path,
+    const char* output_stl_path,
+    double,
+    double)
+{
+    if (engine == nullptr || input_path == nullptr || input_path[0] == '\0' ||
+        output_stl_path == nullptr || output_stl_path[0] == '\0') {
+        return ORCA_ERROR_INVALID_ARGUMENT;
+    }
+    engine->last_error = "STEP import requires the real OCCT-backed libslic3r wrapper.";
     return ORCA_ERROR_LOAD_MODEL;
 }
 
@@ -198,6 +232,20 @@ extern "C" const char* orca_get_gcode_summary(OrcaEngine*)
 extern "C" const char* orca_get_enriched_gcode_summary(OrcaEngine*)
 {
     return nullptr;
+}
+
+extern "C" const char* orca_get_thumbnail_requests_json(OrcaEngine*)
+{
+    return nullptr;
+}
+
+extern "C" void orca_clear_slice_thumbnails(OrcaEngine*)
+{
+}
+
+extern "C" int orca_add_slice_thumbnail_rgba(OrcaEngine*, int, int, const char*, const char*, const unsigned char*, int)
+{
+    return ORCA_ERROR_INVALID_ARGUMENT;
 }
 
 extern "C" int orca_write_gcode_to_file(OrcaEngine* engine, const char* path)

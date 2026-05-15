@@ -45,6 +45,8 @@ set(ORCA_ANDROID_NLOPT_PREFIX "" CACHE PATH "Installed Android NLopt prefix")
 set(ORCA_ANDROID_GMP_PREFIX "" CACHE PATH "Installed Android GMP prefix")
 set(ORCA_ANDROID_MPFR_PREFIX "" CACHE PATH "Installed Android MPFR prefix")
 set(ORCA_ANDROID_CGAL_PREFIX "" CACHE PATH "Installed Android CGAL prefix")
+set(ORCA_ANDROID_OCCT_PREFIX "" CACHE PATH "Optional Android OpenCASCADE/OCCT prefix for STEP import")
+set(ORCA_ANDROID_JPEG_PREFIX "" CACHE PATH "Installed Android libjpeg-turbo prefix for Orca JPG G-code thumbnails")
 set(ORCA_ANDROID_DEFAULT_LIBNOISE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libnoise_compat")
 if (NOT DEFINED ORCA_ANDROID_LIBNOISE_INCLUDE_DIR OR ORCA_ANDROID_LIBNOISE_INCLUDE_DIR MATCHES "third_party_stub")
     set(ORCA_ANDROID_LIBNOISE_INCLUDE_DIR "${ORCA_ANDROID_DEFAULT_LIBNOISE_INCLUDE_DIR}" CACHE PATH "Android libnoise-compatible include root" FORCE)
@@ -69,15 +71,21 @@ else()
     set(ORCA_ANDROID_BOOST_INCLUDE_DIR "${ORCA_ANDROID_BOOST_PREFIX}/include")
 endif()
 set(ORCA_ANDROID_BOOST_FILESYSTEM_LIBRARY "${ORCA_ANDROID_BOOST_PREFIX}/lib/libboost_filesystem.a")
+set(ORCA_ANDROID_BOOST_THREAD_LIBRARY "${ORCA_ANDROID_BOOST_PREFIX}/lib/libboost_thread.a")
+set(ORCA_ANDROID_BOOST_CHRONO_LIBRARY "${ORCA_ANDROID_BOOST_PREFIX}/lib/libboost_chrono.a")
+set(ORCA_ANDROID_BOOST_ATOMIC_LIBRARY "${ORCA_ANDROID_BOOST_PREFIX}/lib/libboost_atomic.a")
 
 set(ORCA_ANDROID_TBB_INCLUDE_DIR "${ORCA_ANDROID_TBB_PREFIX}/include")
 set(ORCA_ANDROID_TBB_LIBRARY "${ORCA_ANDROID_TBB_PREFIX}/lib/libtbb.a")
 set(ORCA_ANDROID_TBBMALLOC_LIBRARY "${ORCA_ANDROID_TBB_PREFIX}/lib/libtbbmalloc.a")
 set(ORCA_ANDROID_NLOPT_INCLUDE_DIR "${ORCA_ANDROID_NLOPT_PREFIX}/include")
 set(ORCA_ANDROID_NLOPT_LIBRARY "${ORCA_ANDROID_NLOPT_PREFIX}/lib/libnlopt.a")
+set(ORCA_ANDROID_JPEG_INCLUDE_DIR "${ORCA_ANDROID_JPEG_PREFIX}/include")
+set(ORCA_ANDROID_JPEG_LIBRARY "${ORCA_ANDROID_JPEG_PREFIX}/lib/libjpeg.a")
 
 set(ORCA_ANDROID_CEREAL_INCLUDE_DIR "${ORCA_ANDROID_CEREAL_PREFIX}/include")
 set(ORCA_ANDROID_CGAL_INCLUDE_DIR "${ORCA_ANDROID_CGAL_PREFIX}/include")
+set(ORCA_ANDROID_OCCT_CMAKE_DIR "${ORCA_ANDROID_OCCT_PREFIX}/lib/cmake/occt")
 
 set(ORCA_ANDROID_BOOST_SRC_ROOT "" CACHE PATH "Boost source root for compiling individual modules")
 if (ORCA_ANDROID_BOOST_SRC_ROOT)
@@ -103,6 +111,7 @@ target_include_directories(orca_android_libslic3r_port_config INTERFACE
     ${ORCA_DEPS_SRC_ROOT}/eigen
     ${ORCA_DEPS_SRC_ROOT}/qhull/src
     ${ORCA_ANDROID_NLOPT_INCLUDE_DIR}
+    ${ORCA_ANDROID_JPEG_INCLUDE_DIR}
 )
 target_compile_definitions(orca_android_libslic3r_port_config INTERFACE
     SLIC3R_GUI=0
@@ -120,6 +129,11 @@ find_package(Threads REQUIRED)
 
 orca_android_require_directory("Android Boost headers" "${ORCA_ANDROID_BOOST_INCLUDE_DIR}")
 orca_android_require_file("Android Boost filesystem static library" "${ORCA_ANDROID_BOOST_FILESYSTEM_LIBRARY}")
+orca_android_require_file("Android Boost thread static library" "${ORCA_ANDROID_BOOST_THREAD_LIBRARY}")
+orca_android_require_file("Android Boost chrono static library" "${ORCA_ANDROID_BOOST_CHRONO_LIBRARY}")
+orca_android_require_file("Android Boost atomic static library" "${ORCA_ANDROID_BOOST_ATOMIC_LIBRARY}")
+orca_android_require_file("Android libjpeg-turbo static library" "${ORCA_ANDROID_JPEG_LIBRARY}")
+orca_android_require_file("Android libjpeg-turbo header" "${ORCA_ANDROID_JPEG_INCLUDE_DIR}/jpeglib.h")
 orca_android_require_directory("Android TBB headers" "${ORCA_ANDROID_TBB_INCLUDE_DIR}")
 orca_android_require_file("Android TBB static library" "${ORCA_ANDROID_TBB_LIBRARY}")
 orca_android_require_file("Android TBB malloc static library" "${ORCA_ANDROID_TBBMALLOC_LIBRARY}")
@@ -136,6 +150,18 @@ orca_android_require_directory("Android OpenSSL headers" "${ORCA_ANDROID_OPENSSL
 orca_android_require_file("Android OpenSSL MD5 header" "${ORCA_ANDROID_OPENSSL_INCLUDE_DIR}/openssl/md5.h")
 orca_android_require_file("Android OpenSSL crypto library" "${ORCA_ANDROID_OPENSSL_CRYPTO_LIBRARY}")
 
+set(ORCA_ANDROID_REAL_STEP OFF)
+if (ORCA_ANDROID_OCCT_PREFIX AND EXISTS "${ORCA_ANDROID_OCCT_CMAKE_DIR}")
+    set(OpenCASCADE_DIR "${ORCA_ANDROID_OCCT_CMAKE_DIR}" CACHE PATH "Android OCCT CMake package" FORCE)
+    find_package(OpenCASCADE REQUIRED)
+    set(ORCA_ANDROID_REAL_STEP ON)
+    message(STATUS "orca_android_libslic3r: enabling OCCT-backed STEP import from ${ORCA_ANDROID_OCCT_PREFIX}")
+elseif (ORCA_ANDROID_OCCT_PREFIX)
+    message(FATAL_ERROR "ORCA_ANDROID_OCCT_PREFIX was provided but ${ORCA_ANDROID_OCCT_CMAKE_DIR} does not exist.")
+else()
+    message(STATUS "orca_android_libslic3r: STEP import is disabled; set ORCA_ANDROID_OCCT_PREFIX to an Android OCCT package to enable it.")
+endif()
+
 add_library(orca_android_boost_headers INTERFACE)
 target_include_directories(orca_android_boost_headers INTERFACE "${ORCA_ANDROID_BOOST_INCLUDE_DIR}")
 if (ORCA_ANDROID_BOOST_EXTRA_INCLUDE_DIRS)
@@ -150,6 +176,26 @@ set_target_properties(orca_android_boost_filesystem PROPERTIES
     IMPORTED_LOCATION "${ORCA_ANDROID_BOOST_FILESYSTEM_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${ORCA_ANDROID_BOOST_INCLUDE_DIR}"
     INTERFACE_LINK_LIBRARIES "orca_android_boost_system"
+)
+
+add_library(orca_android_boost_atomic STATIC IMPORTED GLOBAL)
+set_target_properties(orca_android_boost_atomic PROPERTIES
+    IMPORTED_LOCATION "${ORCA_ANDROID_BOOST_ATOMIC_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ORCA_ANDROID_BOOST_INCLUDE_DIR}"
+)
+
+add_library(orca_android_boost_chrono STATIC IMPORTED GLOBAL)
+set_target_properties(orca_android_boost_chrono PROPERTIES
+    IMPORTED_LOCATION "${ORCA_ANDROID_BOOST_CHRONO_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ORCA_ANDROID_BOOST_INCLUDE_DIR}"
+    INTERFACE_LINK_LIBRARIES "orca_android_boost_system"
+)
+
+add_library(orca_android_boost_thread STATIC IMPORTED GLOBAL)
+set_target_properties(orca_android_boost_thread PROPERTIES
+    IMPORTED_LOCATION "${ORCA_ANDROID_BOOST_THREAD_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ORCA_ANDROID_BOOST_INCLUDE_DIR}"
+    INTERFACE_LINK_LIBRARIES "orca_android_boost_chrono;orca_android_boost_atomic;Threads::Threads"
 )
 
 add_library(orca_android_tbb STATIC IMPORTED GLOBAL)
@@ -764,6 +810,12 @@ set(ORCA_ANDROID_LIBSLIC3R_PRINT_GCODE_ENGINE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/android_libslic3r_remaining_print_stubs.cpp
 )
 
+if (ORCA_ANDROID_REAL_STEP)
+    list(APPEND ORCA_ANDROID_LIBSLIC3R_PRINT_GCODE_ENGINE_SOURCES
+        ${ORCA_LIBSLIC3R_ROOT}/Format/STEP.cpp
+    )
+endif()
+
 add_library(orca_android_libslic3r_print_gcode_lib STATIC
     ${ORCA_ANDROID_LIBSLIC3R_PRINT_GCODE_ENGINE_SOURCES}
 )
@@ -780,6 +832,7 @@ target_link_libraries(orca_android_libslic3r_print_gcode_lib PUBLIC
     orca_android_qhull
     orca_android_glu_libtess
     orca_android_openssl_crypto
+    ${ORCA_ANDROID_JPEG_LIBRARY}
     log
 )
 target_compile_options(orca_android_libslic3r_print_gcode_lib PRIVATE
@@ -794,6 +847,45 @@ target_compile_definitions(orca_android_libslic3r_print_gcode_lib PRIVATE
     ORCA_ANDROID_REAL_BBS_3MF
     XML_STATIC
 )
+
+if (ORCA_ANDROID_REAL_STEP)
+    target_compile_definitions(orca_android_libslic3r_print_gcode_lib PUBLIC ORCA_ANDROID_REAL_STEP)
+    target_include_directories(orca_android_libslic3r_print_gcode_lib SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
+    if (OpenCASCADE_LIBRARY_DIR)
+        target_link_directories(orca_android_libslic3r_print_gcode_lib PUBLIC ${OpenCASCADE_LIBRARY_DIR})
+    endif()
+    target_link_libraries(orca_android_libslic3r_print_gcode_lib PUBLIC
+        orca_android_boost_thread
+        orca_android_boost_chrono
+        orca_android_boost_atomic
+        TKXDESTEP
+        TKSTEP
+        TKSTEP209
+        TKSTEPAttr
+        TKSTEPBase
+        TKXCAF
+        TKXSBase
+        TKVCAF
+        TKCAF
+        TKLCAF
+        TKCDF
+        TKV3d
+        TKService
+        TKBRep
+        TKMesh
+        TKBO
+        TKPrim
+        TKHLR
+        TKShHealing
+        TKTopAlgo
+        TKGeomAlgo
+        TKGeomBase
+        TKG3d
+        TKG2d
+        TKMath
+        TKernel
+    )
+endif()
 
 if (ORCA_ANDROID_LIBSLIC3R_BUILD_EXPERIMENTAL_TOOLS)
     add_executable(orca_android_libslic3r_print_gcode_probe

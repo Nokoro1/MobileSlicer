@@ -5,6 +5,8 @@
 #include "orca_native_paint.h"
 
 #include "libslic3r/Model.hpp"
+#include "libslic3r/Format/bbs_3mf.hpp"
+#include "libslic3r/GCode/ThumbnailData.hpp"
 #include "libslic3r/TriangleMesh.hpp"
 #include "libslic3r/TriangleSelector.hpp"
 
@@ -41,6 +43,14 @@ struct PaintVolumeBounds {
 };
 
 struct OrcaEngineImpl {
+    struct SliceThumbnailRgba {
+        unsigned int width{0};
+        unsigned int height{0};
+        std::string format;
+        std::string role;
+        std::vector<unsigned char> rgba;
+    };
+
     struct PaintObjectBinding {
         long long mobile_object_id{0};
         std::vector<int> model_object_indices;
@@ -49,9 +59,19 @@ struct OrcaEngineImpl {
         std::vector<PaintVolumeBounds> volume_bounds;
     };
 
+    struct PlanningModelCacheEntry {
+        std::string key;
+        Slic3r::Model model;
+        std::uint64_t last_used_generation{0};
+    };
+
     mutable std::recursive_mutex mutex;
     std::optional<Slic3r::Model> model;
+    std::vector<Slic3r::PlateData> imported_project_plate_data;
+    std::optional<Slic3r::DynamicPrintConfig> imported_project_config;
     std::uint64_t model_generation{0};
+    std::uint64_t planning_cache_generation{0};
+    std::vector<PlanningModelCacheEntry> planning_model_cache;
     std::unordered_map<long long, PaintObjectBinding> paint_object_bindings;
     std::unique_ptr<mobileslicer::orca_paint::OrcaPaintSession> paint_session;
     int paint_tool_color_slot{1};
@@ -73,6 +93,8 @@ struct OrcaEngineImpl {
     bool gcode_path_owned{false};
     std::string gcode_summary;
     bool gcode_summary_enriched{false};
+    std::vector<SliceThumbnailRgba> slice_thumbnails;
+    std::optional<Slic3r::PlateBBoxData> sliced_plate_bbox_data;
     std::string slice_metrics;
     std::string last_error;
     std::string preview_range_plan;

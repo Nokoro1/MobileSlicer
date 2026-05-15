@@ -28,7 +28,8 @@ class AutomationSliceRunnerTest {
                 placementMs = 3,
                 configMs = 4,
                 nativeSliceMs = 5,
-                writeGcodeMs = 6,
+                thumbnailMs = 6,
+                writeGcodeMs = 7,
                 totalMs = 21
             ),
             nativeMetrics = AutomationSliceNativeMetrics(
@@ -85,7 +86,8 @@ class AutomationSliceRunnerTest {
         assertTrue(status.contains("placementMs=3"))
         assertTrue(status.contains("configMs=4"))
         assertTrue(status.contains("nativeSliceMs=5"))
-        assertTrue(status.contains("writeGcodeMs=6"))
+        assertTrue(status.contains("thumbnailMs=6"))
+        assertTrue(status.contains("writeGcodeMs=7"))
         assertTrue(status.contains("previewMoves=7"))
         assertTrue(status.contains("previewCacheBuilt=1"))
         assertTrue(status.contains("previewCacheComplete=1"))

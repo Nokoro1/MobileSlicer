@@ -2,11 +2,14 @@ package com.mobileslicer.printerconnection
 
 import com.mobileslicer.profiles.PrinterProfile
 import java.io.File
+import java.net.URLEncoder
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 internal class OctoKlipperConnectionClient(
     private val requestText: (url: String, method: String, headers: Map<String, String>) -> NetworkResult,
     private val requestTextBody: (url: String, method: String, headers: Map<String, String>) -> TextNetworkResult,
+    private val sendRawBody: (url: String, method: String, headers: Map<String, String>, body: String) -> NetworkResult,
     private val uploadMultipart: suspend (
         url: String,
         headers: Map<String, String>,
@@ -54,63 +57,75 @@ internal class OctoKlipperConnectionClient(
     ): PrinterConnectionResult {
         val failures = mutableListOf<String>()
         for (candidate in printerHostCandidates(baseUrl)) {
-            val octoProbe = requestText(
-                "$candidate/api/version",
-                "GET",
-                profile.authHeaders(PrinterProtocol.OctoPrint)
-            )
-            if (octoProbe.isSuccess) {
-                val result = uploadMultipart(
-                    "$candidate/api/files/local",
-                    profile.authHeaders(PrinterProtocol.OctoPrint),
-                    mapOf("print" to (action == PrinterUploadAction.UploadAndStart).toString()),
-                    file,
-                    "file",
-                    remoteFileName,
-                    onProgress
-                )
-                if (result.isSuccess) {
-                    return successfulUpload(action, remoteFileName)
-                }
-                failures += "OctoPrint upload ${safeDisplayUrl(candidate)}: ${result.errorMessage ?: "failed"}"
-                continue
-            }
-            failures += "OctoPrint probe ${safeDisplayUrl(candidate)}: ${octoProbe.errorMessage ?: "no response"}"
-
             val moonrakerProbe = requestText(
                 "$candidate/server/info",
                 "GET",
                 profile.authHeaders(PrinterProtocol.Moonraker)
             )
-            if (!moonrakerProbe.isSuccess) {
-                failures += "Moonraker probe ${safeDisplayUrl(candidate)}: ${moonrakerProbe.errorMessage ?: "no response"}"
+            if (moonrakerProbe.isSuccess) {
+                val result = uploadMultipart(
+                    "$candidate/server/files/upload",
+                    profile.authHeaders(PrinterProtocol.Moonraker),
+                    mapOf(
+                        "root" to "gcodes",
+                        "print" to "false"
+                    ),
+                    file,
+                    "file",
+                    remoteFileName,
+                    onProgress
+                )
+                if (!result.isSuccess) {
+                    failures += "Moonraker upload ${safeDisplayUrl(candidate)}: ${result.errorMessage ?: "failed"}"
+                    continue
+                }
+                if (action == PrinterUploadAction.UploadAndStart) {
+                    val metadata = waitForMoonrakerMetadata(
+                        baseUrl = candidate,
+                        headers = profile.authHeaders(PrinterProtocol.Moonraker),
+                        remoteFileName = remoteFileName
+                    )
+                    if (!metadata.isSuccess) {
+                        return PrinterConnectionResult(
+                            false,
+                            "Start delayed",
+                            metadata.errorMessage ?: "File uploaded, but Moonraker metadata was not ready."
+                        )
+                    }
+                    val startResult = sendMoonrakerPrintStart(
+                        baseUrl = candidate,
+                        headers = profile.authHeaders(PrinterProtocol.Moonraker),
+                        remoteFileName = remoteFileName
+                    )
+                    if (!startResult.isSuccess) {
+                        return PrinterConnectionResult(false, "Start failed", startResult.errorMessage ?: "File uploaded, but print did not start.")
+                    }
+                }
+                return successfulUpload(action, remoteFileName)
+            }
+            failures += "Moonraker probe ${safeDisplayUrl(candidate)}: ${moonrakerProbe.errorMessage ?: "no response"}"
+
+            val octoProbe = requestText(
+                "$candidate/api/version",
+                "GET",
+                profile.authHeaders(PrinterProtocol.OctoPrint)
+            )
+            if (!octoProbe.isSuccess) {
+                failures += "OctoPrint probe ${safeDisplayUrl(candidate)}: ${octoProbe.errorMessage ?: "no response"}"
                 continue
             }
             val result = uploadMultipart(
-                "$candidate/server/files/upload",
-                profile.authHeaders(PrinterProtocol.Moonraker),
-                mapOf(
-                    "root" to "gcodes",
-                    "print" to "false"
-                ),
+                "$candidate/api/files/local",
+                profile.authHeaders(PrinterProtocol.OctoPrint),
+                mapOf("print" to (action == PrinterUploadAction.UploadAndStart).toString()),
                 file,
                 "file",
                 remoteFileName,
                 onProgress
             )
             if (!result.isSuccess) {
-                failures += "Moonraker upload ${safeDisplayUrl(candidate)}: ${result.errorMessage ?: "failed"}"
+                failures += "OctoPrint upload ${safeDisplayUrl(candidate)}: ${result.errorMessage ?: "failed"}"
                 continue
-            }
-            if (action == PrinterUploadAction.UploadAndStart) {
-                val startResult = sendMoonrakerGcode(
-                    baseUrl = candidate,
-                    headers = profile.authHeaders(PrinterProtocol.Moonraker),
-                    gcode = "SDCARD_PRINT_FILE FILENAME=${remoteFileName.moonrakerFilenameArgument()}"
-                )
-                if (!startResult.isSuccess) {
-                    return PrinterConnectionResult(false, "Start failed", startResult.errorMessage ?: "File uploaded, but print did not start.")
-                }
             }
             return successfulUpload(action, remoteFileName)
         }
@@ -147,13 +162,65 @@ internal class OctoKlipperConnectionClient(
         return PrinterConnectionResult(false, "Status unavailable", failures.joinToString("\n").ifBlank { "Printer did not respond." })
     }
 
-    private fun sendMoonrakerGcode(baseUrl: String, headers: Map<String, String>, gcode: String): NetworkResult {
-        val fields = mapOf("script" to gcode).toQueryString()
-        return requestText(
-            "${baseUrl.trimEnd('/')}/printer/gcode/script?$fields",
+    private fun sendMoonrakerPrintStart(baseUrl: String, headers: Map<String, String>, remoteFileName: String): NetworkResult {
+        val startEndpoint = "${baseUrl.trimEnd('/')}/printer/print/start?filename=${urlEncode(remoteFileName)}"
+        val startResult = requestText(
+            startEndpoint,
             "POST",
             headers
         )
+        if (startResult.isSuccess) return startResult
+
+        val gcode = "SDCARD_PRINT_FILE FILENAME=${remoteFileName.moonrakerFilenameArgument()}"
+        val scriptResult = sendMoonrakerGcodeScript(baseUrl, headers, gcode)
+        if (scriptResult.isSuccess) return scriptResult
+        return NetworkResult.Failure(
+            "Moonraker print start failed: ${startResult.errorMessage ?: "unknown error"}. " +
+                "G-code script fallback failed: ${scriptResult.errorMessage ?: "unknown error"}."
+        )
+    }
+
+    private fun sendMoonrakerGcodeScript(baseUrl: String, headers: Map<String, String>, gcode: String): NetworkResult {
+        val endpoint = "${baseUrl.trimEnd('/')}/printer/gcode/script"
+        val bodyResult = sendRawBody(
+            endpoint,
+            "POST",
+            headers + ("Content-Type" to "application/json"),
+            JSONObject().put("script", gcode).toString()
+        )
+        if (bodyResult.isSuccess) return bodyResult
+
+        val fields = mapOf("script" to gcode).toQueryString()
+        val queryResult = requestText(
+            "$endpoint?$fields",
+            "POST",
+            headers
+        )
+        if (queryResult.isSuccess) return queryResult
+        return NetworkResult.Failure(
+            "Moonraker JSON start failed: ${bodyResult.errorMessage ?: "unknown error"}. " +
+                "Query fallback failed: ${queryResult.errorMessage ?: "unknown error"}."
+        )
+    }
+
+    private suspend fun waitForMoonrakerMetadata(
+        baseUrl: String,
+        headers: Map<String, String>,
+        remoteFileName: String,
+        timeoutMs: Long = 480_000L,
+        pollIntervalMs: Long = 2_000L
+    ): TextNetworkResult {
+        val encodedName = URLEncoder.encode(remoteFileName, Charsets.UTF_8.name()).replace("+", "%20")
+        val metadataUrl = "${baseUrl.trimEnd('/')}/server/files/metadata?filename=$encodedName"
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var lastFailure: String? = null
+        while (System.currentTimeMillis() <= deadline) {
+            val result = requestTextBody(metadataUrl, "GET", headers)
+            if (result.isSuccess) return result
+            lastFailure = result.errorMessage
+            delay(pollIntervalMs)
+        }
+        return TextNetworkResult.Failure("File uploaded, but Moonraker did not finish G-code metadata processing before print start. Last response: ${lastFailure ?: "metadata unavailable"}.")
     }
 
     private fun String.moonrakerFilenameArgument(): String {

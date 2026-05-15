@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mobileslicer.appBodyColor
@@ -44,6 +46,7 @@ import com.mobileslicer.appCardColorMuted
 import com.mobileslicer.appOutlineColor
 import com.mobileslicer.appTitleColor
 import com.mobileslicer.viewer.GcodePreviewDisplayMode
+import com.mobileslicer.viewer.ViewerModelTransform
 import java.util.Locale
 
 private enum class PreviewInfoTab {
@@ -65,6 +68,14 @@ internal fun PlateObjectListSheet(
     activePlateId: Long,
     selectedPlateObjectId: Long?,
     onObjectSelected: (Long) -> Unit,
+    onObjectProcessSelected: (Long) -> Unit,
+    onAddModifierToObject: (Long) -> Unit,
+    onModifierProcessSelected: (Long, Long) -> Unit,
+    onToggleModifier: (Long, Long, Boolean) -> Unit,
+    onDeleteModifier: (Long, Long) -> Unit,
+    onCenterModifierOnObject: (Long, Long) -> Unit,
+    onRotateModifier: (Long, Long) -> Unit,
+    onModifierTransformChanged: (Long, Long, ViewerModelTransform) -> Unit,
     onMoveObjectToPlate: (Long, Long) -> Unit,
     onMoveObjectToNewPlate: (Long) -> Unit,
     onDismiss: () -> Unit
@@ -144,11 +155,44 @@ internal fun PlateObjectListSheet(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                objectOnPlate.attribution?.let { attribution ->
+                                    Text(
+                                        text = attribution.compactLabel(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                                 Row(
                                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    TextButton(
+                                        onClick = { onObjectProcessSelected(objectOnPlate.id) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text(
+                                            text = if (objectOnPlate.processOverride?.hasProcessOverrides == true) {
+                                                "Edit process *"
+                                            } else {
+                                                "Edit process"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = { onAddModifierToObject(objectOnPlate.id) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text(
+                                            text = "Add modifier",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1
+                                        )
+                                    }
                                     TextButton(
                                         onClick = { onMoveObjectToNewPlate(objectOnPlate.id) },
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
@@ -172,6 +216,106 @@ internal fun PlateObjectListSheet(
                                         }
                                     }
                                 }
+                                objectOnPlate.modifiers.forEach { modifier ->
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = if (modifier.enabled) 0.10f else 0.05f),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            MaterialTheme.colorScheme.primary.copy(alpha = if (modifier.enabled) 0.38f else 0.18f)
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = modifier.label,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = appTitleColor(),
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    modifier = Modifier.weight(1f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = if (modifier.enabled) "Modifier" else "Disabled",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                            Row(
+                                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                TextButton(
+                                                    onClick = { onModifierProcessSelected(objectOnPlate.id, modifier.id) },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (modifier.hasProcessOverrides) "Edit process *" else "Edit process",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                                TextButton(
+                                                    onClick = { onToggleModifier(objectOnPlate.id, modifier.id, !modifier.enabled) },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (modifier.enabled) "Disable" else "Enable",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                                TextButton(
+                                                    onClick = { onCenterModifierOnObject(objectOnPlate.id, modifier.id) },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Center",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                                TextButton(
+                                                    onClick = { onRotateModifier(objectOnPlate.id, modifier.id) },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Rotate 90",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                                TextButton(
+                                                    onClick = { onDeleteModifier(objectOnPlate.id, modifier.id) },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Delete",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                            }
+                                            ModifierTransformEditor(
+                                                transform = modifier.transform,
+                                                enabled = modifier.enabled,
+                                                onTransformChanged = { transform ->
+                                                    onModifierTransformChanged(objectOnPlate.id, modifier.id, transform)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                             if (selected) {
                                 Text(
@@ -191,6 +335,134 @@ internal fun PlateObjectListSheet(
 
 private fun WorkspacePlate.shortPlateMoveLabel(fallbackIndex: Int): String =
     label.ifBlank { defaultWorkspacePlateLabel(fallbackIndex + 1) }
+
+@Composable
+private fun ModifierTransformEditor(
+    transform: ViewerModelTransform,
+    enabled: Boolean,
+    onTransformChanged: (ViewerModelTransform) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            ModifierTransformField(
+                label = "X",
+                value = transform.centerXmm,
+                suffix = "mm",
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+                onValueChanged = { onTransformChanged(transform.copy(centerXmm = it)) }
+            )
+            ModifierTransformField(
+                label = "Y",
+                value = transform.centerYmm,
+                suffix = "mm",
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+                onValueChanged = { onTransformChanged(transform.copy(centerYmm = it)) }
+            )
+            ModifierTransformField(
+                label = "Z",
+                value = transform.zOffsetMm,
+                suffix = "mm",
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+                onValueChanged = { onTransformChanged(transform.copy(zOffsetMm = it)) }
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            ModifierTransformField(
+                label = "Rx",
+                value = transform.rotationXDegrees,
+                suffix = "deg",
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+                onValueChanged = { onTransformChanged(transform.copy(rotationXDegrees = normalizeDegrees(it), orientationMatrix = null)) }
+            )
+            ModifierTransformField(
+                label = "Ry",
+                value = transform.rotationYDegrees,
+                suffix = "deg",
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+                onValueChanged = { onTransformChanged(transform.copy(rotationYDegrees = normalizeDegrees(it), orientationMatrix = null)) }
+            )
+            ModifierTransformField(
+                label = "Rz",
+                value = transform.rotationZDegrees,
+                suffix = "deg",
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+                onValueChanged = { onTransformChanged(transform.copy(rotationZDegrees = normalizeDegrees(it), orientationMatrix = null)) }
+            )
+        }
+        ModifierTransformField(
+            label = "Scale",
+            value = transform.uniformScale * 100f,
+            suffix = "%",
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+            onValueChanged = { percent ->
+                onTransformChanged(transform.copy(uniformScale = (percent / 100f).coerceIn(0.05f, 20f)))
+            }
+        )
+    }
+}
+
+@Composable
+private fun ModifierTransformField(
+    label: String,
+    value: Float,
+    suffix: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onValueChanged: (Float) -> Unit
+) {
+    var text by remember(value) { mutableStateOf(formatModifierTransformValue(value)) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { next ->
+            text = next
+            next.toFloatOrNull()?.takeIf { it.isFinite() }?.let(onValueChanged)
+        },
+        enabled = enabled,
+        singleLine = true,
+        label = {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        suffix = {
+            Text(
+                text = suffix,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+        },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        textStyle = MaterialTheme.typography.bodyMedium,
+        modifier = modifier
+    )
+}
+
+private fun formatModifierTransformValue(value: Float): String =
+    if (kotlin.math.abs(value - value.toInt().toFloat()) < 0.0001f) {
+        value.toInt().toString()
+    } else {
+        String.format(Locale.US, "%.2f", value)
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

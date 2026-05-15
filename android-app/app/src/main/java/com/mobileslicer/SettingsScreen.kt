@@ -405,7 +405,7 @@ private fun InfoSettingsSection(
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             LegalInfoRow(
                 title = "MobileSlicer",
-                value = "MobileSlicer is a local Android slicer for STL and 3MF files. It is not affiliated with, sponsored by, or endorsed by the OrcaSlicer project."
+                value = "MobileSlicer is a local Android slicer for STL, 3MF, and STEP/STP files. It is not affiliated with, sponsored by, or endorsed by the OrcaSlicer project."
             )
             HorizontalDivider(color = outlineColor)
             LegalInfoRow(

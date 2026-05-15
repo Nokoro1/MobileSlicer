@@ -26,7 +26,10 @@ internal fun parseNativeEngineError(message: String?): NativeEngineError? {
     val lowercase = cleaned.lowercase()
     val code = when {
         "printable volume exceeded" in lowercase -> NativeEngineErrorCode.PrintableVolumeExceeded
-        "stl load failed" in lowercase || "model load failed" in lowercase -> NativeEngineErrorCode.ModelLoadFailed
+        "stl load failed" in lowercase ||
+            "step import" in lowercase ||
+            "step file" in lowercase ||
+            "model load failed" in lowercase -> NativeEngineErrorCode.ModelLoadFailed
         "plate" in lowercase && "load failed" in lowercase -> NativeEngineErrorCode.PlateLoadFailed
         "config" in lowercase && ("rejected" in lowercase || "failed" in lowercase) -> NativeEngineErrorCode.ConfigRejected
         "no generated g-code" in lowercase -> NativeEngineErrorCode.GcodeUnavailable

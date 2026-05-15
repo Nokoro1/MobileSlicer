@@ -6,6 +6,24 @@
 # Local-only project notes and website deployment files.
 /README/
 /Website/
+!/README/
+/README/*
+!/README/plans/
+/README/plans/*
+!/README/plans/MODEL_SEARCH_IMPORT_PLAN.md
+!/Website/
+/Website/*
+!/Website/README.md
+!/Website/wrangler.toml
+!/Website/privacy.html
+!/Website/legal.html
+!/Website/functions/
+!/Website/functions/**
+!/Website/lib/
+!/Website/lib/**
+!/Website/test/
+!/Website/test/**
+/Website/.wrangler/
 
 # Upstream metadata and generated dependency folders that do not belong in the
 # public Android source tree.

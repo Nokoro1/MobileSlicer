@@ -17,34 +17,46 @@ internal fun ProcessStrengthTabContent(
     ensureVerticalShellThicknessOptions: List<AppSettingOption<EnsureVerticalShellThicknessMode>>,
     wallCount: String,
     onWallCountChange: (String) -> Unit,
+    wallCountChanged: Boolean = false,
     alternateExtraWall: Boolean,
     onAlternateExtraWallChange: (Boolean) -> Unit,
     topShellLayers: String,
     onTopShellLayersChange: (String) -> Unit,
+    topShellLayersChanged: Boolean = false,
     topShellThickness: String,
     onTopShellThicknessChange: (String) -> Unit,
+    topShellThicknessChanged: Boolean = false,
     topSurfaceDensityPercent: String,
     onTopSurfaceDensityPercentChange: (String) -> Unit,
+    topSurfaceDensityPercentChanged: Boolean = false,
     topSurfacePattern: TopSurfacePattern,
     onTopSurfacePatternChange: (TopSurfacePattern) -> Unit,
+    topSurfacePatternChanged: Boolean = false,
     bottomShellLayers: String,
     onBottomShellLayersChange: (String) -> Unit,
+    bottomShellLayersChanged: Boolean = false,
     bottomShellThickness: String,
     onBottomShellThicknessChange: (String) -> Unit,
+    bottomShellThicknessChanged: Boolean = false,
     bottomSurfaceDensityPercent: String,
     onBottomSurfaceDensityPercentChange: (String) -> Unit,
+    bottomSurfaceDensityPercentChanged: Boolean = false,
     bottomSurfacePattern: BottomSurfacePattern,
     onBottomSurfacePatternChange: (BottomSurfacePattern) -> Unit,
+    bottomSurfacePatternChanged: Boolean = false,
     topBottomInfillWallOverlapPercent: String,
     onTopBottomInfillWallOverlapPercentChange: (String) -> Unit,
     internalSolidInfillPattern: InternalSolidInfillPattern,
     onInternalSolidInfillPatternChange: (InternalSolidInfillPattern) -> Unit,
     infillPercent: String,
     onInfillPercentChange: (String) -> Unit,
+    infillPercentChanged: Boolean = false,
     fillMultiline: String,
     onFillMultilineChange: (String) -> Unit,
+    fillMultilineChanged: Boolean = false,
     sparseInfillPattern: SparseInfillPattern,
     onSparseInfillPatternChange: (SparseInfillPattern) -> Unit,
+    sparseInfillPatternChanged: Boolean = false,
     extraSolidInfills: String,
     onExtraSolidInfillsChange: (String) -> Unit,
     detectThinWall: Boolean,
@@ -108,7 +120,7 @@ internal fun ProcessStrengthTabContent(
 ) {
     ProfileEditorSection("Strength", "Shell, wall, infill, and adhesion controls.") {
         ProfileGroupHeader("Walls")
-        ProfileTextField(wallCount, onWallCountChange, "Wall / perimeter count", KeyboardType.Number)
+        ProfileTextField(wallCount, onWallCountChange, "Wall / perimeter count", KeyboardType.Number, changed = wallCountChanged)
         if (ProfileEditorSetting.ProcessStrengthAdvanced.isVisible(showAdvancedProfileSettings)) {
             ProfileDropdownField(
                 label = "Alternate extra wall",
@@ -124,23 +136,25 @@ internal fun ProcessStrengthTabContent(
             )
         }
         ProfileGroupHeader("Top/bottom shells")
-        ProfileTextField(topShellLayers, onTopShellLayersChange, "Top shell layers", KeyboardType.Number)
-        ProfileTextField(topShellThickness, onTopShellThicknessChange, "Top shell thickness (mm)", KeyboardType.Decimal)
-        ProfileTextField(topSurfaceDensityPercent, onTopSurfaceDensityPercentChange, "Top surface density (%)", KeyboardType.Number)
+        ProfileTextField(topShellLayers, onTopShellLayersChange, "Top shell layers", KeyboardType.Number, changed = topShellLayersChanged)
+        ProfileTextField(topShellThickness, onTopShellThicknessChange, "Top shell thickness (mm)", KeyboardType.Decimal, changed = topShellThicknessChanged)
+        ProfileTextField(topSurfaceDensityPercent, onTopSurfaceDensityPercentChange, "Top surface density (%)", KeyboardType.Number, changed = topSurfaceDensityPercentChanged)
         ProfileDropdownField(
             label = "Top surface pattern",
             selectedLabel = topSurfacePattern.displayLabel,
             options = topSurfacePatternOptions,
-            onSelected = onTopSurfacePatternChange
+            onSelected = onTopSurfacePatternChange,
+            changed = topSurfacePatternChanged
         )
-        ProfileTextField(bottomShellLayers, onBottomShellLayersChange, "Bottom shell layers", KeyboardType.Number)
-        ProfileTextField(bottomShellThickness, onBottomShellThicknessChange, "Bottom shell thickness (mm)", KeyboardType.Decimal)
-        ProfileTextField(bottomSurfaceDensityPercent, onBottomSurfaceDensityPercentChange, "Bottom surface density (%)", KeyboardType.Number)
+        ProfileTextField(bottomShellLayers, onBottomShellLayersChange, "Bottom shell layers", KeyboardType.Number, changed = bottomShellLayersChanged)
+        ProfileTextField(bottomShellThickness, onBottomShellThicknessChange, "Bottom shell thickness (mm)", KeyboardType.Decimal, changed = bottomShellThicknessChanged)
+        ProfileTextField(bottomSurfaceDensityPercent, onBottomSurfaceDensityPercentChange, "Bottom surface density (%)", KeyboardType.Number, changed = bottomSurfaceDensityPercentChanged)
         ProfileDropdownField(
             label = "Bottom surface pattern",
             selectedLabel = bottomSurfacePattern.displayLabel,
             options = bottomSurfacePatternOptions,
-            onSelected = onBottomSurfacePatternChange
+            onSelected = onBottomSurfacePatternChange,
+            changed = bottomSurfacePatternChanged
         )
         if (ProfileEditorSetting.ProcessStrengthAdvanced.isVisible(showAdvancedProfileSettings)) {
             ProfileTextField(
@@ -151,13 +165,14 @@ internal fun ProcessStrengthTabContent(
             )
         }
         ProfileGroupHeader("Infill")
-        ProfileTextField(infillPercent, onInfillPercentChange, "Infill density (%)", KeyboardType.Number)
-        ProfileTextField(fillMultiline, onFillMultilineChange, "Fill multiline", KeyboardType.Number)
+        ProfileTextField(infillPercent, onInfillPercentChange, "Infill density (%)", KeyboardType.Number, changed = infillPercentChanged)
+        ProfileTextField(fillMultiline, onFillMultilineChange, "Fill multiline", KeyboardType.Number, changed = fillMultilineChanged)
         ProfileDropdownField(
             label = "Sparse infill pattern",
             selectedLabel = sparseInfillPattern.displayLabel,
             options = sparseInfillPatternOptions,
-            onSelected = onSparseInfillPatternChange
+            onSelected = onSparseInfillPatternChange,
+            changed = sparseInfillPatternChanged
         )
         if (ProfileEditorSetting.ProcessStrengthAdvanced.isVisible(showAdvancedProfileSettings)) {
             ProfileTextField(infillDirectionDegrees, onInfillDirectionDegreesChange, "Sparse infill direction (degrees)", KeyboardType.Decimal)

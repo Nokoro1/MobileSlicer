@@ -7,30 +7,37 @@ import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import kotlin.math.sqrt
 
-internal fun parseAsciiForDisplay(file: File, maxDisplayTriangles: Int): PreparedViewerMesh {
+internal fun parseAsciiForDisplay(file: File, maxPreviewMeshBytes: Long): PreparedViewerMesh {
     val sourceSummary = parseAsciiBoundsAndCount(file)
-    if (sourceSummary.triangleCount <= maxDisplayTriangles) {
-        return parseAscii(file).let { mesh ->
-            PreparedViewerMesh(
-                mesh = mesh,
-                sourceTriangleCount = mesh.triangleCount,
-                displayTriangleCount = mesh.triangleCount,
-                sourceBounds = mesh.bounds,
-                reducedForDisplay = false
-            )
-        }
+    if (exactPreviewMeshByteSize(sourceSummary.triangleCount) > maxPreviewMeshBytes) {
+        return parseAsciiIndexedForDisplay(file, sourceSummary, maxPreviewMeshBytes)
     }
 
-    val vertices = FloatCollector(maxDisplayTriangles * 9)
-    val normals = FloatCollector(maxDisplayTriangles * 9)
+    return parseAscii(file).let { mesh ->
+        PreparedViewerMesh(
+            mesh = mesh,
+            sourceTriangleCount = mesh.triangleCount,
+            displayTriangleCount = mesh.triangleCount,
+            sourceBounds = mesh.bounds,
+            renderArrayBytes = mesh.exactPreviewMeshByteSize()
+        )
+    }
+}
+
+private fun parseAsciiIndexedForDisplay(
+    file: File,
+    sourceSummary: BoundsAndTriangleCount,
+    maxPreviewMeshBytes: Long
+): PreparedViewerMesh {
+    val vertices = FloatCollector(4096)
+    val indices = IntArray(sourceSummary.triangleCount * 3)
+    val keyToIndex = VertexPositionIndexMap()
     val parsedVector = FloatArray(3)
     val parsedNormal = FloatArray(3)
     var currentFacetNormalX = 0f
     var currentFacetNormalY = 0f
     var currentFacetNormalZ = 1f
-    val triangleVertices = FloatArray(9)
-    var vertexInTriangle = 0
-    var triangleIndex = 0
+    var vertexCount = 0
 
     InputStreamReader(file.inputStream(), asciiDecoder()).use { reader ->
         reader.buffered().useLines { lines ->
@@ -47,48 +54,47 @@ internal fun parseAsciiForDisplay(file: File, maxDisplayTriangles: Int): Prepare
                     require(parseVector(line, prefixLength = 7, out = parsedVector)) {
                         "ASCII STL vertex line is malformed."
                     }
-                    val base = vertexInTriangle * 3
-                    triangleVertices[base] = parsedVector[0]
-                    triangleVertices[base + 1] = parsedVector[1]
-                    triangleVertices[base + 2] = parsedVector[2]
-                    vertexInTriangle++
-                    if (vertexInTriangle == 3) {
-                        if (shouldKeepDisplayTriangle(
-                                triangleIndex = triangleIndex,
-                                sourceTriangleCount = sourceSummary.triangleCount,
-                                displayTriangleBudget = maxDisplayTriangles
-                            )
-                        ) {
-                            appendTriangle(
-                                vertices = vertices,
-                                normals = normals,
-                                triangleVertices = triangleVertices,
-                                normalX = currentFacetNormalX,
-                                normalY = currentFacetNormalY,
-                                normalZ = currentFacetNormalZ
-                            )
+                    val x = parsedVector[0]
+                    val y = parsedVector[1]
+                    val z = parsedVector[2]
+                    val vertexIndex = keyToIndex.getOrPut(x, y, z) {
+                        val nextIndex = vertices.size / 3
+                        vertices.append(x, y, z)
+                        val byteSize = exactFlatIndexedPreviewMeshByteSize(nextIndex + 1, indices.size)
+                        require(byteSize <= maxPreviewMeshBytes) {
+                            "STL is too large for exact workspace preview (${formatExactPreviewBytes(byteSize)} required, " +
+                                "${formatExactPreviewBytes(maxPreviewMeshBytes)} available)."
                         }
-                        triangleIndex++
-                        vertexInTriangle = 0
+                        nextIndex
                     }
+                    indices[vertexCount] = vertexIndex
+                    vertexCount++
                 }
             }
         }
     }
-    require(vertexInTriangle == 0) { "ASCII STL vertex count is incomplete." }
-
-    val selectedTriangles = vertices.size / 9
+    require(vertexCount > 0) { "ASCII STL has no vertices." }
+    require(vertexCount % 3 == 0) { "ASCII STL vertex count is incomplete." }
+    require(vertexCount == indices.size) { "ASCII STL triangle count changed during indexed parse." }
+    val mesh = StlMesh(
+        vertices = vertices.toFloatArray(),
+        normals = FloatArray(0),
+        triangleCount = sourceSummary.triangleCount,
+        bounds = sourceSummary.bounds,
+        indices = indices,
+        flatShaded = true
+    )
+    val renderBytes = mesh.exactPreviewMeshByteSize()
+    require(renderBytes <= maxPreviewMeshBytes) {
+        "STL is too large for exact workspace preview (${formatExactPreviewBytes(renderBytes)} required, " +
+            "${formatExactPreviewBytes(maxPreviewMeshBytes)} available)."
+    }
     return PreparedViewerMesh(
-        mesh = StlMesh(
-            vertices = vertices.toFloatArray(),
-            normals = normals.toFloatArray(),
-            triangleCount = selectedTriangles,
-            bounds = sourceSummary.bounds
-        ),
+        mesh = mesh,
         sourceTriangleCount = sourceSummary.triangleCount,
-        displayTriangleCount = selectedTriangles,
+        displayTriangleCount = sourceSummary.triangleCount,
         sourceBounds = sourceSummary.bounds,
-        reducedForDisplay = true
+        renderArrayBytes = renderBytes
     )
 }
 
@@ -203,22 +209,6 @@ internal fun parseAsciiBoundsAndCount(file: File): BoundsAndTriangleCount {
         bounds = MeshBounds(minX, minY, minZ, maxX, maxY, maxZ),
         triangleCount = vertexCount / 3
     )
-}
-
-internal fun appendTriangle(
-    vertices: FloatCollector,
-    normals: FloatCollector,
-    triangleVertices: FloatArray,
-    normalX: Float,
-    normalY: Float,
-    normalZ: Float
-) {
-    vertices.append(triangleVertices[0], triangleVertices[1], triangleVertices[2])
-    vertices.append(triangleVertices[3], triangleVertices[4], triangleVertices[5])
-    vertices.append(triangleVertices[6], triangleVertices[7], triangleVertices[8])
-    repeat(3) {
-        normals.append(normalX, normalY, normalZ)
-    }
 }
 
 internal data class BoundsAndTriangleCount(

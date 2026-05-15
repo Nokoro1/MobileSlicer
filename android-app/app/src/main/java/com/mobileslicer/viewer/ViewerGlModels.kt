@@ -3,8 +3,17 @@ package com.mobileslicer.viewer
 internal data class TriangleUpload(
     val vertexBufferId: Int,
     val normalBufferId: Int,
-    val vertexCount: Int
-)
+    val vertexCount: Int,
+    val indexBufferId: Int = 0,
+    val indexCount: Int = 0,
+    val sourceVertexCount: Int = vertexCount,
+    val uploadBytes: Long = (vertexCount.toLong() * 3L * 2L * Float.SIZE_BYTES),
+    val uploadMs: Long = 0L,
+    val glError: Int = 0,
+    val flatShaded: Boolean = false
+) {
+    val indexed: Boolean get() = indexBufferId != 0 && indexCount > 0
+}
 
 internal data class TriangleProgramHandles(
     val positionHandle: Int,
@@ -12,7 +21,9 @@ internal data class TriangleProgramHandles(
     val matrixHandle: Int,
     val modelMatrixHandle: Int,
     val colorHandle: Int,
-    val lightHandle: Int
+    val lightHandle: Int,
+    val flatShadingHandle: Int,
+    val fullBrightHandle: Int
 )
 
 internal data class TriangleProgram(

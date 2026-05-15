@@ -22,6 +22,8 @@
 #include <float.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <unordered_set>
 #include <boost/filesystem/path.hpp>
@@ -53,6 +55,12 @@ using namespace nlohmann;
 namespace Slic3r {
 
 #ifdef __ANDROID__
+static bool mobile_slicer_verbose_native_logging()
+{
+    const char *value = std::getenv("MOBILE_SLICER_VERBOSE_NATIVE_LOGS");
+    return value != nullptr && (value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' || value[0] == 'Y');
+}
+
 static std::string orca_print_debug_join_u(const std::vector<unsigned int> &values)
 {
     std::string out;
@@ -948,6 +956,24 @@ StringObjectException Print::sequential_print_clearance_valid(const Print &print
 //BBS
 static StringObjectException layered_print_cleareance_valid(const Print &print, StringObjectException *warning)
 {
+    static constexpr coord_t clipper_safe_limit = 0x3FFFFFFFFFFFFFFFLL;
+    auto polygon_valid_for_clipper = [](const Polygon& polygon) {
+        if (polygon.points.size() < 3) {
+            return false;
+        }
+        for (const Point& point : polygon.points) {
+            if (
+                point.x() > clipper_safe_limit ||
+                point.x() < -clipper_safe_limit ||
+                point.y() > clipper_safe_limit ||
+                point.y() < -clipper_safe_limit
+            ) {
+                return false;
+            }
+        }
+        return true;
+    };
+
     std::vector<const PrintInstance*> print_instances_ordered = sort_object_instances_by_model_order(print, true);
     if (print_instances_ordered.size() < 1)
         return {};
@@ -957,11 +983,23 @@ static StringObjectException layered_print_cleareance_valid(const Print &print, 
     const Vec3d print_origin = print.get_plate_origin();
     std::for_each(exclude_polys.begin(), exclude_polys.end(),
                   [&print_origin](Polygon& p) { p.translate(scale_(print_origin.x()), scale_(print_origin.y())); });
+    exclude_polys.erase(
+        std::remove_if(
+            exclude_polys.begin(),
+            exclude_polys.end(),
+            [&](const Polygon& polygon) { return !polygon_valid_for_clipper(polygon); }
+        ),
+        exclude_polys.end()
+    );
 
     Pointfs wrapping_detection_area = print_config.wrapping_exclude_area.values;
     Polygon wrapping_poly;
     for (size_t i = 0; i < wrapping_detection_area.size(); ++i) {
         auto pt = wrapping_detection_area[i];
+        if (!std::isfinite(pt.x()) || !std::isfinite(pt.y())) {
+            wrapping_poly.points.clear();
+            break;
+        }
         wrapping_poly.points.emplace_back(scale_(pt.x() + print_origin.x()), scale_(pt.y() + print_origin.y()));
     }
 
@@ -979,14 +1017,15 @@ static StringObjectException layered_print_cleareance_valid(const Print &print, 
                 it_convex_hull = map_model_volume_to_convex_hull.emplace_hint(it_convex_hull, v, volume_hull);
             }
             Polygon &convex_hull = it_convex_hull->second;
-            Polygons convex_hulls_temp;
-            convex_hulls_temp.push_back(convex_hull);
-            if (!intersection(exclude_polys, convex_hull).empty()) {
+            if (!polygon_valid_for_clipper(convex_hull)) {
+                continue;
+            }
+            if (!exclude_polys.empty() && !intersection(exclude_polys, convex_hull).empty()) {
                 return {inst->model_instance->get_object()->name + L(" is too close to exclusion area, there may be collisions when printing.") + "\n",
                         inst->model_instance->get_object()};
             }
 
-            if (print_config.enable_wrapping_detection.value && !intersection(wrapping_poly, convex_hull).empty()) {
+            if (print_config.enable_wrapping_detection.value && wrapping_poly.points.size() >= 3 && !intersection(wrapping_poly, convex_hull).empty()) {
                 return {inst->model_instance->get_object()->name + L(" is too close to clumping detection area, there may be collisions when printing.") + "\n",
                         inst->model_instance->get_object()};
             }
@@ -1020,37 +1059,45 @@ static StringObjectException layered_print_cleareance_valid(const Print &print, 
             wipe_tower_convex_hull.points.emplace_back(scale_(x + width), scale_(y + depth));
             wipe_tower_convex_hull.points.emplace_back(scale_(x), scale_(y + depth));
             wipe_tower_convex_hull.rotate(a);
-            convex_hulls_temp.push_back(wipe_tower_convex_hull);
+            if (polygon_valid_for_clipper(wipe_tower_convex_hull)) {
+                convex_hulls_temp.push_back(wipe_tower_convex_hull);
+            }
         } else {
             //here, wipe_tower_polygon is not always convex.
             Polygon wipe_tower_polygon;
             if (print.wipe_tower_data().wipe_tower_mesh_data) {
                 wipe_tower_polygon = print.wipe_tower_data().wipe_tower_mesh_data->bottom;
                 wipe_tower_polygon.translate(Point(scale_(x), scale_(y)));
-                convex_hulls_temp.push_back(wipe_tower_polygon);
+                if (polygon_valid_for_clipper(wipe_tower_polygon)) {
+                    convex_hulls_temp.push_back(wipe_tower_polygon);
+                }
             } else {
                 wipe_tower_polygon.points.emplace_back(scale_(x), scale_(y));
                 wipe_tower_polygon.points.emplace_back(scale_(x + width), scale_(y));
                 wipe_tower_polygon.points.emplace_back(scale_(x + width), scale_(y + depth));
                 wipe_tower_polygon.points.emplace_back(scale_(x), scale_(y + depth));
                 wipe_tower_polygon.rotate(a);
-                convex_hulls_temp.push_back(wipe_tower_polygon);
+                if (polygon_valid_for_clipper(wipe_tower_polygon)) {
+                    convex_hulls_temp.push_back(wipe_tower_polygon);
+                }
             }
         }
     }
-    if (!intersection(convex_hulls_other, convex_hulls_temp).empty()) {
-        if (warning) {
-            warning->string += L("Prime Tower") + L(" is too close to others, and collisions may be caused.\n");
+    if (!convex_hulls_temp.empty()) {
+        if (!intersection(convex_hulls_other, convex_hulls_temp).empty()) {
+            if (warning) {
+                warning->string += L("Prime Tower") + L(" is too close to others, and collisions may be caused.\n");
+            }
         }
-    }
-    if (!intersection(exclude_polys, convex_hulls_temp).empty()) {
-        /*if (warning) {
-            warning->string += L("Prime Tower is too close to exclusion area, there may be collisions when printing.\n");
-        }*/
-        return {L("Prime Tower") + L(" is too close to exclusion area, and collisions will be caused.\n")};
-    }
-    if (print_config.enable_wrapping_detection.value && !intersection({wrapping_poly}, convex_hulls_temp).empty()) {
-        return {L("Prime Tower") + L(" is too close to clumping detection area, and collisions will be caused.\n")};
+        if (!exclude_polys.empty() && !intersection(exclude_polys, convex_hulls_temp).empty()) {
+            /*if (warning) {
+                warning->string += L("Prime Tower is too close to exclusion area, there may be collisions when printing.\n");
+            }*/
+            return {L("Prime Tower") + L(" is too close to exclusion area, and collisions will be caused.\n")};
+        }
+        if (print_config.enable_wrapping_detection.value && wrapping_poly.points.size() >= 3 && !intersection({wrapping_poly}, convex_hulls_temp).empty()) {
+            return {L("Prime Tower") + L(" is too close to clumping detection area, and collisions will be caused.\n")};
+        }
     }
     return {};
 }
@@ -2316,13 +2363,15 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 
         }
 #ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative", "orca_process_checkpoint after_wipe_tower");
+        if (mobile_slicer_verbose_native_logging())
+            __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative", "orca_process_checkpoint after_wipe_tower");
 #endif
         this->set_done(psWipeTower);
     }
 
 #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative", "orca_process_checkpoint before_fake_wipe_tower_pos");
+    if (mobile_slicer_verbose_native_logging())
+        __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative", "orca_process_checkpoint before_fake_wipe_tower_pos");
 #endif
     if (this->has_wipe_tower()) {
 #ifndef __ANDROID__
@@ -2331,7 +2380,8 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
     }
 
 #ifdef __ANDROID__
-    __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative", "orca_process_checkpoint before_skirt_brim");
+    if (mobile_slicer_verbose_native_logging())
+        __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative", "orca_process_checkpoint before_skirt_brim");
 #endif
     if (this->set_started(psSkirtBrim)) {
         this->set_status(70, L("Generating skirt & brim"));
@@ -2514,7 +2564,8 @@ std::string Print::export_gcode(const std::string& path_template, GCodeProcessor
 {
 #ifdef __ANDROID__
     auto android_log_export = [](const char *phase, const char *detail = "") {
-        __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative", "print_export_gcode: %s %s", phase, detail);
+        if (mobile_slicer_verbose_native_logging())
+            __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative", "print_export_gcode: %s %s", phase, detail);
     };
     android_log_export("begin", path_template.c_str());
 #endif
@@ -3298,14 +3349,15 @@ void Print::_make_wipe_tower()
                          + " h=" + std::to_string(lt.wipe_tower_layer_height)
                          + " e=[" + orca_print_debug_join_u(lt.extruders) + "]";
         }
-        __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
-            "orca_wipe_ordering type2=%d has=%d all=[%s] first=%u layers=%zu sample=%s",
-            is_wipe_tower_type2 ? 1 : 0,
-            m_wipe_tower_data.tool_ordering.has_wipe_tower() ? 1 : 0,
-            orca_print_debug_join_u(m_wipe_tower_data.tool_ordering.all_extruders()).c_str(),
-            m_wipe_tower_data.tool_ordering.first_extruder(),
-            m_wipe_tower_data.tool_ordering.layer_tools().size(),
-            layers_debug.c_str());
+        if (mobile_slicer_verbose_native_logging())
+            __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
+                "orca_wipe_ordering type2=%d has=%d all=[%s] first=%u layers=%zu sample=%s",
+                is_wipe_tower_type2 ? 1 : 0,
+                m_wipe_tower_data.tool_ordering.has_wipe_tower() ? 1 : 0,
+                orca_print_debug_join_u(m_wipe_tower_data.tool_ordering.all_extruders()).c_str(),
+                m_wipe_tower_data.tool_ordering.first_extruder(),
+                m_wipe_tower_data.tool_ordering.layer_tools().size(),
+                layers_debug.c_str());
     }
 #endif
 
@@ -3435,10 +3487,11 @@ void Print::_make_wipe_tower()
                 break;
         }
 #ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
-            "orca_wipe_plan type1 planned=%zu nozzles=%zu filament_map=%s prime=%.3f flush_multiplier0=%.3f",
-            planned_toolchanges, nozzle_nums, orca_print_debug_join_u(std::vector<unsigned int>(filament_maps.begin(), filament_maps.end())).c_str(),
-            double(m_config.prime_volume.value), double(m_config.flush_multiplier.get_at(0)));
+        if (mobile_slicer_verbose_native_logging())
+            __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
+                "orca_wipe_plan type1 planned=%zu nozzles=%zu filament_map=%s prime=%.3f flush_multiplier0=%.3f",
+                planned_toolchanges, nozzle_nums, orca_print_debug_join_u(std::vector<unsigned int>(filament_maps.begin(), filament_maps.end())).c_str(),
+                double(m_config.prime_volume.value), double(m_config.flush_multiplier.get_at(0)));
 #endif
         }
 
@@ -3465,10 +3518,11 @@ void Print::_make_wipe_tower()
                     layer_sizes += std::to_string(m_wipe_tower_data.tool_changes[i].size());
                 }
             }
-            __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
-                "orca_wipe_generated type1 layers=%zu total=%zu first_sizes=[%s] depth=%.3f brim=%.3f",
-                m_wipe_tower_data.tool_changes.size(), total_tool_changes, layer_sizes.c_str(),
-                double(wipe_tower.get_depth()), double(wipe_tower.get_brim_width()));
+            if (mobile_slicer_verbose_native_logging())
+                __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
+                    "orca_wipe_generated type1 layers=%zu total=%zu first_sizes=[%s] depth=%.3f brim=%.3f",
+                    m_wipe_tower_data.tool_changes.size(), total_tool_changes, layer_sizes.c_str(),
+                    double(wipe_tower.get_depth()), double(wipe_tower.get_brim_width()));
         }
 #endif
         m_wipe_tower_data.depth      = wipe_tower.get_depth();

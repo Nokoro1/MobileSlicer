@@ -1,0 +1,93 @@
+# STEP Import
+
+MobileSlicer treats STEP/STP as CAD source geometry and converts it to a
+triangulated mesh before the normal workspace path sees it. The original STEP
+file is preserved as source metadata, while the generated binary STL is used by
+the existing viewer, arrange, auto-orient, paint, slice, and saved-project
+paths.
+
+This matches Orca's model: STEP is not sliced as live B-Rep geometry. It is
+tessellated with linear and angular deflection controls, then handled as mesh
+geometry.
+
+## Android Native Boundary
+
+The Android wrapper exposes:
+
+```text
+orca_convert_step_to_stl(inputPath, outputStlPath, linearDeflection, angleDeflection)
+```
+
+The function requires the OCCT-backed STEP importer. The Android dependency
+builder now stages Orca's OCCT 7.6.0 dependency for the active ABI:
+
+```bash
+ANDROID_ABI=arm64-v8a engine-wrapper/orca-android-libslic3r/build-android-deps.sh
+```
+
+By default that installs OCCT at `/tmp/orca-deps-install/arm64-occt` or
+`/tmp/orca-deps-install/x86_64-occt`, and the app CMake build enables STEP
+automatically when that package exists. Custom locations can still be supplied
+with `ORCA_ANDROID_OCCT_PREFIX` or the Gradle property
+`orcaAndroid.occtPrefix`.
+
+Without OCCT the native call fails explicitly instead of silently pretending
+STEP support exists.
+
+Default tessellation values used by the app importer:
+
+```text
+linearDeflection = 0.003
+angleDeflection = 0.5
+```
+
+## Persistence Contract
+
+Saved projects store `PlateObjectGeometrySource.StepMeshConvert` with:
+
+```text
+originalPath
+convertedStlPath
+linearDeflection
+angleDeflection
+```
+
+The plate object remains `ImportedModelFormat.Stl` because the active workspace
+artifact is the generated mesh. The geometry source is what preserves the STEP
+origin and conversion settings.
+
+## Implementation Notes
+
+STEP/STP files enter through the same Android storage, share-sheet, external
+intent, and Thingiverse import gates as STL/3MF. The app stages the original
+file, converts it into cache as binary STL, parses bounds from that mesh, then
+loads the mesh through the existing native model path.
+
+Failure must leave the workspace unchanged and report that STEP tessellation
+failed. Common causes are a build made before OCCT was staged, invalid STEP
+data, or CAD geometry that produces no mesh faces.
+
+The native converter does not trust Orca's `store_stl()` return value because
+the vendored writer currently reports success even when a write fails. After
+writing, MobileSlicer validates the binary STL header, triangle count, and byte
+size before reporting STEP conversion success. This specifically guards against
+the 84-byte empty-STL failure mode where tessellation produced geometry but no
+loadable workspace mesh was written.
+
+## Release Smoke
+
+`regression-fixtures/import/occt_screw.step` is the STEP smoke fixture used by
+the Android Orca import gate. Run it on a connected device with:
+
+```bash
+MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh orca-import-smoke <serial>
+```
+
+That gate slices three import surfaces through the app automation path:
+
+- direct STL load
+- Orca 3MF mesh extraction
+- OCCT-backed STEP tessellation
+
+The STEP case must produce a non-empty converted STL, load it through the
+native plate-model path, slice it, and write non-trivial G-code.

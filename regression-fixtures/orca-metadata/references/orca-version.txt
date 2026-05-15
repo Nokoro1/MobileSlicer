@@ -1,0 +1,90 @@
+OrcaSlicer-2.3.2:
+Usage: orca-slicer [ OPTIONS ] [ file.3mf/file.stl ... ]
+
+OPTIONS:
+ --allow-mix-temp option
+                     Allow filaments with high/low temperature to be printed together.
+ --allow-multicolor-oneplate
+                     If enabled, Arrange will allow multiple colors on one plate.
+ --allow-newer-file option
+                     Allow 3MF with newer version to be sliced.
+ --allow-rotations   If enabled, Arrange will allow rotation when placing objects.
+ --avoid-extrusion-cali-region
+                     If enabled, Arrange will avoid extrusion calibrate region when placing objects.
+ --clone-objects "1,3,1,10"
+                     Clone objects in the load list.
+ --datadir           Load and store settings at the given directory. This is useful for maintaining
+                     different profiles or including configurations from a network storage.
+ --debug level       Sets debug logging level. 0:fatal, 1:error, 2:warning, 3:info, 4:debug, 5:trace
+ --downward-check    If enabled, check whether current machine downward compatible with the machines
+                     in the list.
+ --downward-settings "machine1.json;machine2.json;..."
+                     The machine settings list needs to do downward checking.
+ --enable-timelapse  If enabled, this slicing will be considered using timelapse.
+ --load-assemble-list assemble_list.json
+                     Load assemble object list from config file.
+ --load-custom-gcodes custom_gcode_toolchange.json
+                     Load custom G-code from json.
+ --load-filament-ids "1,2,3,1"
+                     Load filament IDs for each object.
+ --load-filaments "filament1.json;filament2.json;..."
+                     Load filament settings from the specified file list.
+ --load-settings "setting1.json;setting2.json"
+                     Load process/machine settings from the specified file.
+ --makerlab-name name
+                     MakerLab name to generate this 3MF.
+ --makerlab-version version
+                     MakerLab version to generate this 3MF.
+ --metadata-name "name1;name2;..."
+                     Metadata name list added into 3MF.
+ --metadata-value "value1;value2;..."
+                     Metadata value list added into 3MF.
+ --outputdir dir     Output directory for the exported files.
+ --skip-modified-gcodes option
+                     Skip the modified G-code in 3MF from printer or filament presets.
+ --skip-objects "3,5,10,77"
+                     Skip some objects in this print.
+ --uptodate-filaments "filament1.json;filament2.json;..."
+                     Load uptodate filament settings from the specified file when using uptodate.
+ --uptodate-settings "setting1.json;setting2.json"
+                     Load uptodate process/machine settings from the specified file when using
+                     uptodate.
+ --arrange option    Arrange options: 0-disable, 1-enable, others-auto
+ --assemble          Arrange the supplied models in a plate and merge them in a single model in order
+                     to perform actions once.
+ --convert-unit      Convert the units of model.
+ --ensure-on-bed     Lift the object above the bed when it is partially below. Disabled by default.
+ --orient            Orient options: 0-disable, 1-enable, others-auto
+ --repetitions count Repetition count of the whole model.
+ --rotate            Rotation angle around the Z axis in degrees.
+ --rotate-x          Rotation angle around the X axis in degrees.
+ --rotate-y          Rotation angle around the Y axis in degrees.
+ --scale factor      Scale the model by a float factor.
+ --export-3mf filename.3mf
+                     Export project as 3MF.
+ --export-settings settings.json
+                     Export settings to a file.
+ --export-slicedata slicing_data_directory
+                     Export slicing data to a folder.
+ --export-stl        Export the objects as single STL.
+ --export-stls       Export the objects as multiple STLs to directory.
+ --help, -h          Show command help.
+ --info              Output the model's information.
+ --load-defaultfila option
+                     Load first filament as default for those not loaded.
+ --load-slicedata slicing_data_directory
+                     Load cached slicing data from directory.
+ --min-save option   Export 3MF with minimum size.
+ --mstpp time        max slicing time per plate in seconds.
+ --mtcpp count       max triangle count per plate for slicing.
+ --no-check          Do not run any validity checks, such as G-code path conflicts check.
+ --normative-check option
+                     Check the normative items.
+ --pipe pipename     Send progress to pipe.
+ --slice option      Slice the plates: 0-all plates, i-plate i, others-invalid
+ --uptodate          Update the config values of 3MF to latest.
+
+Print setting priorities:
+	1) setting values from the command line (highest priority)
+	2) setting values loaded with --load_settings and --load_filaments
+	3) setting values loaded from 3mf(lowest priority)

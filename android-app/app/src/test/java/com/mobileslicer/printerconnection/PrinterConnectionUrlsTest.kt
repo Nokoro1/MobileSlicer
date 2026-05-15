@@ -13,9 +13,19 @@ class PrinterConnectionUrlsTest {
         assertNull(requireAllowedPrinterBaseUrl("http://10.0.0.5:7125"))
         assertNull(requireAllowedPrinterBaseUrl("http://172.16.0.5:7125"))
         assertNull(requireAllowedPrinterBaseUrl("http://169.254.20.5"))
+        assertNull(requireAllowedPrinterBaseUrl("http://100.64.0.1"))
+        assertNull(requireAllowedPrinterBaseUrl("http://100.123.18.83:7125"))
+        assertNull(requireAllowedPrinterBaseUrl("http://100.127.255.254"))
         assertNull(requireAllowedPrinterBaseUrl("http://printer.local"))
+        assertNull(requireAllowedPrinterBaseUrl("http://printer.tailnet-name.ts.net"))
         assertNull(requireAllowedPrinterBaseUrl("http://printer-lan"))
         assertNull(requireAllowedPrinterBaseUrl("http://localhost:5000"))
+    }
+
+    @Test
+    fun requireAllowedPrinterBaseUrlRejectsPublicNeighborsAroundVpnRange() {
+        assertTrue(requireAllowedPrinterBaseUrl("http://100.63.255.255")?.detail?.contains("Cleartext HTTP") == true)
+        assertTrue(requireAllowedPrinterBaseUrl("http://100.128.0.1")?.detail?.contains("Cleartext HTTP") == true)
     }
 
     @Test
@@ -38,6 +48,8 @@ class PrinterConnectionUrlsTest {
     fun requireAllowedPrinterNetworkUrlAllowsHttpsAndLocalCleartext() {
         requireAllowedPrinterNetworkUrl("https://example.com/api/files")
         requireAllowedPrinterNetworkUrl("http://192.168.1.42/api/files")
+        requireAllowedPrinterNetworkUrl("http://100.123.18.83/api/files")
+        requireAllowedPrinterNetworkUrl("http://printer.tailnet-name.ts.net/api/files")
         requireAllowedPrinterNetworkUrl("http://printer.local/api/files")
         requireAllowedPrinterNetworkUrl("http://printer-lan/api/files")
     }

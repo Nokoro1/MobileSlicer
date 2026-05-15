@@ -55,6 +55,100 @@ static double first_model_object_height(const Slic3r::Model& model)
     return model.objects.front()->bounding_box_exact().size().z();
 }
 
+static std::optional<Slic3r::PlateBBoxData> build_sliced_plate_bbox_data(
+    Slic3r::Print& print,
+    const Slic3r::GCodeProcessorResult& gcode_result
+)
+{
+    Slic3r::PlateBBoxData bbox_data;
+    bbox_data.is_seq_print = print.config().print_sequence.value == Slic3r::PrintSequence::ByObject;
+    bbox_data.bed_type = Slic3r::bed_type_to_gcode_string(print.config().curr_bed_type.value);
+    bbox_data.first_layer_time = gcode_result.initial_layer_time;
+
+    unsigned int first_extruder = print.get_tool_ordering().first_extruder();
+    if (first_extruder == static_cast<unsigned int>(-1)) {
+        first_extruder = 0;
+    }
+    bbox_data.first_extruder = static_cast<int>(first_extruder);
+
+    if (const auto* nozzle_diameters = print.config().option<Slic3r::ConfigOptionFloats>("nozzle_diameter");
+        nozzle_diameters != nullptr && !nozzle_diameters->values.empty()) {
+        bbox_data.nozzle_diameter = static_cast<float>(nozzle_diameters->get_at(first_extruder));
+    }
+
+    const Slic3r::Vec3d origin = print.get_plate_origin();
+    const Slic3r::Vec2d origin_2d(origin.x(), origin.y());
+    Slic3r::BoundingBoxf bbox_all;
+    const auto unscaled_bboxf = [](const Slic3r::BoundingBox& scaled_bbox) {
+        const auto bbox = Slic3r::unscaled(scaled_bbox);
+        return Slic3r::BoundingBoxf(bbox.min, bbox.max);
+    };
+
+    const size_t print_object_count = print.objects().size();
+    for (size_t object_index = 0; object_index < print_object_count; ++object_index) {
+        Slic3r::PrintObject* object = print.get_object(object_index);
+        if (object == nullptr) {
+            continue;
+        }
+        Slic3r::BBoxData object_bbox;
+        const Slic3r::BoundingBox scaled_bbox =
+            object->get_first_layer_bbox(object_bbox.area, object_bbox.layer_height, object_bbox.name);
+        if (!scaled_bbox.defined) {
+            continue;
+        }
+        Slic3r::BoundingBoxf bbox = unscaled_bboxf(scaled_bbox);
+        bbox.min -= origin_2d;
+        bbox.max -= origin_2d;
+        bbox_all.merge(bbox);
+        object_bbox.area *= static_cast<float>(SCALING_FACTOR * SCALING_FACTOR);
+        object_bbox.id = object->id().id;
+        object_bbox.bbox = {bbox.min.x(), bbox.min.y(), bbox.max.x(), bbox.max.y()};
+        bbox_data.bbox_objs.emplace_back(std::move(object_bbox));
+    }
+
+    if (print.has_wipe_tower()) {
+        const Slic3r::Points wipe_tower_corners = print.first_layer_wipe_tower_corners();
+        if (wipe_tower_corners.size() >= 3) {
+            Slic3r::BoundingBox scaled_bbox{wipe_tower_corners[0], wipe_tower_corners[2]};
+            if (scaled_bbox.defined) {
+                Slic3r::BoundingBoxf bbox = unscaled_bboxf(scaled_bbox);
+                bbox.min -= origin_2d;
+                bbox.max -= origin_2d;
+                bbox_all.merge(bbox);
+
+                Slic3r::BBoxData wipe_tower_bbox;
+                wipe_tower_bbox.id = 1000;
+                wipe_tower_bbox.bbox = {bbox.min.x(), bbox.min.y(), bbox.max.x(), bbox.max.y()};
+                wipe_tower_bbox.area = static_cast<float>(bbox.area());
+                wipe_tower_bbox.layer_height = static_cast<float>(print.skirt_first_layer_height());
+                wipe_tower_bbox.name = "wipe_tower";
+                bbox_data.bbox_objs.emplace_back(std::move(wipe_tower_bbox));
+            }
+        }
+    }
+
+    if (!bbox_all.defined || !bbox_data.is_valid()) {
+        return std::nullopt;
+    }
+    bbox_data.bbox_all = {bbox_all.min.x(), bbox_all.min.y(), bbox_all.max.x(), bbox_all.max.y()};
+
+    std::vector<unsigned int> filament_ids = print.get_slice_used_filaments(false);
+    if (filament_ids.empty()) {
+        filament_ids.push_back(first_extruder);
+    }
+    const auto* filament_colors = print.config().option<Slic3r::ConfigOptionStrings>("filament_colour");
+    for (const unsigned int filament_id : filament_ids) {
+        bbox_data.filament_ids.push_back(static_cast<int>(filament_id));
+        if (filament_colors != nullptr && !filament_colors->values.empty()) {
+            bbox_data.filament_colors.push_back(filament_colors->get_at(filament_id));
+        } else {
+            bbox_data.filament_colors.emplace_back("#FFFFFF");
+        }
+    }
+
+    return bbox_data;
+}
+
 static void prepare_orca_pa_pattern_model(
     const std::string& json,
     Slic3r::Model& model,
@@ -477,7 +571,16 @@ extern "C" int orca_slice(OrcaEngine* engine)
     clear_generated_gcode(engine);
     invalidate_json_scalar_index();
 
+    const char* slice_stage = "start";
+    const auto log_slice_exception = [&](const std::string& message) {
+        std::ostringstream detail;
+        detail << "stage=" << slice_stage << " error=" << message;
+        set_last_error(engine, detail.str());
+        log_native_error("orca_slice", detail.str().c_str());
+    };
+
     try {
+        slice_stage = "initialize";
         const auto total_start = std::chrono::steady_clock::now();
         auto stage_start = total_start;
         const auto log_stage_elapsed = [&](const char* stage_name) {
@@ -500,6 +603,7 @@ extern "C" int orca_slice(OrcaEngine* engine)
             log_native_info("orca_slice", message.str());
         }
 
+        slice_stage = "config";
         const auto config_full_start = std::chrono::steady_clock::now();
         Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
         const long config_full_ms = elapsed_ms_since(config_full_start);
@@ -541,8 +645,10 @@ extern "C" int orca_slice(OrcaEngine* engine)
         log_stage_elapsed("config");
 
         Slic3r::Print print;
+        print.set_plate_origin(Slic3r::Vec3d::Zero());
         Slic3r::Model model = *engine->impl.model;
 
+        slice_stage = "prepare_model";
         const auto calibration_model_start = std::chrono::steady_clock::now();
         apply_orca_calibration_model_preparation(engine->impl.config_json, model, config);
         const long calibration_model_ms = elapsed_ms_since(calibration_model_start);
@@ -581,6 +687,7 @@ extern "C" int orca_slice(OrcaEngine* engine)
         }
         log_stage_elapsed("prepare_model");
 
+        slice_stage = "print_apply";
         if (kVerboseNativeTimingLogs) {
             std::ostringstream message;
             message
@@ -675,6 +782,7 @@ extern "C" int orca_slice(OrcaEngine* engine)
             set_calibration_ms = elapsed_ms_since(set_calibration_start);
         }
         const long calibration_ms = elapsed_ms_since(calibration_start);
+        slice_stage = "print_validate";
         const auto validate_start = std::chrono::steady_clock::now();
         print.validate();
         const long validate_ms = elapsed_ms_since(validate_start);
@@ -726,6 +834,7 @@ extern "C" int orca_slice(OrcaEngine* engine)
             log_native_info("orca_slice", message.str());
         }
 
+        slice_stage = "print_process";
         print.process();
         log_stage_elapsed("process");
         if (kVerboseNativeTimingLogs) {
@@ -752,6 +861,7 @@ extern "C" int orca_slice(OrcaEngine* engine)
             log_native_info("orca_slice", message.str());
         }
 
+        slice_stage = "export_gcode";
         const auto temp_path_start = std::chrono::steady_clock::now();
         const auto gcode_path = make_temp_gcode_path();
         const long temp_path_ms = elapsed_ms_since(temp_path_start);
@@ -761,9 +871,54 @@ extern "C" int orca_slice(OrcaEngine* engine)
             message << "export_gcode attempt=1 tempPathMs=" << temp_path_ms;
             log_native_info("orca_slice", message.str());
         }
+        Slic3r::ThumbnailsGeneratorCallback thumbnail_cb =
+            [engine](const Slic3r::ThumbnailsParams& params) -> Slic3r::ThumbnailsList {
+            Slic3r::ThumbnailsList thumbnails;
+            for (const Slic3r::Vec2d& size : params.sizes) {
+                const unsigned int requested_width = static_cast<unsigned int>(std::lround(size(0)));
+                const unsigned int requested_height = static_cast<unsigned int>(std::lround(size(1)));
+                if (requested_width == 0 || requested_height == 0) {
+                    continue;
+                }
+                const auto match = std::find_if(
+                    engine->impl.slice_thumbnails.begin(),
+                    engine->impl.slice_thumbnails.end(),
+                    [requested_width, requested_height](const OrcaEngineImpl::SliceThumbnailRgba& thumbnail) {
+                        return thumbnail.role == "gcode" &&
+                            thumbnail.width == requested_width &&
+                            thumbnail.height == requested_height;
+                    });
+                if (match == engine->impl.slice_thumbnails.end()) {
+                    continue;
+                }
+                Slic3r::ThumbnailData data;
+                data.set(match->width, match->height);
+                data.pixels = match->rgba;
+                if (data.is_valid()) {
+                    thumbnails.push_back(std::move(data));
+                }
+            }
+            return thumbnails;
+        };
+        Slic3r::ThumbnailsGeneratorCallback* thumbnail_cb_ptr =
+            engine->impl.slice_thumbnails.empty() ? nullptr : &thumbnail_cb;
         const auto export_call_start = std::chrono::steady_clock::now();
-        print.export_gcode(gcode_path.string(), &gcode_result, nullptr);
+        print.export_gcode(
+            gcode_path.string(),
+            &gcode_result,
+            thumbnail_cb_ptr != nullptr ? *thumbnail_cb_ptr : Slic3r::ThumbnailsGeneratorCallback{});
         const long export_call_ms = elapsed_ms_since(export_call_start);
+        engine->impl.sliced_plate_bbox_data = build_sliced_plate_bbox_data(print, gcode_result);
+        if (engine->impl.sliced_plate_bbox_data.has_value()) {
+            const Slic3r::PlateBBoxData& bbox_data = *engine->impl.sliced_plate_bbox_data;
+            log_native_info(
+                "orca_slice",
+                "sliced_3mf_bbox objects=" + std::to_string(bbox_data.bbox_objs.size()) +
+                    " filaments=" + std::to_string(bbox_data.filament_ids.size()) +
+                    " firstLayerTime=" + std::to_string(bbox_data.first_layer_time));
+        } else {
+            log_native_info("orca_slice", "sliced_3mf_bbox unavailable");
+        }
         log_stage_elapsed("export_gcode");
         if ((gcode_result.gcode_check_result.error_code & ORCA_PLATE_PRINTABLE_AREA_ERROR) != 0 ||
             (gcode_result.gcode_check_result.error_code & ORCA_PLATE_PRINTABLE_HEIGHT_ERROR) != 0) {
@@ -818,6 +973,7 @@ extern "C" int orca_slice(OrcaEngine* engine)
         }
         engine->impl.gcode_path = gcode_path;
         engine->impl.gcode_path_owned = true;
+        slice_stage = "summarize_gcode";
         const auto summary_parse_start = std::chrono::steady_clock::now();
         engine->impl.gcode_summary = summarize_gcode_file_for_android(gcode_path);
         engine->impl.gcode_summary = enrich_gcode_summary_from_processor(engine->impl.gcode_summary, gcode_result, &print);
@@ -978,21 +1134,17 @@ extern "C" int orca_slice(OrcaEngine* engine)
         return ORCA_SUCCESS;
     } catch (const Slic3r::SlicingErrors& errors) {
         for (const auto& error : errors.errors_) {
-            set_last_error(engine, error.what());
-            log_native_error("orca_slice", error.what());
+            log_slice_exception(error.what());
         }
         return ORCA_ERROR_SLICE;
     } catch (const Slic3r::SlicingError& error) {
-        set_last_error(engine, error.what());
-        log_native_error("orca_slice", error.what());
+        log_slice_exception(error.what());
         return ORCA_ERROR_SLICE;
     } catch (const std::exception& exception) {
-        set_last_error(engine, exception.what());
-        log_native_error("orca_slice", exception.what());
+        log_slice_exception(exception.what());
         return ORCA_ERROR_SLICE;
     } catch (...) {
-        set_last_error(engine, "unknown exception");
-        log_native_error("orca_slice", "unknown exception");
+        log_slice_exception("unknown exception");
         return ORCA_ERROR_SLICE;
     }
 }

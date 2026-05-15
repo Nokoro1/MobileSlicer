@@ -1,0 +1,121 @@
+{
+  "failures": [],
+  "metadata": {
+    "config_entries": [
+      "Metadata/model_settings.config",
+      "Metadata/project_settings.config",
+      "Metadata/slice_info.config"
+    ],
+    "entries": [
+      "[Content_Types].xml",
+      "Metadata/plate_1.png",
+      "Metadata/plate_1_small.png",
+      "Metadata/plate_2.png",
+      "Metadata/plate_2_small.png",
+      "Metadata/plate_no_light_1.png",
+      "Metadata/plate_no_light_2.png",
+      "Metadata/top_1.png",
+      "Metadata/pick_1.png",
+      "Metadata/top_2.png",
+      "Metadata/pick_2.png",
+      "3D/3dmodel.model",
+      "3D/_rels/3dmodel.model.rels",
+      "3D/Objects/left_cube_1_1.model",
+      "3D/Objects/right_cube_1_2.model",
+      "3D/Objects/left_cube_1_3.model",
+      "Metadata/layer_config_ranges.xml",
+      "Metadata/project_settings.config",
+      "Metadata/model_settings.config",
+      "Metadata/slice_info.config",
+      "_rels/.rels"
+    ],
+    "entry_count": 21,
+    "filament_count": 2,
+    "layer_range_evidence": [
+      {
+        "max_z": "6",
+        "min_z": "0",
+        "object_index": 3,
+        "object_name": "left_cube_1",
+        "settings": [
+          {
+            "key": "sparse_infill_density",
+            "object_name": "left_cube_1",
+            "value": "75%"
+          },
+          {
+            "key": "wall_loops",
+            "object_name": "left_cube_1",
+            "value": "6"
+          }
+        ]
+      }
+    ],
+    "modifier_evidence": [],
+    "object_count": 3,
+    "object_filament_assignments": [
+      {
+        "filament_index": 2,
+        "object_name": "right_cube_1"
+      },
+      {
+        "filament_index": 1,
+        "object_name": "left_cube_1"
+      },
+      {
+        "filament_index": 1,
+        "object_name": "left_cube_1"
+      }
+    ],
+    "object_names": [
+      "right_cube_1",
+      "left_cube_1",
+      "left_cube_1"
+    ],
+    "object_setting_evidence": [
+      {
+        "key": "sparse_infill_density",
+        "object_name": "right_cube_1",
+        "value": "35%"
+      },
+      {
+        "key": "wall_loops",
+        "object_name": "right_cube_1",
+        "value": "4"
+      }
+    ],
+    "path": "/home/peanut/Development/MobileSlicer/artifacts/orca-project-fixtures/height-range-project-20260515-123920/output/height-range-project.3mf",
+    "plate_count": 2,
+    "plate_names": [
+      "Object settings plate",
+      "Height range plate"
+    ],
+    "preserved_features": [
+      "mesh_geometry",
+      "object_names",
+      "object_filament_assignments",
+      "object_settings",
+      "layer_config_ranges",
+      "layer_range_settings",
+      "plate_metadata",
+      "filament_metadata",
+      "project_thumbnails",
+      "project_settings",
+      "model_settings",
+      "slice_info"
+    ],
+    "thumbnail_entries": [
+      "Metadata/pick_1.png",
+      "Metadata/pick_2.png",
+      "Metadata/plate_1.png",
+      "Metadata/plate_1_small.png",
+      "Metadata/plate_2.png",
+      "Metadata/plate_2_small.png",
+      "Metadata/plate_no_light_1.png",
+      "Metadata/plate_no_light_2.png",
+      "Metadata/top_1.png",
+      "Metadata/top_2.png"
+    ]
+  },
+  "ok": true
+}

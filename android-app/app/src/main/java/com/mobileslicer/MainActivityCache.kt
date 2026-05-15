@@ -175,6 +175,25 @@ internal fun MainActivity.cleanupCacheArtifacts(extraRetainedFiles: Collection<F
         cleanupOrcaTempCache(cacheDir = cacheDir, retainedPaths = retainedPaths)
     }
 
+internal fun MainActivity.clearFreshWorkspaceRuntimeArtifacts() {
+        stagedModelFile = null
+        currentModelName = null
+        nativeLoadedModelPath = null
+        preparedViewerMeshCache.clear()
+        NativeEngineHandle.fromRaw(nativeEngineSession.currentRawHandle)?.let { handle ->
+            NativeEngineCalls.clearGeneratedGcode(handle)
+        }
+        cleanupGeneratedGcodeCache(cacheDir = cacheDir, retainedPaths = emptySet())
+        cleanupStagedModelCache(cacheDir = cacheDir, retainedPaths = emptySet())
+        cleanupShareCache(cacheDir)
+        cleanupOrcaTempCache(
+            cacheDir = cacheDir,
+            retainedPaths = emptySet(),
+            maxBytes = 0L,
+            maxAgeMs = 0L
+        )
+    }
+
 internal fun MainActivity.cleanupGeneratedGcodeCache(
         retain: File? = null,
         retainedPaths: Set<String> = retainedCachePaths(listOfNotNull(retain))

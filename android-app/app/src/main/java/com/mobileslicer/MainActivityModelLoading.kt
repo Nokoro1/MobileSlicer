@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -125,6 +126,7 @@ import com.mobileslicer.storage.PreparedViewerMeshCache
 import com.mobileslicer.storage.PrinterCredentialStore
 import com.mobileslicer.storage.SavedProject
 import com.mobileslicer.storage.SavedProjectRepository
+import com.mobileslicer.viewer.DEFAULT_MAX_EXACT_PREVIEW_MESH_BYTES
 import com.mobileslicer.viewer.StlMesh
 import com.mobileslicer.viewer.StlMeshParser
 import com.mobileslicer.nativebridge.NativeEngineBridge
@@ -150,22 +152,28 @@ import com.mobileslicer.workspace.PlateObject
 import com.mobileslicer.workspace.PlateObjectGeometrySource
 import com.mobileslicer.workspace.SlicePipelineTiming
 import com.mobileslicer.workspace.SliceResult
+import com.mobileslicer.workspace.SourceModelFileFormat
+import com.mobileslicer.workspace.ThreeMfProjectInspector
 import com.mobileslicer.workspace.WorkspacePreparationResult
 import com.mobileslicer.workspace.WorkspacePreparationTiming
 import com.mobileslicer.workspace.WorkspaceScreen
 import com.mobileslicer.workspace.WorkspaceSessionViewModel
 import com.mobileslicer.workspace.defaultNativeModelTransform
+import com.mobileslicer.workspace.detectSourceModelFileFormat
+import com.mobileslicer.workspace.detectSourceModelMimeType
 import com.mobileslicer.workspace.modelLoadStatusMessage
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import com.mobileslicer.viewer.MeshBounds
+
+private const val DEFAULT_STEP_LINEAR_DEFLECTION = 0.003
+private const val DEFAULT_STEP_ANGLE_DEFLECTION = 0.5
 
 internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
         val handle = NativeEngineHandle.fromRaw(ensureEngine())
@@ -175,20 +183,25 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
                 loaded = false
             )
         }
+        NativeEngineCalls.clearGeneratedGcode(handle)
+        cleanupGeneratedGcodeCache(cacheDir = cacheDir, retainedPaths = emptySet())
 
         val fileName = queryDisplayName(uri) ?: "selected_model.stl"
         val normalizedName = sanitizeFileName(fileName)
-        val normalizedNameLower = normalizedName.lowercase(Locale.US)
-        val fileFormat = when {
-            normalizedNameLower.endsWith(".stl") -> ImportedModelFormat.Stl
-            normalizedNameLower.endsWith(".3mf") -> ImportedModelFormat.ThreeMf
-            else -> null
+        val sourceFormat = detectSourceModelFileFormat(normalizedName)
+            ?: detectSourceModelMimeType(contentResolver.getType(uri))
+        val fileFormat = when (sourceFormat) {
+            SourceModelFileFormat.Stl -> ImportedModelFormat.Stl
+            SourceModelFileFormat.ThreeMf -> ImportedModelFormat.ThreeMf
+            SourceModelFileFormat.Step -> ImportedModelFormat.Stl
+            null -> null
         }
-        if (fileFormat == null) {
+        if (sourceFormat == null || fileFormat == null) {
             NativeEngineCalls.clearGeneratedGcode(handle)
             currentModelName = null
+            Log.e(MainActivity.TAG, "model_import_failed unsupported_file name=$normalizedName mime=${contentResolver.getType(uri)} uri=$uri")
             return ModelLoadResult(
-                message = "Failed to load model\nSelected file is not an STL or 3MF.",
+                message = "Failed to load model\nSelected file is not an STL, 3MF, STEP, or STP.",
                 loaded = false,
                 format = fileFormat
             )
@@ -198,6 +211,7 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
         val stagedFile = stageModelFile(uri, normalizedName)
             ?: run {
                 NativeEngineCalls.clearGeneratedGcode(handle)
+                Log.e(MainActivity.TAG, "model_import_failed stage_read_failed name=$normalizedName mime=${contentResolver.getType(uri)} uri=$uri")
                 return ModelLoadResult(
                     message = "Failed to load model\nUnable to read the selected file.",
                     loaded = false,
@@ -208,15 +222,36 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
         var workspaceModelFile = stagedFile
         var workspaceModelFormat = fileFormat
         var workspaceGeometrySource: PlateObjectGeometrySource = PlateObjectGeometrySource.StagedFile
-        val importExtraDetail = if (fileFormat == ImportedModelFormat.ThreeMf) {
-            val extractedName = normalizedName.substringBeforeLast('.', normalizedName) + "-3mf-mesh.stl"
+        val threeMfProjectMetadata = if (sourceFormat == SourceModelFileFormat.ThreeMf) {
+            ThreeMfProjectInspector.inspect(stagedFile)
+        } else {
+            null
+        }
+        val importExtraDetail = if (sourceFormat == SourceModelFileFormat.ThreeMf || sourceFormat == SourceModelFileFormat.Step) {
+            val conversionSuffix = if (sourceFormat == SourceModelFileFormat.Step) "step-mesh" else "3mf-mesh"
+            val extractedName = normalizedName.substringBeforeLast('.', normalizedName) + "-$conversionSuffix.stl"
             val extractedStl = File(cacheDir, "selected-model-${SystemClock.elapsedRealtime()}-$extractedName")
-            val extractionResult = NativeEngineCalls.extractModelMeshToStl(
-                handle = handle,
-                inputPath = stagedFile.absolutePath,
-                outputStlPath = extractedStl.absolutePath
-            )
+            val extractionResult = if (sourceFormat == SourceModelFileFormat.Step) {
+                NativeEngineCalls.convertStepToStl(
+                    handle = handle,
+                    inputPath = stagedFile.absolutePath,
+                    outputStlPath = extractedStl.absolutePath,
+                    linearDeflection = DEFAULT_STEP_LINEAR_DEFLECTION,
+                    angleDeflection = DEFAULT_STEP_ANGLE_DEFLECTION
+                )
+            } else {
+                NativeEngineCalls.extractModelMeshToStl(
+                    handle = handle,
+                    inputPath = stagedFile.absolutePath,
+                    outputStlPath = extractedStl.absolutePath
+                )
+            }
             if (extractionResult !is NativeEngineCallResult.Success) {
+                Log.e(
+                    MainActivity.TAG,
+                    "model_import_failed ${sourceFormat.name.lowercase()}_mesh_conversion_failed " +
+                        "name=$normalizedName stagedBytes=${stagedFile.length()} status=${extractionResult.statusMessage}"
+                )
                 NativeEngineCalls.clearGeneratedGcode(handle)
                 stagedFile.delete()
                 extractedStl.delete()
@@ -230,20 +265,38 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
                         loaded = false,
                         fileName = normalizedName,
                         timing = ModelImportTiming(stagingMs = stagingMs, nativeLoadMs = 0L),
-                        extraDetail = "MobileSlicer could not find printable model geometry in this 3MF.\n${extractionResult.statusMessage}"
+                        extraDetail = if (sourceFormat == SourceModelFileFormat.Step) {
+                            "MobileSlicer could not tessellate this STEP file into printable mesh geometry.\n${extractionResult.statusMessage}"
+                        } else {
+                            "MobileSlicer could not find printable model geometry in this 3MF.\n${extractionResult.statusMessage}"
+                        }
                     ),
                     loaded = false,
-                    format = ImportedModelFormat.ThreeMf
+                    format = if (sourceFormat == SourceModelFileFormat.Step) ImportedModelFormat.Stl else ImportedModelFormat.ThreeMf
                 )
             }
             stagedModelFile = extractedStl
             workspaceModelFile = extractedStl
             workspaceModelFormat = ImportedModelFormat.Stl
-            workspaceGeometrySource = PlateObjectGeometrySource.ThreeMfMeshExtract(
-                originalPath = stagedFile.absolutePath,
-                extractedStlPath = extractedStl.absolutePath
-            )
-            "3MF model loaded for the workspace preview."
+            workspaceGeometrySource = if (sourceFormat == SourceModelFileFormat.Step) {
+                PlateObjectGeometrySource.StepMeshConvert(
+                    originalPath = stagedFile.absolutePath,
+                    convertedStlPath = extractedStl.absolutePath,
+                    linearDeflection = DEFAULT_STEP_LINEAR_DEFLECTION,
+                    angleDeflection = DEFAULT_STEP_ANGLE_DEFLECTION
+                )
+            } else {
+                PlateObjectGeometrySource.ThreeMfMeshExtract(
+                    originalPath = stagedFile.absolutePath,
+                    extractedStlPath = extractedStl.absolutePath,
+                    projectMetadata = threeMfProjectMetadata
+                )
+            }
+            if (sourceFormat == SourceModelFileFormat.Step) {
+                "STEP model tessellated for the workspace preview and slicing."
+            } else {
+                "3MF model loaded for the workspace preview."
+            }
         } else {
             "The workspace preview will finish loading after the model opens."
         }
@@ -277,8 +330,20 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
                 geometrySource = workspaceGeometrySource
             )
         } else {
+            Log.e(
+                MainActivity.TAG,
+                "model_import_failed native_load_failed name=$normalizedName " +
+                    "sourceFormat=${sourceFormat.name} workspaceBytes=${workspaceModelFile.length()} " +
+                    "status=${loadResult.statusMessage}"
+            )
             NativeEngineCalls.clearGeneratedGcode(handle)
             workspaceModelFile.delete()
+            if (
+                (sourceFormat == SourceModelFileFormat.Step || sourceFormat == SourceModelFileFormat.ThreeMf) &&
+                stagedFile.absolutePath != workspaceModelFile.absolutePath
+            ) {
+                stagedFile.delete()
+            }
             if (stagedModelFile?.absolutePath == workspaceModelFile.absolutePath) {
                 stagedModelFile = null
             }
@@ -289,7 +354,7 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
                     loaded = false,
                     fileName = normalizedName,
                     timing = timing,
-                    extraDetail = "MobileSlicer could not load this model."
+                    extraDetail = "MobileSlicer could not load this model.\n${loadResult.statusMessage}"
                 ),
                 loaded = false,
                 stagedFilePath = workspaceModelFile.absolutePath,
@@ -298,7 +363,66 @@ internal fun MainActivity.loadModelFromUri(uri: Uri): ModelLoadResult {
                 bounds = bounds
             )
         }
+}
+
+internal fun MainActivity.loadScannerWorkspaceModelFromFile(modelFile: File): ModelLoadResult {
+    val handle = NativeEngineHandle.fromRaw(ensureEngine())
+    if (handle == null) {
+        return ModelLoadResult(
+            message = "Failed to load model\nThe slicer is not ready. Restart the app and try again.",
+            loaded = false
+        )
     }
+    if (!modelFile.isFile || modelFile.length() <= 0L) {
+        return ModelLoadResult(
+            message = "Failed to load model\nValidated scanner handoff file is missing.",
+            loaded = false,
+            format = ImportedModelFormat.Stl
+        )
+    }
+    NativeEngineCalls.clearGeneratedGcode(handle)
+    cleanupGeneratedGcodeCache(cacheDir = cacheDir, retainedPaths = emptySet())
+
+    val nativeLoadStartedAt = SystemClock.elapsedRealtime()
+    val loadResult = NativeEngineCalls.loadModel(handle, modelFile.absolutePath)
+    val nativeLoadMs = SystemClock.elapsedRealtime() - nativeLoadStartedAt
+    val timing = ModelImportTiming(stagingMs = 0L, nativeLoadMs = nativeLoadMs)
+    val bounds = runCatching { StlMeshParser.parseBounds(modelFile) }.getOrNull()
+    return if (loadResult is NativeEngineCallResult.Success) {
+        stagedModelFile = modelFile
+        currentModelName = modelFile.nameWithoutExtension
+        nativeLoadedModelPath = modelFile.absolutePath
+        ModelLoadResult(
+            message = modelLoadStatusMessage(
+                loaded = true,
+                fileName = modelFile.name,
+                timing = timing,
+                extraDetail = "Validated scanner handoff imported through the shared workspace path."
+            ),
+            loaded = true,
+            stagedFilePath = modelFile.absolutePath,
+            format = ImportedModelFormat.Stl,
+            loadTiming = timing,
+            bounds = bounds,
+            geometrySource = PlateObjectGeometrySource.StagedFile
+        )
+    } else {
+        NativeEngineCalls.clearGeneratedGcode(handle)
+        currentModelName = null
+        nativeLoadedModelPath = null
+        ModelLoadResult(
+            message = modelLoadStatusMessage(
+                loaded = false,
+                fileName = modelFile.name,
+                timing = timing,
+                extraDetail = loadResult.statusMessage
+            ),
+            loaded = false,
+            format = ImportedModelFormat.Stl,
+            loadTiming = timing
+        )
+    }
+}
 
 internal fun MainActivity.prepareWorkspaceMesh(modelFilePath: String): WorkspacePreparationResult {
         val stagedFile = File(modelFilePath)
@@ -310,14 +434,23 @@ internal fun MainActivity.prepareWorkspaceMesh(modelFilePath: String): Workspace
 
         val startedAt = SystemClock.elapsedRealtime()
         preparedViewerMeshCache.get(stagedFile)?.let { cachedMesh ->
+            val elapsedMs = SystemClock.elapsedRealtime() - startedAt
+            Log.i(
+                "MobileSlicerPerf",
+                "workspace_mesh_prepare cacheHit=true fileBytes=${stagedFile.length()} " +
+                    "sourceTriangles=${cachedMesh.sourceTriangleCount} displayTriangles=${cachedMesh.displayTriangleCount} " +
+                    "renderArrayBytes=${cachedMesh.renderArrayBytes} cacheRetainedBytes=${preparedViewerMeshCache.retainedBytes} ms=$elapsedMs"
+            )
             return WorkspacePreparationResult(
                 preparedMesh = cachedMesh.mesh,
                 timing = WorkspacePreparationTiming(
-                    viewerMeshPrepMs = SystemClock.elapsedRealtime() - startedAt,
+                    viewerMeshPrepMs = elapsedMs,
                     cacheHit = true,
                     sourceTriangleCount = cachedMesh.sourceTriangleCount,
                     displayTriangleCount = cachedMesh.displayTriangleCount,
-                    reducedForDisplay = cachedMesh.reducedForDisplay
+                    renderArrayBytes = cachedMesh.renderArrayBytes,
+                    cacheRetainedBytes = preparedViewerMeshCache.retainedBytes,
+                    exactPreviewBudgetBytes = DEFAULT_MAX_EXACT_PREVIEW_MESH_BYTES
                 )
             )
         }
@@ -329,14 +462,32 @@ internal fun MainActivity.prepareWorkspaceMesh(modelFilePath: String): Workspace
             preparedViewerMeshCache.put(stagedFile, it)
         }
         val preparedMesh = preparedMeshResult.getOrNull()
+        Log.i(
+            "MobileSlicerPerf",
+            "workspace_mesh_prepare cacheHit=false fileBytes=${stagedFile.length()} " +
+                "success=${preparedMesh != null} sourceTriangles=${preparedMesh?.sourceTriangleCount ?: 0} " +
+                "displayTriangles=${preparedMesh?.displayTriangleCount ?: 0} " +
+                "renderArrayBytes=${preparedMesh?.renderArrayBytes ?: 0} " +
+                "cacheRetainedBytes=${preparedViewerMeshCache.retainedBytes} " +
+                "budgetBytes=$DEFAULT_MAX_EXACT_PREVIEW_MESH_BYTES ms=$elapsedMs " +
+                "error=${preparedMeshResult.exceptionOrNull()?.message?.replace(Regex("\\s+"), "_") ?: "none"}"
+        )
         return WorkspacePreparationResult(
             preparedMesh = preparedMesh?.mesh,
-            viewerPreparationError = preparedMeshResult.exceptionOrNull()?.message,
+            viewerPreparationError = previewPreparationErrorMessage(preparedMeshResult.exceptionOrNull()?.message),
             timing = WorkspacePreparationTiming(
                 viewerMeshPrepMs = elapsedMs,
                 sourceTriangleCount = preparedMesh?.sourceTriangleCount,
                 displayTriangleCount = preparedMesh?.displayTriangleCount,
-                reducedForDisplay = preparedMesh?.reducedForDisplay == true
+                renderArrayBytes = preparedMesh?.renderArrayBytes,
+                cacheRetainedBytes = preparedViewerMeshCache.retainedBytes,
+                exactPreviewBudgetBytes = DEFAULT_MAX_EXACT_PREVIEW_MESH_BYTES
             )
         )
     }
+
+private fun previewPreparationErrorMessage(rawMessage: String?): String? {
+    if (rawMessage.isNullOrBlank()) return null
+    if (!rawMessage.contains("exact workspace preview", ignoreCase = true)) return rawMessage
+    return "$rawMessage Exact 3D preview was skipped to protect device memory; slicing, export, and saved plate data still use the original model file."
+}

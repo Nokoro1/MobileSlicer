@@ -4,6 +4,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #if defined(__ANDROID__)
@@ -17,6 +18,8 @@ OrcaEngine* engine_from_handle(jlong handle);
 
 std::mutex g_paint_overlay_buffer_mutex;
 std::unordered_map<long long, std::vector<float>> g_paint_overlay_direct_buffers;
+std::mutex g_engine_lifecycle_mutex;
+std::unordered_set<OrcaEngine*> g_live_engines;
 
 void trim_native_heap()
 {
@@ -252,9 +255,40 @@ private:
     jlong* raw_;
 };
 
+class JniByteArrayElements {
+public:
+    JniByteArrayElements(JNIEnv* env, jbyteArray values)
+        : env_(env), values_(values), raw_(env->GetByteArrayElements(values, nullptr))
+    {
+    }
+
+    ~JniByteArrayElements()
+    {
+        if (raw_ != nullptr) {
+            env_->ReleaseByteArrayElements(values_, raw_, JNI_ABORT);
+        }
+    }
+
+    JniByteArrayElements(const JniByteArrayElements&) = delete;
+    JniByteArrayElements& operator=(const JniByteArrayElements&) = delete;
+
+    bool ok() const { return raw_ != nullptr; }
+    const unsigned char* data() const { return reinterpret_cast<const unsigned char*>(raw_); }
+
+private:
+    JNIEnv* env_;
+    jbyteArray values_;
+    jbyte* raw_;
+};
+
 OrcaEngine* engine_from_handle(jlong handle)
 {
-    return handle == 0 ? nullptr : reinterpret_cast<OrcaEngine*>(handle);
+    if (handle == 0) {
+        return nullptr;
+    }
+    OrcaEngine* engine = reinterpret_cast<OrcaEngine*>(handle);
+    std::lock_guard<std::mutex> lock(g_engine_lifecycle_mutex);
+    return g_live_engines.find(engine) == g_live_engines.end() ? nullptr : engine;
 }
 
 OrcaGcodeViewer* viewer_from_handle(jlong handle)
@@ -288,7 +322,15 @@ jstring new_nonempty_string(JNIEnv* env, const char* value)
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeCreateEngine(JNIEnv*, jclass)
 {
-    return reinterpret_cast<jlong>(orca_create());
+    OrcaEngine* engine = orca_create();
+    if (engine == nullptr) {
+        return 0;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_engine_lifecycle_mutex);
+        g_live_engines.insert(engine);
+    }
+    return reinterpret_cast<jlong>(engine);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -320,12 +362,19 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeDestroyEngine(JNIEnv
     if (handle == 0) {
         return;
     }
+    OrcaEngine* engine = reinterpret_cast<OrcaEngine*>(handle);
+    {
+        std::lock_guard<std::mutex> lifecycle_lock(g_engine_lifecycle_mutex);
+        if (g_live_engines.erase(engine) == 0) {
+            return;
+        }
+    }
     {
         std::lock_guard<std::mutex> lock(g_paint_overlay_buffer_mutex);
         g_paint_overlay_direct_buffers.erase(static_cast<long long>(handle) << 1);
         g_paint_overlay_direct_buffers.erase((static_cast<long long>(handle) << 1) | 1LL);
     }
-    orca_destroy(engine_from_handle(handle));
+    orca_destroy(engine);
     trim_native_heap();
 }
 
@@ -503,6 +552,30 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeExtractModelMeshToSt
         engine_from_handle(handle),
         raw_input_path.get(),
         raw_output_path.get()
+    );
+    trim_native_heap();
+    return jni_bool_from_result(result);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeConvertStepToStl(JNIEnv* env, jclass, jlong handle, jstring input_path, jstring output_stl_path, jdouble linear_deflection, jdouble angle_deflection)
+{
+    if (handle == 0 || input_path == nullptr || output_stl_path == nullptr) {
+        return JNI_FALSE;
+    }
+
+    JniUtfString raw_input_path(env, input_path);
+    JniUtfString raw_output_path(env, output_stl_path);
+    if (!raw_input_path.ok() || !raw_output_path.ok()) {
+        return JNI_FALSE;
+    }
+
+    const int result = orca_convert_step_to_stl(
+        engine_from_handle(handle),
+        raw_input_path.get(),
+        raw_output_path.get(),
+        static_cast<double>(linear_deflection),
+        static_cast<double>(angle_deflection)
     );
     trim_native_heap();
     return jni_bool_from_result(result);
@@ -964,10 +1037,12 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanPlateArrangement
         return nullptr;
     }
 
-    constexpr jsize output_transform_stride = 16;
+    constexpr jsize output_transform_stride = 17;
     const jsize output_transform_count = count * output_transform_stride;
     std::vector<int> extruder_ids_copy = raw_extruder_ids.copy(count);
     std::vector<double> planned(static_cast<size_t>(output_transform_count), 0.0);
+    std::vector<double> native_transforms(static_cast<size_t>(count) * 16, 0.0);
+    std::vector<int> planned_beds(static_cast<size_t>(count), 0);
     const int result = orca_plan_plate_arrangement(
         engine_from_handle(handle),
         raw_paths.data(),
@@ -977,11 +1052,22 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanPlateArrangement
         static_cast<int>(count),
         raw_config_json.get(),
         allow_rotation == JNI_TRUE ? 1 : 0,
-        planned.data()
+        native_transforms.data(),
+        planned_beds.data()
     );
 
     if (result != 0) {
         return nullptr;
+    }
+
+    for (jsize index = 0; index < count; ++index) {
+        const jsize source_offset = index * 16;
+        const jsize target_offset = index * output_transform_stride;
+        for (jsize value_index = 0; value_index < 16; ++value_index) {
+            planned[static_cast<size_t>(target_offset + value_index)] =
+                native_transforms[static_cast<size_t>(source_offset + value_index)];
+        }
+        planned[static_cast<size_t>(target_offset + 16)] = static_cast<double>(planned_beds[static_cast<size_t>(index)]);
     }
 
     jdoubleArray output = env->NewDoubleArray(output_transform_count);
@@ -1049,6 +1135,27 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanAutoOrientation(
     }
     env->SetDoubleArrayRegion(output, 0, output_transform_count, planned.data());
     return output;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePrewarmPlatePlanningModels(JNIEnv* env, jclass, jlong handle, jobjectArray paths)
+{
+    if (handle == 0 || paths == nullptr) {
+        return JNI_FALSE;
+    }
+    const jsize count = env->GetArrayLength(paths);
+    if (count <= 0) {
+        return JNI_FALSE;
+    }
+    JniStringArrayUtf raw_paths(env, paths, count);
+    if (!raw_paths.ok()) {
+        return JNI_FALSE;
+    }
+    return orca_prewarm_plate_planning_models(
+        engine_from_handle(handle),
+        raw_paths.data(),
+        static_cast<int>(count)
+    ) == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1155,6 +1262,89 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeGetSliceMetrics(JNIE
 }
 
 extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeGetThumbnailRequestsJson(JNIEnv* env, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return nullptr;
+    }
+
+    std::lock_guard<std::mutex> lifecycle_lock(g_engine_lifecycle_mutex);
+    OrcaEngine* engine = reinterpret_cast<OrcaEngine*>(handle);
+    if (g_live_engines.find(engine) == g_live_engines.end()) {
+        return nullptr;
+    }
+    return new_nonempty_string(env, orca_get_thumbnail_requests_json(engine));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeGetSlicedPlateBboxJson(JNIEnv* env, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return nullptr;
+    }
+
+    std::lock_guard<std::mutex> lifecycle_lock(g_engine_lifecycle_mutex);
+    OrcaEngine* engine = reinterpret_cast<OrcaEngine*>(handle);
+    if (g_live_engines.find(engine) == g_live_engines.end()) {
+        return nullptr;
+    }
+    return new_nonempty_string(env, orca_get_sliced_plate_bbox_json(engine));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeClearSliceThumbnails(JNIEnv*, jclass, jlong handle)
+{
+    if (handle == 0) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lifecycle_lock(g_engine_lifecycle_mutex);
+    OrcaEngine* engine = reinterpret_cast<OrcaEngine*>(handle);
+    if (g_live_engines.find(engine) == g_live_engines.end()) {
+        return;
+    }
+    orca_clear_slice_thumbnails(engine);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeAddSliceThumbnailRgba(
+    JNIEnv* env,
+    jclass,
+    jlong handle,
+    jint width,
+    jint height,
+    jstring format,
+    jstring role,
+    jbyteArray rgba)
+{
+    if (handle == 0 || width <= 0 || height <= 0 || format == nullptr || role == nullptr || rgba == nullptr) {
+        return JNI_FALSE;
+    }
+    const jsize byte_count = env->GetArrayLength(rgba);
+    JniUtfString raw_format(env, format);
+    JniUtfString raw_role(env, role);
+    JniByteArrayElements raw_rgba(env, rgba);
+    if (!raw_format.ok() || !raw_role.ok() || !raw_rgba.ok()) {
+        return JNI_FALSE;
+    }
+
+    std::lock_guard<std::mutex> lifecycle_lock(g_engine_lifecycle_mutex);
+    OrcaEngine* engine = reinterpret_cast<OrcaEngine*>(handle);
+    if (g_live_engines.find(engine) == g_live_engines.end()) {
+        return JNI_FALSE;
+    }
+    const int result = orca_add_slice_thumbnail_rgba(
+        engine,
+        static_cast<int>(width),
+        static_cast<int>(height),
+        raw_format.get(),
+        raw_role.get(),
+        raw_rgba.data(),
+        static_cast<int>(byte_count));
+    return jni_bool_from_result(result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
 Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativePlanLatestSlicePreviewRanges(JNIEnv* env, jclass, jlong handle, jlong min_layer, jlong max_layer, jlong vertex_budget)
 {
     if (handle == 0) {
@@ -1200,6 +1390,27 @@ Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeWriteBambuGcode3mfTo
     }
 
     const int result = orca_write_bambu_gcode_3mf_to_file(engine_from_handle(handle), raw_path.get());
+    trim_native_heap();
+    return jni_bool_from_result(result);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobileslicer_nativebridge_NativeEngineBridge_nativeWriteMultiPlateBambuGcode3mfToFile(JNIEnv* env, jclass, jlong handle, jstring path, jstring manifestJson)
+{
+    if (handle == 0 || path == nullptr || manifestJson == nullptr) {
+        return JNI_FALSE;
+    }
+
+    JniUtfString raw_path(env, path);
+    JniUtfString raw_manifest(env, manifestJson);
+    if (!raw_path.ok() || !raw_manifest.ok()) {
+        return JNI_FALSE;
+    }
+
+    const int result = orca_write_multi_plate_bambu_gcode_3mf_to_file(
+        engine_from_handle(handle),
+        raw_path.get(),
+        raw_manifest.get());
     trim_native_heap();
     return jni_bool_from_result(result);
 }

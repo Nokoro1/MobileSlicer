@@ -100,7 +100,9 @@ internal fun autoArrangePlateObjectsStatus(
     objectCount: Int,
     result: PlateAutoArrangeResult
 ): String =
-    if (result.reservedPrimeTowerSpace) {
+    if (result.usesMultipleBeds) {
+        "Objects arranged\n$objectCount across ${result.arrangedPlateCount} plates"
+    } else if (result.reservedPrimeTowerSpace) {
         "Objects arranged\n$objectCount on plate; prime tower space reserved"
     } else {
         "Objects arranged\n$objectCount on plate"

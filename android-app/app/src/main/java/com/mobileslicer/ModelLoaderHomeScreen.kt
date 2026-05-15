@@ -25,6 +25,8 @@ internal fun ModelLoaderHomeScreen(
     importInProgress: Boolean,
     onOpenSettings: () -> Unit,
     onSelectModel: () -> Unit,
+    onFindAndImportModel: () -> Unit,
+    onScannerClick: () -> Unit,
     onCalibrationsClick: () -> Unit,
     onProfilesClick: () -> Unit,
     onOpenProject: (SavedProject) -> Unit,
@@ -44,7 +46,9 @@ internal fun ModelLoaderHomeScreen(
         HeroImportCard(
             importedModel = importedModel,
             importInProgress = importInProgress,
-            onSelectModel = onSelectModel
+            onSelectModel = onSelectModel,
+            onFindAndImportModel = onFindAndImportModel,
+            onScannerClick = onScannerClick
         )
         PrinterCalibrationsLandingSection(
             importInProgress = importInProgress,

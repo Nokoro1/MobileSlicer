@@ -102,6 +102,23 @@ internal object NativeEngineCalls {
             NativeEngineBridge.nativeExtractModelMeshToStl(handle.raw, inputPath, outputStlPath)
         }
 
+    fun convertStepToStl(
+        handle: NativeEngineHandle,
+        inputPath: String,
+        outputStlPath: String,
+        linearDeflection: Double,
+        angleDeflection: Double
+    ): NativeEngineCallResult =
+        booleanCall(handle, "nativeConvertStepToStl") {
+            NativeEngineBridge.nativeConvertStepToStl(
+                handle.raw,
+                inputPath,
+                outputStlPath,
+                linearDeflection,
+                angleDeflection
+            )
+        }
+
     fun planPlateArrangement(
         handle: NativeEngineHandle,
         paths: Array<String>,
@@ -133,6 +150,14 @@ internal object NativeEngineCalls {
             extruderIds,
             configJson
         )
+
+    fun prewarmPlatePlanningModels(
+        handle: NativeEngineHandle,
+        paths: Array<String>
+    ): NativeEngineCallResult =
+        booleanCall(handle, "nativePrewarmPlatePlanningModels") {
+            NativeEngineBridge.nativePrewarmPlatePlanningModels(handle.raw, paths)
+        }
 
     fun cancelPlanning(handle: NativeEngineHandle): Boolean =
         NativeEngineBridge.nativeCancelPlanning(handle.raw)
@@ -185,6 +210,15 @@ internal object NativeEngineCalls {
             NativeEngineBridge.nativeWriteBambuGcode3mfToFile(handle.raw, path)
         }
 
+    fun writeMultiPlateBambuGcode3mfToFile(
+        handle: NativeEngineHandle,
+        path: String,
+        manifestJson: String
+    ): NativeEngineCallResult =
+        booleanCall(handle, "nativeWriteMultiPlateBambuGcode3mfToFile") {
+            NativeEngineBridge.nativeWriteMultiPlateBambuGcode3mfToFile(handle.raw, path, manifestJson)
+        }
+
     fun getGcodeSummary(handle: NativeEngineHandle): String? =
         NativeEngineBridge.nativeGetGcodeSummary(handle.raw)
 
@@ -193,6 +227,28 @@ internal object NativeEngineCalls {
 
     fun getSliceMetrics(handle: NativeEngineHandle): String? =
         NativeEngineBridge.nativeGetSliceMetrics(handle.raw)
+
+    fun getThumbnailRequests(handle: NativeEngineHandle): NativeThumbnailRequestSummary? =
+        parseNativeThumbnailRequestsJson(NativeEngineBridge.nativeGetThumbnailRequestsJson(handle.raw))
+
+    fun getSlicedPlateBboxJson(handle: NativeEngineHandle): String? =
+        NativeEngineBridge.nativeGetSlicedPlateBboxJson(handle.raw)
+
+    fun clearSliceThumbnails(handle: NativeEngineHandle) {
+        NativeEngineBridge.nativeClearSliceThumbnails(handle.raw)
+    }
+
+    fun addSliceThumbnailRgba(
+        handle: NativeEngineHandle,
+        width: Int,
+        height: Int,
+        format: String,
+        role: String,
+        rgba: ByteArray
+    ): NativeEngineCallResult =
+        booleanCall(handle, "nativeAddSliceThumbnailRgba") {
+            NativeEngineBridge.nativeAddSliceThumbnailRgba(handle.raw, width, height, format, role, rgba)
+        }
 
     fun planLatestSlicePreviewRanges(
         handle: NativeEngineHandle,

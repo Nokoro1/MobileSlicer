@@ -106,6 +106,7 @@ void clear_generated_gcode(OrcaEngine* engine)
     engine->impl.gcode.clear();
     engine->impl.gcode_summary.clear();
     engine->impl.gcode_summary_enriched = false;
+    engine->impl.sliced_plate_bbox_data.reset();
     engine->impl.slice_metrics.clear();
 #if defined(MOBILE_SLICER_ENABLE_VGCODE)
     engine->impl.cached_preview_input = libvgcode::GCodeInputData{};

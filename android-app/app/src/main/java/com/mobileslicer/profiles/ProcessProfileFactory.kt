@@ -5,6 +5,8 @@ import org.json.JSONObject
 
 private inline fun <reified T : Enum<T>> enumDefault(): T = enumValues<T>().first()
 
+internal const val DEFAULT_SEAM_GAP = "0%"
+
 private val processProfileFieldDefaults: List<Pair<String, Any?>> = listOf(
     "id" to "",
     "name" to "",
@@ -232,7 +234,7 @@ private val processProfileFieldDefaults: List<Pair<String, Any?>> = listOf(
     "ironingAngleDegrees" to 0f,
     "ironingAngleFixed" to false,
     "ironingSpeedMmPerSec" to 20f,
-    "seamGap" to "10%",
+    "seamGap" to DEFAULT_SEAM_GAP,
     "seamScarfType" to SeamScarfType.None,
     "seamScarfConditional" to false,
     "scarfAngleThresholdDegrees" to 155,
@@ -412,6 +414,9 @@ private val processProfileLegacyIndexNames: Map<Int, String> = mapOf(
 	    268 to "strengthInfillDetails",
 	    269 to "gcodeOutputDetails"
 	)
+
+internal fun processProfileFieldDefaultSnapshot(): Map<String, Any?> =
+    processProfileFieldDefaults.toMap()
 
 internal fun processProfileValues(overrides: Iterable<Pair<Int, Any?>>): Map<String, Any?> {
     val values = processProfileFieldDefaults.toMap().toMutableMap()

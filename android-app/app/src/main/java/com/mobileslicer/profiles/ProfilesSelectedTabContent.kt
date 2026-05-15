@@ -163,8 +163,56 @@ internal fun ProfilesSelectedTabContent(
     onShowFilamentSelection: () -> Unit,
     onShowProcessSelection: () -> Unit,
     onEditorRequest: (ProfileEditorRequest) -> Unit,
-    onDeleteRequest: (ProfileDeleteRequest) -> Unit
+    onDeleteRequest: (ProfileDeleteRequest) -> Unit,
+    workspaceProcessMode: Boolean = false,
+    workspaceProcess: ProcessProfile? = null,
+    workspaceHasProcessOverrides: Boolean = false,
+    objectProcessMode: Boolean = false,
+    objectProcessLabel: String? = null,
+    objectProcessScopeLabel: String = "Object",
+    objectProcess: ProcessProfile? = null,
+    objectHasProcessOverrides: Boolean = false,
+    objectHasProcessState: Boolean = false,
+    onWorkspaceProcessSelected: ((ProcessProfile) -> Unit)? = null,
+    onWorkspaceProcessTransferred: ((ProcessProfile) -> Unit)? = null,
+    onObjectProcessSelected: ((ProcessProfile) -> Unit)? = null,
+    onObjectProcessReset: (() -> Unit)? = null
 ) {
+    var pendingWorkspaceProcessSwitch by remember { mutableStateOf<ProcessProfile?>(null) }
+    pendingWorkspaceProcessSwitch?.let { targetProcess ->
+        AlertDialog(
+            onDismissRequest = { pendingWorkspaceProcessSwitch = null },
+            title = { Text("Unsaved process changes") },
+            text = {
+                Text("Transfer current edits to ${targetProcess.name}, or discard them?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onWorkspaceProcessTransferred?.invoke(targetProcess)
+                        pendingWorkspaceProcessSwitch = null
+                    }
+                ) {
+                    Text("Transfer")
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { pendingWorkspaceProcessSwitch = null }) {
+                        Text("Cancel")
+                    }
+                    TextButton(
+                        onClick = {
+                            onWorkspaceProcessSelected?.invoke(targetProcess)
+                            pendingWorkspaceProcessSwitch = null
+                        }
+                    ) {
+                        Text("Discard")
+                    }
+                }
+            }
+        )
+    }
     when (selectedTab) {
                 ProfileTab.Printer -> DomainProfilesSection(
                     title = "Printer profiles",
@@ -337,15 +385,15 @@ internal fun ProfilesSelectedTabContent(
                 ProfileTab.Process -> DomainProfilesSection(
                     title = "Process profiles",
                     subtitle = "",
-                    selectLabel = "Select process",
-                    actionLabel = "New custom process",
+                    selectLabel = "Select/import preset",
+                    actionLabel = "Duplicate selected",
                     details = "",
                     onSelect = { onShowProcessSelection() },
                     onAdd = {
                         val base = store.visibleProcessesForSelectedPrinter().firstOrNull { it.id == store.selectedProcessId }
                             ?: store.visibleProcessesForSelectedPrinter().firstOrNull()
                         if (base == null) {
-                            Toast.makeText(context, "Import a process preset before creating a custom process.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Select or import a process preset before duplicating it.", Toast.LENGTH_SHORT).show()
                         } else {
                             onEditorRequest(
                             ProfileEditorRequest.Process(
@@ -370,6 +418,48 @@ internal fun ProfilesSelectedTabContent(
                         }
                     }
                 ) {
+                    if (objectProcessMode && !objectProcessLabel.isNullOrBlank()) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.52f)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = "$objectProcessScopeLabel process",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = objectProcessLabel,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = appTitleColor(),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { onObjectProcessReset?.invoke() },
+                                    enabled = objectHasProcessState && onObjectProcessReset != null
+                                ) {
+                                    Text("Reset ${objectProcessScopeLabel.lowercase()}")
+                                }
+                            }
+                        }
+                    }
                     val visibleProcesses = store.visibleProcessesForSelectedPrinter()
                     if (store.selectedPrinterId.isBlank()) {
                         Text(
@@ -387,12 +477,66 @@ internal fun ProfilesSelectedTabContent(
                     visibleProcesses.forEach { profile ->
                         DomainProfileCard(
                             title = profile.name,
-                            selected = profile.id == store.selectedProcessId,
+                            selected = if (objectProcessMode && objectProcess != null) {
+                                profile.id == objectProcess.id
+                            } else if (workspaceProcessMode && workspaceProcess != null) {
+                                profile.id == workspaceProcess.id
+                            } else {
+                                profile.id == store.selectedProcessId
+                            },
                             accentColor = PanelLavender,
                             builtIn = profile.builtIn,
                             sourceLabel = "",
-                            onUse = { updateStore { it.withSelectedProcessForCurrentPrinter(profile.id) } },
-                            onEdit = { onEditorRequest(ProfileEditorRequest.Process(profile, isNew = false)) },
+                            useLabel = when {
+                                objectProcessMode -> "Use as ${objectProcessScopeLabel.lowercase()} base"
+                                workspaceProcessMode -> "Apply to plate"
+                                else -> "Use"
+                            },
+                            activeLabel = when {
+                                objectProcessMode -> if (objectHasProcessOverrides) {
+                                    "$objectProcessScopeLabel modified"
+                                } else {
+                                    "$objectProcessScopeLabel base"
+                                }
+                                workspaceProcessMode -> "Applied to plate"
+                                else -> "Active"
+                            },
+                            onUse = {
+                                if (objectProcessMode) {
+                                    onObjectProcessSelected?.invoke(profile)
+                                } else if (workspaceProcessMode && onWorkspaceProcessSelected != null) {
+                                    if (
+                                        workspaceHasProcessOverrides &&
+                                        onWorkspaceProcessTransferred != null &&
+                                        workspaceProcess?.id != profile.id
+                                    ) {
+                                        pendingWorkspaceProcessSwitch = profile
+                                    } else {
+                                        onWorkspaceProcessSelected(profile)
+                                    }
+                                } else {
+                                    updateStore { it.withSelectedProcessForCurrentPrinter(profile.id) }
+                                }
+                            },
+                            onEdit = {
+                                val editProfile = if (objectProcessMode && objectProcess?.id == profile.id) {
+                                    objectProcess
+                                } else if (workspaceProcessMode && workspaceProcess?.id == profile.id) {
+                                    workspaceProcess
+                                } else {
+                                    profile
+                                }
+                                onEditorRequest(
+                                    ProfileEditorRequest.Process(
+                                        editProfile,
+                                        isNew = false,
+                                        workspaceProcessMode = workspaceProcessMode,
+                                        objectProcessMode = objectProcessMode,
+                                        objectLabel = objectProcessLabel,
+                                        processScopeLabel = objectProcessScopeLabel
+                                    )
+                                )
+                            },
                             onDuplicate = {
                                 onEditorRequest(
                             ProfileEditorRequest.Process(

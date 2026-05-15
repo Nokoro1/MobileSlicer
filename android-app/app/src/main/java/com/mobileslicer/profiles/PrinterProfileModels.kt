@@ -18,22 +18,29 @@ internal fun thumbnailFormatFromThumbnails(thumbnails: String): String {
 }
 
 internal fun thumbnailsForExport(printer: PrinterProfile): String {
-    if (printer.printerAgent.equals("qidi", ignoreCase = true) &&
-        printer.printerModel.equals("Qidi Q2", ignoreCase = true)
-    ) {
-        return "150x150/PNG"
-    }
     return printer.thumbnails
 }
 
 internal fun printerSettingsIdForExport(printer: PrinterProfile): String {
-    if (printer.printerAgent.equals("qidi", ignoreCase = true) &&
-        printer.printerModel.equals("Qidi Q2", ignoreCase = true)
-    ) {
+    printer.resolvedOrcaMachineNameFromJson().takeIf { it.isNotBlank() }?.let { return it }
+    if (printer.isResolvedQidiQ2()) {
         return "Qidi Q2 ${printer.nozzleDiameterMm.formatNozzleDiameter()} nozzle"
     }
     return printer.name
 }
+
+private fun PrinterProfile.isResolvedQidiQ2(): Boolean {
+    val resolvedName = resolvedOrcaMachineNameFromJson()
+    return printerAgent.equals("qidi", ignoreCase = true) &&
+        sequenceOf(printerModel, name, resolvedName)
+            .any { value -> value.equals("Qidi Q2", ignoreCase = true) || value.startsWith("Qidi Q2 ", ignoreCase = true) }
+}
+
+private fun PrinterProfile.resolvedOrcaMachineNameFromJson(): String =
+    runCatching { org.json.JSONObject(orcaResolvedMachineJson).optString("name") }
+        .getOrNull()
+        .orEmpty()
+        .trim()
 
 private fun Float.formatNozzleDiameter(): String =
     String.format(Locale.US, "%.1f", this)

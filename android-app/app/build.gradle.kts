@@ -58,6 +58,32 @@ val orcaAndroidDepsRoot = providers.environmentVariable("ORCA_ANDROID_DEPS_ROOT"
 val orcaAndroidDepsSrcRoot = providers.environmentVariable("ORCA_ANDROID_DEPS_SRC_ROOT")
     .orNull
     ?: "/tmp/orca-deps-src"
+val orcaAndroidOcctPrefix = providers.environmentVariable("ORCA_ANDROID_OCCT_PREFIX")
+    .orNull
+    ?: providers.gradleProperty("orcaAndroid.occtPrefix").orNull
+    ?: ""
+val localProperties = Properties().apply {
+    val propertiesFile = rootProject.file("local.properties")
+    if (propertiesFile.isFile) {
+        propertiesFile.inputStream().use(::load)
+    }
+}
+
+fun String.asBuildConfigString(): String =
+    "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+val thingiverseAppToken = providers.environmentVariable("THINGIVERSE_APP_TOKEN").orNull
+    ?: localProperties.getProperty("thingiverse.appToken")
+    ?: providers.gradleProperty("thingiverse.appToken").orNull
+val thingiverseClientId = providers.environmentVariable("THINGIVERSE_CLIENT_ID").orNull
+    ?: localProperties.getProperty("thingiverse.clientId")
+    ?: providers.gradleProperty("thingiverse.clientId").orNull
+val thingiverseAuthBackendUrl = providers.environmentVariable("THINGIVERSE_AUTH_BACKEND_URL").orNull
+    ?: localProperties.getProperty("thingiverse.authBackendUrl")
+    ?: providers.gradleProperty("thingiverse.authBackendUrl").orNull
+val thingiverseRedirectScheme = "mobileslicer"
+val thingiverseRedirectHost = "thingiverse-auth"
+val thingiverseRedirectUri = "$thingiverseRedirectScheme://$thingiverseRedirectHost"
 
 android {
     namespace = "com.mobileslicer"
@@ -97,6 +123,9 @@ android {
                     "-DORCA_ANDROID_DEPS_ROOT=$orcaAndroidDepsRoot",
                     "-DORCA_ANDROID_DEPS_SRC_ROOT=$orcaAndroidDepsSrcRoot"
                 )
+                if (orcaAndroidOcctPrefix.isNotBlank()) {
+                    arguments += "-DORCA_ANDROID_OCCT_PREFIX=$orcaAndroidOcctPrefix"
+                }
             }
         }
     }
@@ -126,6 +155,12 @@ android {
             versionNameSuffix = "-debug"
             buildConfigField("boolean", "AUTOMATION_ENABLED", "true")
             buildConfigField("String", "VIEWER_BUILD_STAMP", "\"viewer-build: debug\"")
+            buildConfigField("String", "THINGIVERSE_APP_TOKEN", (thingiverseAppToken ?: "").asBuildConfigString())
+            buildConfigField("String", "THINGIVERSE_CLIENT_ID", (thingiverseClientId ?: "").asBuildConfigString())
+            buildConfigField("String", "THINGIVERSE_AUTH_BACKEND_URL", (thingiverseAuthBackendUrl ?: "").asBuildConfigString())
+            buildConfigField("String", "THINGIVERSE_REDIRECT_URI", thingiverseRedirectUri.asBuildConfigString())
+            manifestPlaceholders["thingiverseRedirectScheme"] = thingiverseRedirectScheme
+            manifestPlaceholders["thingiverseRedirectHost"] = thingiverseRedirectHost
             externalNativeBuild {
                 cmake {
                     arguments += "-DMOBILE_SLICER_BUILD_NATIVE_PAINT_PROBES=ON"
@@ -140,6 +175,12 @@ android {
             versionNameSuffix = "-perf"
             buildConfigField("boolean", "AUTOMATION_ENABLED", "true")
             buildConfigField("String", "VIEWER_BUILD_STAMP", "\"viewer-build: perf\"")
+            buildConfigField("String", "THINGIVERSE_APP_TOKEN", (thingiverseAppToken ?: "").asBuildConfigString())
+            buildConfigField("String", "THINGIVERSE_CLIENT_ID", (thingiverseClientId ?: "").asBuildConfigString())
+            buildConfigField("String", "THINGIVERSE_AUTH_BACKEND_URL", (thingiverseAuthBackendUrl ?: "").asBuildConfigString())
+            buildConfigField("String", "THINGIVERSE_REDIRECT_URI", thingiverseRedirectUri.asBuildConfigString())
+            manifestPlaceholders["thingiverseRedirectScheme"] = thingiverseRedirectScheme
+            manifestPlaceholders["thingiverseRedirectHost"] = thingiverseRedirectHost
             externalNativeBuild {
                 cmake {
                     arguments += "-DMOBILE_SLICER_BUILD_NATIVE_PAINT_PROBES=ON"
@@ -157,6 +198,12 @@ android {
             }
             buildConfigField("boolean", "AUTOMATION_ENABLED", "false")
             buildConfigField("String", "VIEWER_BUILD_STAMP", "\"viewer-build: release\"")
+            buildConfigField("String", "THINGIVERSE_APP_TOKEN", "\"\"")
+            buildConfigField("String", "THINGIVERSE_CLIENT_ID", (thingiverseClientId ?: "").asBuildConfigString())
+            buildConfigField("String", "THINGIVERSE_AUTH_BACKEND_URL", (thingiverseAuthBackendUrl ?: "").asBuildConfigString())
+            buildConfigField("String", "THINGIVERSE_REDIRECT_URI", thingiverseRedirectUri.asBuildConfigString())
+            manifestPlaceholders["thingiverseRedirectScheme"] = thingiverseRedirectScheme
+            manifestPlaceholders["thingiverseRedirectHost"] = thingiverseRedirectHost
         }
     }
 
@@ -313,6 +360,12 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.browser)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.google.ar.core)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
@@ -320,6 +373,8 @@ dependencies {
     implementation(libs.androidx.material.icons.core)
     implementation(libs.androidx.material3)
     implementation(libs.google.material)
+    implementation(libs.mediapipe.tasks.vision)
+    implementation(libs.opencv)
     implementation(libs.paho.mqtt)
     implementation(libs.commons.net)
 

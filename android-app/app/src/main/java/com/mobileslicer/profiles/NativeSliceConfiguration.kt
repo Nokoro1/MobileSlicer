@@ -92,16 +92,19 @@ internal fun ActiveSlicerConfiguration.toNativeSliceConfigBuildResult(context: C
         json.removeUnresolvedMobileProcessDefaults(processJson)
         json.applyFinalOrcaParityNormalization(printer, process)
         json.restoreResolvedOrcaParityValues(printerJson, filamentJson, processJson)
+        json.applyOrcaProfileIdentityDefaults(printer, filament, process)
         json.applySingleMaterialNativeSliceDefaults(
             preserveOrcaResolvedValues = true
         )
+        json.restoreResolvedOrcaTemplateDefaultValues(printerJson, filamentJson, processJson)
     }
     val nativeDefaultsMs = elapsedRealtimeForConfigTiming() - nativeDefaultsStartedAtMs
     val normalizeStartedAtMs = elapsedRealtimeForConfigTiming()
     json.applyNativeFinalOverridesAndNormalization(
         profileJsons = profileJsons,
         preserveOrcaResolvedValues = preserveOrcaResolvedValues,
-        resolvedNativeToolCount = resolvedNativeToolCount
+        resolvedNativeToolCount = resolvedNativeToolCount,
+        activePrinter = printer
     )
     val result = json.toString()
     val normalizeMs = elapsedRealtimeForConfigTiming() - normalizeStartedAtMs
@@ -213,7 +216,8 @@ private fun JSONObject.applyNativeMobileDefaults(
 private fun JSONObject.applyNativeFinalOverridesAndNormalization(
     profileJsons: NativeSliceResolvedProfileJsons,
     preserveOrcaResolvedValues: Boolean,
-    resolvedNativeToolCount: Int
+    resolvedNativeToolCount: Int,
+    activePrinter: PrinterProfile
 ) {
     applyExplicitOrcaOverrideLayers(
         printerOverridesJson = profileJsons.printerOverridesJson,
@@ -224,9 +228,12 @@ private fun JSONObject.applyNativeFinalOverridesAndNormalization(
     val nativeToolCount = if (optInt(NativeConfigKeys.Printer.ExtrudersCount, 0) == 1) 1 else resolvedNativeToolCount
     normalizeNativeScalarListStrings()
     normalizeNativePointStrings()
+    normalizeNativeShellThicknessScalars()
+    normalizeNativeSeamGap()
     if (!preserveOrcaResolvedValues || nativeToolCount > 1) {
         expandActiveMaterialAcrossNativeToolVectors(nativeToolCount)
     }
+    ensureFluiddCompatibleThumbnails(activePrinter)
 }
 
 private fun JSONObject.applyExplicitOrcaOverrideLayers(
@@ -248,6 +255,25 @@ private fun JSONObject.normalizeManualBrimWidthOverride(processOverridesJson: JS
     }
 }
 
+internal fun JSONObject.normalizeNativeShellThicknessScalars() {
+    normalizeNonNegativeFloatScalar("top_shell_thickness", fallback = 0.0)
+    normalizeNonNegativeFloatScalar("bottom_shell_thickness", fallback = 0.0)
+}
+
+internal fun JSONObject.normalizeNativeSeamGap() {
+    put("seam_gap", normalizedProcessSeamGap(scalarString("seam_gap")))
+}
+
+private fun JSONObject.normalizeNonNegativeFloatScalar(key: String, fallback: Double) {
+    val current = scalarString(key)
+    val numeric = current.toDoubleOrNull()
+    if (current.isBlank() || numeric == null || !numeric.isFinite() || numeric < 0.0) {
+        put(key, fallback)
+    }
+}
+
+private fun Double.isFinite(): Boolean = !isNaN() && !isInfinite()
+
 private fun elapsedRealtimeForConfigTiming(): Long =
     runCatching { SystemClock.elapsedRealtime() }.getOrDefault(0L)
 
@@ -266,8 +292,8 @@ private fun Context.resolveOrcaFilamentJsonFromAssets(
     val printerKey = printerSettingsIdForExport(printer).cleanOrcaIdentity()
     val candidates = runCatching { loadOrcaFilamentPresets(this) }.getOrDefault(emptyList())
     val requestedMaterial = sequenceOf(
-        storedFilamentJson?.scalarOrcaValue("filament_type"),
         filament.materialType,
+        storedFilamentJson?.scalarOrcaValue("filament_type"),
         identity.firstNotNullOfOrNull { it.detectFilamentMaterial() }
     )
         .filterNotNull()
@@ -420,9 +446,11 @@ internal fun repairNativeSliceConfigWithOrcaFilamentAssetsResult(
                 elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
             )
         }
+    json.normalizeNativeShellThicknessScalars()
+    val normalizedConfigJson = json.toString()
     if (json.optInt("mobile_slicer_active_filament_slot_count", 1) > 1) {
         return NativeSliceConfigRepairResult(
-            json = configJson,
+            json = normalizedConfigJson,
             cacheHit = false,
             elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
         ).also { NativeSliceConfigRepairCache.put(cacheKey, it.json) }
@@ -458,19 +486,20 @@ internal fun repairNativeSliceConfigWithOrcaFilamentAssetsResult(
         ),
         storedFilamentJson = filamentIdentityJson
     ) ?: return NativeSliceConfigRepairResult(
-        json = configJson,
+        json = normalizedConfigJson,
         cacheHit = false,
         elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
     ).also { NativeSliceConfigRepairCache.put(cacheKey, it.json) }
     if (repaired.toString() == json.toString()) {
         return NativeSliceConfigRepairResult(
-            json = configJson,
+            json = normalizedConfigJson,
             cacheHit = false,
             elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
         ).also { NativeSliceConfigRepairCache.put(cacheKey, it.json) }
     }
     json.mergeJsonObject(repaired)
     json.mergeJsonObject(jsonObjectOrNull(filamentOverridesJson))
+    json.normalizeNativeShellThicknessScalars()
     val repairedConfigJson = json.toString()
     NativeSliceConfigRepairCache.put(cacheKey, repairedConfigJson)
     return NativeSliceConfigRepairResult(

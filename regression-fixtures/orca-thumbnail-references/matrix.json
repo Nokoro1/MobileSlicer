@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "simple-cube",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/simple-cube",
+      "bed": {
+        "width_mm": 270,
+        "depth_mm": 270,
+        "height_mm": 256
+      }
+    },
+    {
+      "id": "tall-box",
+      "model": "regression-fixtures/slicing/stage2_inner_wall_acceleration_tall_box_fixture.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/tall-box",
+      "bed": {
+        "width_mm": 270,
+        "depth_mm": 270,
+        "height_mm": 256
+      }
+    },
+    {
+      "id": "small-perimeter",
+      "model": "regression-fixtures/slicing/stage2_small_perimeter_fixture.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/small-perimeter",
+      "bed": {
+        "width_mm": 270,
+        "depth_mm": 270,
+        "height_mm": 256
+      }
+    },
+    {
+      "id": "perimeter-array",
+      "model": "regression-fixtures/slicing/stage2_small_perimeter_array_fixture.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/perimeter-array",
+      "bed": {
+        "width_mm": 270,
+        "depth_mm": 270,
+        "height_mm": 256
+      }
+    },
+    {
+      "id": "narrow-strip",
+      "model": "regression-fixtures/slicing/stage2_gap_infill_narrow_strip_fixture.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/narrow-strip",
+      "bed": {
+        "width_mm": 270,
+        "depth_mm": 270,
+        "height_mm": 256
+      }
+    },
+    {
+      "id": "bridge-speed",
+      "model": "regression-fixtures/slicing/stage2_bridge_speed_fixture.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/bridge-speed",
+      "bed": {
+        "width_mm": 270,
+        "depth_mm": 270,
+        "height_mm": 256
+      }
+    },
+    {
+      "id": "complex-retraction-tower",
+      "model": "android-app/app/src/main/assets/calib_stl/retraction/retraction_tower.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/complex-retraction-tower",
+      "bed": {
+        "width_mm": 270,
+        "depth_mm": 270,
+        "height_mm": 256
+      }
+    },
+    {
+      "id": "arranged-objects",
+      "model": "regression-fixtures/slicing/stage3_arranged_objects_fixture.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/arranged-objects",
+      "bed": {
+        "width_mm": 270,
+        "depth_mm": 270,
+        "height_mm": 256
+      }
+    },
+    {
+      "id": "active-multifilament-two-objects",
+      "model": "regression-fixtures/slicing/orca_active_multifilament_probe_cube.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/active-multifilament-two-objects",
+      "source_layout": "two_filament_objects",
+      "source_colors": [
+        "#F2754E",
+        "#4EA3F2"
+      ],
+      "requirements": {
+        "active_filaments": 2
+      },
+      "bed": {
+        "width_mm": 350,
+        "depth_mm": 320,
+        "height_mm": 325
+      }
+    },
+    {
+      "id": "creality-k1-simple-cube",
+      "model": "regression-fixtures/slicing/mobileslicer_test_cube.stl",
+      "reference_dir": "regression-fixtures/orca-thumbnail-references/creality-k1-simple-cube",
+      "bed": {
+        "width_mm": 220,
+        "depth_mm": 220,
+        "height_mm": 250
+      },
+      "profiles": {
+        "machine": "vendor/orcaslicer/resources/profiles/Creality/machine/Creality K1 (0.4 nozzle).json",
+        "process": "vendor/orcaslicer/resources/profiles/Creality/process/0.20mm Standard @Creality K1 (0.4 nozzle).json",
+        "filament": "vendor/orcaslicer/resources/profiles/Creality/filament/Creality Generic PLA @K1-all.json",
+        "printer_name": "Creality K1 (0.4 nozzle)",
+        "process_name": "0.20mm Standard @Creality K1 (0.4 nozzle)",
+        "filament_name": "Creality Generic PLA @K1-all"
+      }
+    }
+  ]
+}

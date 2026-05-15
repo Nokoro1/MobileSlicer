@@ -1,0 +1,12 @@
+name = "mobileslicer"
+compatibility_date = "2026-04-25"
+pages_build_output_dir = "."
+
+[vars]
+SITE_DOMAIN = "mobileslicer.com"
+THINGIVERSE_CLIENT_ID = "231844fc0866f66bf032"
+THINGIVERSE_ALLOWED_APP_REDIRECTS = "mobileslicer://thingiverse-auth"
+
+[[kv_namespaces]]
+binding = "THINGIVERSE_OAUTH_RATE_LIMIT_KV"
+id = "30bcbd6356ce41ee8c95b60f4a1beb8a"

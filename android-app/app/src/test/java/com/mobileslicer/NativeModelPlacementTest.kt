@@ -74,6 +74,7 @@ class NativeModelPlacementTest {
         val original = ViewerModelTransform(
             centerXmm = 42f,
             centerYmm = 118f,
+            zOffsetMm = 6f,
             rotationXDegrees = 0f,
             rotationYDegrees = 0f,
             rotationZDegrees = 37f,
@@ -85,6 +86,7 @@ class NativeModelPlacementTest {
 
         assertEquals(original.centerXmm, restored.centerXmm, 0.0001f)
         assertEquals(original.centerYmm, restored.centerYmm, 0.0001f)
+        assertEquals(original.zOffsetMm, restored.zOffsetMm, 0.0001f)
         assertEquals(original.rotationXDegrees, restored.rotationXDegrees, 0.0001f)
         assertEquals(original.rotationYDegrees, restored.rotationYDegrees, 0.0001f)
         assertEquals(original.rotationZDegrees, restored.rotationZDegrees, 0.0001f)

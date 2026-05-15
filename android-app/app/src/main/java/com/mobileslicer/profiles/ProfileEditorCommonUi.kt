@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -157,8 +158,10 @@ internal fun ProfileEditorScreenScaffold(
     title: String? = null,
     subtitle: String? = "Edit and save this profile on its own page.",
     saveLabel: String,
+    secondarySaveLabel: String? = null,
     onBack: () -> Unit,
     onSave: () -> Unit,
+    onSecondarySave: (() -> Unit)? = null,
     headerContent: (@Composable ColumnScope.() -> Unit)? = null,
     topContent: (@Composable ColumnScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
@@ -199,13 +202,11 @@ internal fun ProfileEditorScreenScaffold(
                     )
                 }
             }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                if (headerContent != null) {
-                    headerContent()
-                } else {
+            if (headerContent == null) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     if (title != null) {
                         Text(
                             text = title,
@@ -222,17 +223,50 @@ internal fun ProfileEditorScreenScaffold(
                         )
                     }
                 }
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
             }
-            Button(
-                onClick = onSave,
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = Color.White
-                )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(saveLabel)
+                if (secondarySaveLabel != null && onSecondarySave != null) {
+                    TextButton(
+                        onClick = onSecondarySave,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.widthIn(max = 104.dp)
+                    ) {
+                        Text(
+                            text = secondarySaveLabel,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Button(
+                    onClick = onSave,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    modifier = Modifier.widthIn(max = 178.dp)
+                ) {
+                    Text(
+                        text = saveLabel,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
+        }
+        if (headerContent != null) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = headerContent
+            )
         }
         if (topContent != null) {
             Column(
@@ -396,16 +430,24 @@ internal fun ProfileTextField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
-    keyboardType: KeyboardType = KeyboardType.Text
+    keyboardType: KeyboardType = KeyboardType.Text,
+    changed: Boolean = false
 ) {
+    val changedColor = MaterialTheme.colorScheme.primary
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = Modifier.fillMaxWidth(),
-        label = { Text(label) },
+        label = { Text(if (changed) "$label *" else label) },
         singleLine = true,
         shape = RoundedCornerShape(16.dp),
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType)
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = if (changed) changedColor else MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = if (changed) changedColor.copy(alpha = 0.72f) else MaterialTheme.colorScheme.outline,
+            focusedLabelColor = if (changed) changedColor else MaterialTheme.colorScheme.primary,
+            unfocusedLabelColor = if (changed) changedColor else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     )
 }
 
@@ -460,22 +502,30 @@ internal fun <T> ProfileDropdownField(
     label: String,
     selectedLabel: String,
     options: List<AppSettingOption<T>>,
-    onSelected: (T) -> Unit
+    onSelected: (T) -> Unit,
+    changed: Boolean = false
 ) {
     var pickerOpen by remember { mutableStateOf(false) }
     val titleColor = appTitleColor()
     val bodyColor = appBodyColor()
     val outlineColor = appOutlineColor()
+    val changedColor = MaterialTheme.colorScheme.primary
 
     Box(modifier = Modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = selectedLabel,
             onValueChange = {},
             modifier = Modifier.fillMaxWidth(),
-            label = { Text(label) },
+            label = { Text(if (changed) "$label *" else label) },
             singleLine = true,
             readOnly = true,
             shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = if (changed) changedColor else MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = if (changed) changedColor.copy(alpha = 0.72f) else MaterialTheme.colorScheme.outline,
+                focusedLabelColor = if (changed) changedColor else MaterialTheme.colorScheme.primary,
+                unfocusedLabelColor = if (changed) changedColor else MaterialTheme.colorScheme.onSurfaceVariant
+            ),
             trailingIcon = {
                 Text(
                     text = "▼",

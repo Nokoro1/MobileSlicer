@@ -2,10 +2,14 @@ package com.mobileslicer
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -88,6 +92,50 @@ internal fun ModelLoaderPrinterUploadProgressDialog(
             Text(
                 progressPercent?.let { "Uploading G-code... $it%" }
                     ?: "Preparing upload..."
+            )
+        }
+    )
+}
+
+@Composable
+internal fun ModelLoaderImportAutoArrangeProgressDialog() {
+    AlertDialog(
+        onDismissRequest = {},
+        confirmButton = {},
+        title = { Text("Importing and auto-arranging") },
+        text = {
+            Column {
+                Text("MobileSlicer is importing the selected files and placing them on the build plate.")
+                Spacer(modifier = Modifier.height(16.dp))
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+    )
+}
+
+@Composable
+internal fun ModelLoaderOrcaMultiPlateArrangeDialog(
+    arrangement: PendingOrcaMultiPlateArrangement,
+    onArrangeAcrossPlates: () -> Unit,
+    onKeepCurrentPlate: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onKeepCurrentPlate,
+        confirmButton = {
+            TextButton(onClick = onArrangeAcrossPlates) {
+                Text("Use ${arrangement.plateCount} plates")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onKeepCurrentPlate) {
+                Text("Keep current plate")
+            }
+        },
+        title = { Text("Objects need more plates") },
+        text = {
+            Text(
+                "Orca arranged ${arrangement.objectCount} objects across ${arrangement.plateCount} plates. " +
+                    "Use that layout, or keep the objects on the current plate."
             )
         }
     )

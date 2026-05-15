@@ -165,7 +165,8 @@ static void apply_preview_option_visibility_for_view_type(
     libvgcode::Viewer& viewer,
     libvgcode::EViewType view_type)
 {
-    const bool seams_visible = view_type == libvgcode::EViewType::FeatureType;
+    (void)view_type;
+    const bool seams_visible = false;
     if (viewer.is_option_visible(libvgcode::EOptionType::Seams) != seams_visible) {
         viewer.toggle_option_visibility(libvgcode::EOptionType::Seams);
     }

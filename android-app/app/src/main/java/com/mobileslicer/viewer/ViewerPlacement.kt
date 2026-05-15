@@ -54,7 +54,7 @@ internal fun buildModelPlacement(
     )
     val placementX = transform.centerXmm - bed.widthMm * 0.5f - rotatedCenter.xMm
     val placementY = transform.centerYmm - bed.depthMm * 0.5f - rotatedCenter.yMm
-    val placementZ = -rotatedBounds.minZ
+    val placementZ = transform.zOffsetMm - rotatedBounds.minZ
     val matrix = FloatArray(16)
     Matrix.setIdentityM(matrix, 0)
     Matrix.translateM(matrix, 0, placementX, placementY, placementZ)
@@ -70,7 +70,7 @@ internal fun buildModelPlacement(
         matrix = matrix,
         centerX = placementX + (rotatedBounds.minX + rotatedBounds.maxX) * 0.5f,
         centerY = placementY + (rotatedBounds.minY + rotatedBounds.maxY) * 0.5f,
-        centerZ = rotatedBounds.sizeZ * 0.5f,
+        centerZ = placementZ + (rotatedBounds.minZ + rotatedBounds.maxZ) * 0.5f,
         sizeX = rotatedBounds.sizeX,
         sizeY = rotatedBounds.sizeY,
         sizeZ = rotatedBounds.sizeZ

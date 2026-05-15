@@ -38,6 +38,7 @@ internal class WorkspaceSessionViewModel : ViewModel() {
     val plateObjects = mutableStateListOf<PlateObject>()
     val plateFilamentSlots = mutableStateListOf<PlateFilamentSlot>()
     val plateFlushVolumes = mutableStateOf<PlateFlushVolumes?>(null)
+    val activePlateProfileState = mutableStateOf(PlateProfileState())
     val selectedPlateObjectId = mutableStateOf<Long?>(null)
     val nextPlateObjectId = mutableLongStateOf(1L)
     val currentSavedProjectId = mutableStateOf<String?>(null)
@@ -54,5 +55,36 @@ internal class WorkspaceSessionViewModel : ViewModel() {
         if (resetWorkspaceMode) {
             workspaceMode.value = WorkspaceMode.Prepare
         }
+    }
+
+    fun clearForFreshWorkspace() {
+        modelLoaded.value = false
+        currentModelLabel.value = "No model imported"
+        currentModelFilePath.value = null
+        currentPreparedMesh.value = null
+        currentModelBounds.value = null
+        currentViewerPreparationError.value = null
+        currentImportTiming.value = null
+        currentWorkspacePreparationTiming.value = null
+        importStartedAtMs.value = null
+        firstVisibleWorkspaceFrameMs.value = null
+        currentModelFormatName.value = null
+        workspaceStatus.value = ""
+        currentModelTransform.value = null
+        clearGeneratedPreviewState()
+        workspacePlates.clear()
+        workspacePlates.add(
+            WorkspacePlate(
+                id = 1L,
+                label = defaultWorkspacePlateLabel(1)
+            )
+        )
+        activePlateId.longValue = 1L
+        nextPlateId.longValue = 2L
+        plateObjects.clear()
+        activePlateProfileState.value = PlateProfileState()
+        selectedPlateObjectId.value = null
+        nextPlateObjectId.longValue = 1L
+        currentSavedProjectId.value = null
     }
 }

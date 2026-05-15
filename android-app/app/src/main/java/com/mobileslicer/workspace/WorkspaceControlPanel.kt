@@ -408,6 +408,16 @@ internal fun WorkspaceControlPanel(
                 }
             }
             if (!compactPreview && !compactPrepare && workspaceMode == WorkspaceMode.Prepare) {
+                selectedObjectLabel?.takeIf { it.isNotBlank() }?.let { label ->
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = bodyColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

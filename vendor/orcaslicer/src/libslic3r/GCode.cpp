@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <iostream>
+#include <limits>
 #include <math.h>
 #include <stdlib.h>
 #include <string>
@@ -96,6 +97,12 @@ static const int g_max_flush_count = 4;
 static const size_t g_max_label_object = 64;
 
 #ifdef __ANDROID__
+static bool mobile_slicer_verbose_native_logging()
+{
+    const char *value = std::getenv("MOBILE_SLICER_VERBOSE_NATIVE_LOGS");
+    return value != nullptr && (value[0] == '1' || value[0] == 't' || value[0] == 'T' || value[0] == 'y' || value[0] == 'Y');
+}
+
 static size_t mobile_process_rss_kb()
 {
     FILE* status = std::fopen("/proc/self/status", "r");
@@ -122,6 +129,12 @@ static std::string orca_debug_join_u(const std::vector<unsigned int> &values)
     }
     return out;
 }
+#endif
+
+#ifdef __ANDROID__
+#define MOBILE_SLICER_NATIVE_DEBUG_LOG if (!mobile_slicer_verbose_native_logging()) {} else std::cerr
+#else
+#define MOBILE_SLICER_NATIVE_DEBUG_LOG std::cerr
 #endif
 
 static void orca_set_custom_gcode_timelapse_context(
@@ -1624,6 +1637,23 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
 #define EXTRUDER_CONFIG(OPT) m_config.OPT.get_at(m_writer.filament()->extruder_id())
 #define FILAMENT_CONFIG(OPT) m_config.OPT.get_at(m_writer.filament()->id())
 
+static bool valid_gcode_xy_for_state(double x, double y)
+{
+    constexpr double max_reasonable_gcode_coordinate = 1000000.0;
+    return std::isfinite(x) && std::isfinite(y) &&
+        std::abs(x) < max_reasonable_gcode_coordinate &&
+        std::abs(y) < max_reasonable_gcode_coordinate;
+}
+
+static bool valid_scaled_point_for_state(const Point &point)
+{
+    const coord_t max_reasonable_scaled_coordinate = std::numeric_limits<coord_t>::max() / 4;
+    return point.x() > -max_reasonable_scaled_coordinate &&
+        point.x() < max_reasonable_scaled_coordinate &&
+        point.y() > -max_reasonable_scaled_coordinate &&
+        point.y() < max_reasonable_scaled_coordinate;
+}
+
 void GCode::PlaceholderParserIntegration::reset()
 {
     this->failed_templates.clear();
@@ -1716,6 +1746,17 @@ void GCode::PlaceholderParserIntegration::update_from_gcodewriter(const GCodeWri
             this->opt_e_position->values = this->e_position;
         }
     }
+}
+
+void GCode::set_last_pos(const Point &pos)
+{
+    if (!valid_scaled_point_for_state(pos)) {
+        m_last_pos_defined = false;
+        return;
+    }
+
+    m_last_pos = pos;
+    m_last_pos_defined = true;
 }
 
 // Throw if any of the output vector variables were resized by the script.
@@ -2090,13 +2131,13 @@ void GCode::do_export(Print* print, const char* path, GCodeProcessorResult* resu
     std::string path_tmp(path);
     path_tmp += ".tmp";
 
-    std::cerr << "debug: gcode.do_export initialize start path_tmp=" << path_tmp << "\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export initialize start path_tmp=" << path_tmp << "\n";
     m_processor.initialize(path_tmp);
-    std::cerr << "debug: gcode.do_export initialize done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export initialize done\n";
     m_processor.set_print(print);
-    std::cerr << "debug: gcode.do_export set_print done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export set_print done\n";
     GCodeOutputStream file(boost::nowide::fopen(path_tmp.c_str(), "wb"), m_processor);
-    std::cerr << "debug: gcode.do_export fopen done is_open=" << (file.is_open() ? 1 : 0) << "\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export fopen done is_open=" << (file.is_open() ? 1 : 0) << "\n";
     if (! file.is_open()) {
         BOOST_LOG_TRIVIAL(error) << std::string("G-code export to ") + path + " failed.\nCannot open the file for writing.\n" << std::endl;
         if (!fs::exists(folder)) {
@@ -2107,11 +2148,11 @@ void GCode::do_export(Print* print, const char* path, GCodeProcessorResult* resu
     }
 
     try {
-        std::cerr << "debug: gcode.do_export _do_export start\n";
+        MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export _do_export start\n";
         this->_do_export(*print, file, thumbnail_cb);
-        std::cerr << "debug: gcode.do_export _do_export done\n";
+        MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export _do_export done\n";
         file.flush();
-        std::cerr << "debug: gcode.do_export flush done error=" << (file.is_error() ? 1 : 0) << "\n";
+        MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export flush done error=" << (file.is_error() ? 1 : 0) << "\n";
         if (file.is_error()) {
             file.close();
             boost::nowide::remove(path_tmp.c_str());
@@ -2125,7 +2166,7 @@ void GCode::do_export(Print* print, const char* path, GCodeProcessorResult* resu
         throw;
     }
     file.close();
-    std::cerr << "debug: gcode.do_export file close done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export file close done\n";
 #ifdef __ANDROID__
     m_processor.result().mobile_after_generation_rss_kb = mobile_process_rss_kb();
 #endif
@@ -2192,10 +2233,10 @@ void GCode::do_export(Print* print, const char* path, GCodeProcessorResult* resu
     m_processor.check_multi_extruder_gcode_valid(extruder_size, plate_printable_area, m_print->config().printable_height.value, wrapping_exclude_area_points,
                                                  extruder_unprintable_polys, m_print->get_extruder_printable_height(),  m_print->get_filament_maps(),
                                                  m_print->get_physical_unprintable_filaments(m_print->get_slice_used_filaments(false)));
-    std::cerr << "debug: gcode.do_export check_multi_extruder_gcode_valid done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export check_multi_extruder_gcode_valid done\n";
 
     m_processor.finalize(true);
-    std::cerr << "debug: gcode.do_export finalize done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode.do_export finalize done\n";
 #ifdef __ANDROID__
     m_processor.result().mobile_after_finalize_rss_kb = mobile_process_rss_kb();
     static constexpr size_t mobile_preview_vertex_budget = 1000000;
@@ -2473,19 +2514,20 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
 {
     PROFILE_FUNC();
 
-    std::cerr << "debug: gcode._do_export enter\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export enter\n";
     m_print = &print;
-    std::cerr << "debug: gcode._do_export set m_print\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export set m_print\n";
     m_timelapse_pos_picker.init(&print,m_writer.get_xy_offset().cast<coord_t>());
-    std::cerr << "debug: gcode._do_export timelapse init done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export timelapse init done\n";
 
     // modifies m_silent_time_estimator_enabled
     DoExport::init_gcode_processor(print.config(), m_processor, m_silent_time_estimator_enabled);
 #ifdef __ANDROID__
     m_processor.result().mobile_export_start_rss_kb = mobile_process_rss_kb();
 #endif
-    std::cerr << "debug: gcode._do_export init_gcode_processor done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export init_gcode_processor done\n";
     const bool is_bbl_printers = print.is_BBL_printer();
+    const bool is_qidi_printer = print.config().printer_model.value.rfind("Qidi", 0) == 0;
     const WipeTowerType wipe_tower_type = print.wipe_tower_type();
     m_calib_config.clear();
     // resets analyzer's tracking data
@@ -2498,7 +2540,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     m_fan_mover.release();
     
     m_writer.set_is_bbl_machine(is_bbl_printers);
-    std::cerr << "debug: gcode._do_export writer machine done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export writer machine done\n";
 
     // How many times will be change_layer() called?
     // change_layer() in turn increments the progress bar status.
@@ -2545,37 +2587,37 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
         }
     }
     print.throw_if_canceled();
-    std::cerr << "debug: gcode._do_export layer counting done count=" << m_layer_count << "\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export layer counting done count=" << m_layer_count << "\n";
 
     m_enable_cooling_markers = true;
     this->apply_print_config(print.config());
-    std::cerr << "debug: gcode._do_export apply_print_config done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export apply_print_config done\n";
     m_config.apply(print.default_object_config());
-    std::cerr << "debug: gcode._do_export apply default object config done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export apply default object config done\n";
     m_config.apply(print.default_region_config());
-    std::cerr << "debug: gcode._do_export apply default region config done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export apply default region config done\n";
 
     //m_volumetric_speed = DoExport::autospeed_volumetric_limit(print);
     print.throw_if_canceled();
 
     if (print.config().spiral_mode.value)
         m_spiral_vase = make_unique<SpiralVase>(print.config());
-    std::cerr << "debug: gcode._do_export spiral setup done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export spiral setup done\n";
 
     if (print.config().max_volumetric_extrusion_rate_slope.value > 0){
     		m_pressure_equalizer = make_unique<PressureEqualizer>(print.config());
     		m_enable_extrusion_role_markers = (bool)m_pressure_equalizer;
     } else
 	    m_enable_extrusion_role_markers = false;
-    std::cerr << "debug: gcode._do_export pressure equalizer setup done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export pressure equalizer setup done\n";
 
     if (!print.config().small_area_infill_flow_compensation_model.empty())
         m_small_area_infill_flow_compensator = make_unique<SmallAreaInfillFlowCompensator>(print.config());
-    std::cerr << "debug: gcode._do_export small area infill compensator setup done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export small area infill compensator setup done\n";
     
     // Process file_start_gcode - written at the very top of the file, before any header
     {
-        std::cerr << "debug: gcode._do_export file_start_gcode block start\n";
+        MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export file_start_gcode block start\n";
         std::string top_gcode_template = print.config().file_start_gcode.value;
         if (!top_gcode_template.empty()) {
             DynamicConfig top_config;
@@ -2585,7 +2627,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
             if (!top_gcode.empty())
                 file.writeln(top_gcode);
         }
-        std::cerr << "debug: gcode._do_export file_start_gcode block done\n";
+        MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export file_start_gcode block done\n";
     }
 
     // Orca: Don't output Header block if BTT thumbnail is identified in the list
@@ -2593,10 +2635,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     std::string thumbnails_value = print.config().option<ConfigOptionString>("thumbnails")->value;
     // search string for the BTT_TFT label
     bool has_BTT_thumbnail = (thumbnails_value.find("BTT_TFT") != std::string::npos);
-    std::cerr << "debug: gcode._do_export thumbnail scan done has_BTT=" << (has_BTT_thumbnail ? 1 : 0) << "\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export thumbnail scan done has_BTT=" << (has_BTT_thumbnail ? 1 : 0) << "\n";
     
     if(!has_BTT_thumbnail){   
-        std::cerr << "debug: gcode._do_export header block start\n";
+        MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export header block start\n";
         file.write_format("; HEADER_BLOCK_START\n");
         // Write information on the generator.
         file.write_format("; generated by %s on %s\n", Slic3r::header_slic3r_generated().c_str(), Slic3r::Utils::local_timestamp().c_str());
@@ -2658,7 +2700,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     }
 
         file.write_format("; HEADER_BLOCK_END\n\n");
-        std::cerr << "debug: gcode._do_export header block done\n";
+        MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export header block done\n";
     }
     
       // BBS: write global config at the beginning of gcode file because printer
@@ -2668,8 +2710,24 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
       // as configuration key / value pairs to be parsable by older versions of
       // PrusaSlicer G-code viewer.
     {
-        std::cerr << "debug: gcode._do_export config/thumbnails block start\n";
+        MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export config/thumbnails block start\n";
+        auto export_configured_thumbnails = [&]() {
+            auto [thumbnails, errors] = GCodeThumbnails::make_and_check_thumbnail_list(print.full_print_config());
+
+            if (errors != enum_bitmask<ThumbnailError>()) {
+                std::string error_str = format("Invalid thumbnails value:");
+                error_str += GCodeThumbnails::get_error_string(errors);
+                throw Slic3r::ExportError(error_str);
+            }
+
+            if (!thumbnails.empty())
+                GCodeThumbnails::export_thumbnails_to_file(
+                    thumbnail_cb, print.get_plate_index(), thumbnails, [&file](const char* sz) { file.write(sz); }, [&print]() { print.throw_if_canceled(); });
+        };
         if (is_bbl_printers) {
+            if (is_qidi_printer && thumbnail_cb != nullptr) {
+                export_configured_thumbnails();
+            }
             file.write("; CONFIG_BLOCK_START\n");
             std::string full_config;
             append_full_config(print, full_config);
@@ -2686,25 +2744,15 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
             file.write("; CONFIG_BLOCK_END\n\n");
         } else if (thumbnail_cb != nullptr) {
             // generate the thumbnails
-            auto [thumbnails, errors] = GCodeThumbnails::make_and_check_thumbnail_list(print.full_print_config());
-
-            if (errors != enum_bitmask<ThumbnailError>()) {
-                std::string error_str = format("Invalid thumbnails value:");
-                error_str += GCodeThumbnails::get_error_string(errors);
-                throw Slic3r::ExportError(error_str);
-            }
-
-            if (!thumbnails.empty())
-                GCodeThumbnails::export_thumbnails_to_file(
-                    thumbnail_cb, print.get_plate_index(), thumbnails, [&file](const char* sz) { file.write(sz); }, [&print]() { print.throw_if_canceled(); });
+            export_configured_thumbnails();
         }
-        std::cerr << "debug: gcode._do_export config/thumbnails block done\n";
+        MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export config/thumbnails block done\n";
     }
 
 
     // Write some terse information on the slicing parameters.
     const PrintObject *first_object         = print.objects().front();
-    std::cerr << "debug: gcode._do_export first object selected\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export first object selected\n";
     const double       layer_height         = first_object->config().layer_height.value;
     const double       initial_layer_print_height   = print.config().initial_layer_print_height.value;
     for (size_t region_id = 0; region_id < print.num_print_regions(); ++ region_id) {
@@ -2720,10 +2768,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
             file.write_format("; first layer extrusion width = %.2fmm\n",   region.flow(*first_object, frPerimeter, initial_layer_print_height, true).width());
         file.write_format("\n");
     }
-    std::cerr << "debug: gcode._do_export region width comments done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export region width comments done\n";
 
     file.write_format("; EXECUTABLE_BLOCK_START\n");
-    std::cerr << "debug: gcode._do_export executable block start done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export executable block start done\n";
 
     // SoftFever
     if( m_enable_exclude_object)
@@ -2740,7 +2788,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     // Enable passing global variables between PlaceholderParser invocations.
     m_placeholder_parser_integration.context.global_config = std::make_unique<DynamicConfig>();
     print.update_object_placeholders(m_placeholder_parser_integration.parser.config_writable(), ".gcode");
-    std::cerr << "debug: gcode._do_export placeholder setup done\n";
+    MOBILE_SLICER_NATIVE_DEBUG_LOG << "debug: gcode._do_export placeholder setup done\n";
 
     // Get optimal tool ordering to minimize tool switches of a multi-exruder print.
     // For a print by objects, find the 1st printing object.
@@ -3887,9 +3935,18 @@ std::string GCode::placeholder_parser_process(const std::string &name, const std
         ppi.validate_output_vector_variables();
 
         if (const std::vector<double> &pos = ppi.opt_position->values; ppi.position != pos) {
-            // Update G-code writer.
-            m_writer.set_position({ pos[0], pos[1], pos[2] });
-            this->set_last_pos(this->gcode_to_point({ pos[0], pos[1] }));
+            if (valid_gcode_xy_for_state(pos[0], pos[1])) {
+                m_writer.set_position({ pos[0], pos[1], pos[2] });
+                m_writer.set_current_position_clear(true);
+                this->set_last_pos(this->gcode_to_point({ pos[0], pos[1] }));
+            } else {
+                Vec3d writer_pos = m_writer.get_position();
+                if (std::isfinite(pos[2]))
+                    writer_pos.z() = pos[2];
+                m_writer.set_position(writer_pos);
+                m_writer.set_current_position_clear(false);
+                this->clear_last_pos();
+            }
         }
 
         for (const Extruder &e : m_writer.extruders()) {
@@ -4488,7 +4545,7 @@ LayerResult GCode::process_layer(
         return result;
 
 #ifdef __ANDROID__
-    if (layer.id() < 5) {
+    if (mobile_slicer_verbose_native_logging() && layer.id() < 5) {
         __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
             "orca_gcode_process_layer layer=%zu z=%.5f tools=[%s] layers=%zu",
             layer.id(), layer.print_z, orca_debug_join_u(layer_tools.extruders).c_str(), layers.size());
@@ -5004,7 +5061,7 @@ LayerResult GCode::process_layer(
     } // for objects
 
 #ifdef __ANDROID__
-    if (layer.id() < 5) {
+    if (mobile_slicer_verbose_native_logging() && layer.id() < 5) {
         std::string by_extruder_debug;
         for (const auto &entry : by_extruder) {
             size_t non_empty = 0;
@@ -5052,7 +5109,7 @@ LayerResult GCode::process_layer(
     }
 
 #ifdef __ANDROID__
-    if (layer.id() < 5) {
+    if (mobile_slicer_verbose_native_logging() && layer.id() < 5) {
         std::string instances_debug;
         for (const auto &entry : filament_to_print_instances)
             instances_debug += " f" + std::to_string(entry.first) + ":instances=" + std::to_string(entry.second.size());
@@ -5232,7 +5289,7 @@ LayerResult GCode::process_layer(
             const bool finish_layer_for_tool = extruder_id == layer_tools.extruders.back();
             const bool wipe_tower_empty = m_wipe_tower->is_empty_wipe_tower_gcode(*this, extruder_id, finish_layer_for_tool);
 #ifdef __ANDROID__
-            if (layer.id() < 5) {
+            if (mobile_slicer_verbose_native_logging() && layer.id() < 5) {
                 const int current_filament = m_writer.filament() ? int(m_writer.filament()->id()) : -1;
                 __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
                     "orca_gcode_toolchange_decision layer=%zu extruder=%u has_wipe=1 empty=%d finish=%d current=%d need=%d",
@@ -5265,7 +5322,7 @@ LayerResult GCode::process_layer(
                 }
                 gcode_toolchange = m_wipe_tower->tool_change(*this, extruder_id, extruder_id == layer_tools.extruders.back());
 #ifdef __ANDROID__
-                if (layer.id() < 5) {
+                if (mobile_slicer_verbose_native_logging() && layer.id() < 5) {
                     __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
                         "orca_gcode_wipe_toolchange layer=%zu extruder=%u bytes=%zu",
                         layer.id(), extruder_id, gcode_toolchange.size());
@@ -5274,7 +5331,7 @@ LayerResult GCode::process_layer(
             }
         } else {
 #ifdef __ANDROID__
-            if (layer.id() < 5) {
+            if (mobile_slicer_verbose_native_logging() && layer.id() < 5) {
                 const int current_filament = m_writer.filament() ? int(m_writer.filament()->id()) : -1;
                 __android_log_print(ANDROID_LOG_INFO, "MobileSlicerNative",
                     "orca_gcode_toolchange_decision layer=%zu extruder=%u has_wipe=0 current=%d need=%d",
@@ -5727,7 +5784,8 @@ void GCode::set_origin(const Vec2d &pointf)
         scale_(m_origin(0) - pointf(0)),
         scale_(m_origin(1) - pointf(1))
     );
-    m_last_pos += translate;
+    if (m_last_pos_defined)
+        m_last_pos += translate;
     m_wipe.path.translate(translate);
     m_origin = pointf;
 }
@@ -5909,39 +5967,41 @@ std::string GCode::extrude_loop(ExtrusionLoop loop, std::string description, dou
         Vec2d next_pos = next_point.cast<double>();
         Vec2d vec_dist = next_pos - current_pos;
         double vec_norm = vec_dist.norm();
-        // Offset distance is the minimum between half the nozzle diameter or half the line width for the upcomming perimeter
-        // This is to mimimize potential instances where the de-retraction is performed on top of a neighbouring
-        // thin perimeter due to arachne reducing line width.
-        coordf_t dist = std::min(scaled(nozzle_diam) * 0.5, scaled(paths.front().width) * 0.5);
+        if (std::isfinite(vec_norm) && vec_norm > EPSILON) {
+            // Offset distance is the minimum between half the nozzle diameter or half the line width for the upcomming perimeter
+            // This is to mimimize potential instances where the de-retraction is performed on top of a neighbouring
+            // thin perimeter due to arachne reducing line width.
+            coordf_t dist = std::min(scaled(nozzle_diam) * 0.5, scaled(paths.front().width) * 0.5);
 
-        // FIXME Hiding the seams will not work nicely for very densely discretized contours!
-        Point pt = (current_pos + vec_dist * (2 * dist / vec_norm)).cast<coord_t>();
-        pt.rotate(angle, current_point);
-        pt = (current_pos + vec_dist * (2 * dist / vec_norm)).cast<coord_t>();
-        pt.rotate(angle, current_point);
-        
-        // Search region perimeters for lines that are touching the de-retraction point.
-        // If an internal perimeter exists, we should find 2 perimeters touching the de-retraction point
-        // 1: the currently printed external perimeter and 2: the neighbouring internal perimeter.
-        int discoveredTouchingLines = 0;
-        for (const ExtrusionEntity* ee : region_perimeters){
-            auto potential_touching_line = ee->as_polyline();
-            AABBTreeLines::LinesDistancer<Line> potential_touching_line_distancer{potential_touching_line.lines()};
-            auto touching_line = potential_touching_line_distancer.all_lines_in_radius(pt, scale_(nozzle_diam));
-            if(touching_line.size()){
-                discoveredTouchingLines ++;
-                if(discoveredTouchingLines > 1) break; // found 2 touching lines. End the search early.
+            // FIXME Hiding the seams will not work nicely for very densely discretized contours!
+            Point pt = (current_pos + vec_dist * (2 * dist / vec_norm)).cast<coord_t>();
+            pt.rotate(angle, current_point);
+
+            if (valid_scaled_point_for_state(pt)) {
+                // Search region perimeters for lines that are touching the de-retraction point.
+                // If an internal perimeter exists, we should find 2 perimeters touching the de-retraction point
+                // 1: the currently printed external perimeter and 2: the neighbouring internal perimeter.
+                int discoveredTouchingLines = 0;
+                for (const ExtrusionEntity* ee : region_perimeters){
+                    auto potential_touching_line = ee->as_polyline();
+                    AABBTreeLines::LinesDistancer<Line> potential_touching_line_distancer{potential_touching_line.lines()};
+                    auto touching_line = potential_touching_line_distancer.all_lines_in_radius(pt, scale_(nozzle_diam));
+                    if(touching_line.size()){
+                        discoveredTouchingLines ++;
+                        if(discoveredTouchingLines > 1) break; // found 2 touching lines. End the search early.
+                    }
+                }
+                // found 2 perimeters touching the de-retraction point. Its safe to deretract as the point will be
+                // inside the model
+                if(discoveredTouchingLines > 1){
+                    // use extrude instead of travel_to_xy to trigger the unretract
+                    ExtrusionPath fake_path_wipe(Polyline{pt, current_point}, paths.front());
+                    fake_path_wipe.set_force_no_extrusion(true);
+                    fake_path_wipe.mm3_per_mm = 0;
+                    //fake_path_wipe.set_extrusion_role(erExternalPerimeter);
+                    gcode += extrude_path(fake_path_wipe, "move inwards before retraction/seam", speed);
+                }
             }
-        }
-        // found 2 perimeters touching the de-retraction point. Its safe to deretract as the point will be
-        // inside the model
-        if(discoveredTouchingLines > 1){
-            // use extrude instead of travel_to_xy to trigger the unretract
-            ExtrusionPath fake_path_wipe(Polyline{pt, current_point}, paths.front());
-            fake_path_wipe.set_force_no_extrusion(true);
-            fake_path_wipe.mm3_per_mm = 0;
-            //fake_path_wipe.set_extrusion_role(erExternalPerimeter);
-            gcode += extrude_path(fake_path_wipe, "move inwards before retraction/seam", speed);
         }
     }
 
@@ -7280,14 +7340,36 @@ std::string GCode::_encode_label_ids_to_base64(std::vector<size_t> ids)
 // This method accepts &point in print coordinates.
 std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string comment, double z/* = DBL_MAX*/)
 {
+    if (!valid_scaled_point_for_state(point)) {
+        throw Slic3r::RuntimeError(Slic3r::format(
+            "Invalid travel target x=%lld y=%lld role=%s layer=%d comment=%s",
+            static_cast<long long>(point.x()),
+            static_cast<long long>(point.y()),
+            GCode::extrusion_role_to_string_for_parser(role).c_str(),
+            m_layer_index,
+            comment.c_str()));
+    }
+    if (m_last_pos_defined && !valid_scaled_point_for_state(m_last_pos)) {
+        throw Slic3r::RuntimeError(Slic3r::format(
+            "Invalid previous travel position x=%lld y=%lld target_x=%lld target_y=%lld role=%s layer=%d comment=%s",
+            static_cast<long long>(m_last_pos.x()),
+            static_cast<long long>(m_last_pos.y()),
+            static_cast<long long>(point.x()),
+            static_cast<long long>(point.y()),
+            GCode::extrusion_role_to_string_for_parser(role).c_str(),
+            m_layer_index,
+            comment.c_str()));
+    }
+
     /*  Define the travel move as a line between current position and the taget point.
         This is expressed in print coordinates, so it will need to be translated by
         this->origin in order to get G-code coordinates.  */
-    Polyline travel { this->last_pos(), point };
+    const bool had_last_pos = m_last_pos_defined;
+    Polyline travel = had_last_pos ? Polyline { this->last_pos(), point } : Polyline { point, point };
 
     // check whether a straight travel move would need retraction
     LiftType lift_type = LiftType::SpiralLift;
-    bool needs_retraction = this->needs_retraction(travel, role, lift_type);
+    bool needs_retraction = had_last_pos && this->needs_retraction(travel, role, lift_type);
     // check whether wipe could be disabled without causing visible stringing
     bool could_be_wipe_disabled       = false;
     // Save state of use_external_mp_once for the case that will be needed to call twice m_avoid_crossing_perimeters.travel_to.
@@ -7338,6 +7420,7 @@ std::string GCode::travel_to(const Point& point, ExtrusionRole role, std::string
     // if a retraction would be needed, try to use reduce_crossing_wall to plan a
     // multi-hop travel path inside the configuration space
     if (m_config.reduce_crossing_wall
+        && had_last_pos
         && !m_avoid_crossing_perimeters.disabled_once()
         && m_writer.is_current_position_clear())
         //BBS: don't generate detour travel paths when current position is unclea
@@ -7515,12 +7598,16 @@ bool GCode::needs_retraction(const Polyline &travel, ExtrusionRole role, LiftTyp
     float max_z_hop = 0.f;
     for (int i = 0; i < m_config.z_hop.size(); i++)
         max_z_hop = std::max(max_z_hop, (float)m_config.z_hop.get_at(i));
-    float travel_len_thresh = scale_(max_z_hop / tan(this->writer().filament()->travel_slope()));
-    float accum_len = 0.f;
+    const double travel_slope_tangent = tan(this->writer().filament()->travel_slope());
+    const coord_t travel_len_thresh = max_z_hop > 0.f &&
+        std::isfinite(travel_slope_tangent) &&
+        travel_slope_tangent > EPSILON ?
+        scale_(max_z_hop / travel_slope_tangent) :
+        0;
     Polyline clipped_travel;
 
     clipped_travel.append(Polyline(travel.points[0], travel.points[1]));
-    if (clipped_travel.length() > travel_len_thresh)
+    if (travel_len_thresh > 0 && clipped_travel.length() > travel_len_thresh)
         clipped_travel.points.back() = clipped_travel.points.front()+(clipped_travel.points.back() - clipped_travel.points.front()) * (travel_len_thresh / clipped_travel.length());
     //BBS: translate to current plate coordinate system
     clipped_travel.translate(Point::new_scale(double(m_origin.x() - m_writer.get_xy_offset().x()), double(m_origin.y() - m_writer.get_xy_offset().y())));
