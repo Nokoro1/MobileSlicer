@@ -282,8 +282,10 @@ cannot currently be generated without first converting the model to STL. That
 conversion would erase the source evidence the fixture is supposed to prove, so
 it is not an acceptable parity shortcut. The limitation is gated by
 `scripts/verify_android.sh orca-step-project-reference-probe`, and the project
-preservation audit now exposes `--require-step-source` for future
-MobileSlicer-produced STEP project packages.
+preservation audit exposes `--require-step-source` for MobileSlicer-produced
+STEP project packages. The committed app-produced fixture is
+`regression-fixtures/orca-project-references/step-sliced-source-metadata/step-sliced-source-metadata.gcode.3mf`,
+and it is gated by `scripts/verify_android.sh orca-step-sliced-source-fixture`.
 
 ### 2. Modifier Transform Editing UX
 
@@ -315,7 +317,8 @@ matrix. It should grow with real-world stress cases:
 - multiple active filaments with different object sizes,
 - painted/color-assigned models,
 - modifier meshes,
-- STEP-derived app round-trip packages with preserved STEP/STP source evidence,
+- additional STEP-derived app packages beyond the committed source-metadata
+  fixture, especially multi-object and multi-plate STEP/STP cases,
 - multi-plate projects imported from desktop Orca.
 
 Do this after project preservation work starts, otherwise the fixtures will
@@ -342,6 +345,7 @@ Before claiming broad Orca support, keep these as mandatory gates:
 - `scripts/verify_android.sh orca-height-range-project-fixture`
 - `scripts/verify_android.sh orca-height-range-project-roundtrip-contract`
 - `scripts/verify_android.sh orca-step-project-reference-probe`
+- `scripts/verify_android.sh orca-step-sliced-source-fixture`
 - `scripts/verify_android.sh orca-project-parity-matrix`
 - `scripts/verify_android.sh orca-3mf-roundtrip-device <serial>`
 - `scripts/verify_android.sh orca-rich-project-roundtrip-device <serial>`

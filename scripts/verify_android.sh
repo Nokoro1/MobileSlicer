@@ -123,6 +123,7 @@ Usage:
   scripts/verify_android.sh orca-height-range-project-fixture
   scripts/verify_android.sh orca-height-range-project-roundtrip-contract
   scripts/verify_android.sh orca-height-range-project-roundtrip-device [serial]
+  scripts/verify_android.sh orca-step-sliced-source-fixture
   scripts/verify_android.sh orca-project-parity-matrix
   scripts/verify_android.sh orca-project-parity-device-matrix [serial]
   scripts/verify_android.sh orca-active-multifilament-reference-probe
@@ -618,6 +619,7 @@ run_orca_project_parity_matrix_gate() {
   run_orca_modifier_project_roundtrip_contract_gate
   run_orca_height_range_project_fixture_gate
   run_orca_height_range_project_roundtrip_contract_gate
+  run_orca_step_sliced_source_fixture_gate
 }
 
 run_orca_project_parity_device_matrix_gate() {
@@ -665,6 +667,24 @@ run_orca_height_range_project_roundtrip_contract_gate() {
     --require-layer-range-settings \
     --require-project-thumbnails \
     --require-project-settings \
+    --pretty)
+}
+
+run_orca_step_sliced_source_fixture_gate() {
+  log "Running STEP sliced source metadata fixture gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/step-sliced-source-metadata/step-sliced-source-metadata.gcode.3mf"
+  [[ -f "$fixture" ]] || fail "Missing STEP sliced source metadata fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --three-mf "$fixture" \
+    --min-plate-count 1 \
+    --min-object-count 1 \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-project-thumbnails \
+    --require-plate-json-metadata \
+    --require-sliced-plate-gcode \
+    --require-project-settings \
+    --require-step-source \
     --pretty)
 }
 
@@ -4370,6 +4390,9 @@ case "$mode" in
     ;;
   orca-height-range-project-roundtrip-device)
     run_orca_height_range_project_roundtrip_device_gate "$(device_serial "${2:-}")"
+    ;;
+  orca-step-sliced-source-fixture)
+    run_orca_step_sliced_source_fixture_gate
     ;;
   orca-project-parity-matrix)
     run_orca_project_parity_matrix_gate

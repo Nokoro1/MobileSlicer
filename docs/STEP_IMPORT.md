@@ -137,5 +137,16 @@ The device gate for this behavior is:
 MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh step-sliced-3mf-source-metadata
 ```
 
+The committed regression fixture is:
+
+```bash
+scripts/verify_android.sh orca-step-sliced-source-fixture
+```
+
+It audits
+`regression-fixtures/orca-project-references/step-sliced-source-metadata/step-sliced-source-metadata.gcode.3mf`
+with `--require-step-source`, package thumbnails, plate JSON, sliced G-code,
+project settings, and model settings requirements.
+
 Do not replace this with a pre-converted STL-only path. That would slice, but it
 would lose the source evidence needed for Orca-style project/package parity.

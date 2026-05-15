@@ -1,0 +1,122 @@
+{
+  "failures": [],
+  "metadata": {
+    "config_entries": [
+      "Metadata/model_settings.config",
+      "Metadata/project_settings.config",
+      "Metadata/slice_info.config"
+    ],
+    "entries": [
+      "[Content_Types].xml",
+      "Metadata/plate_1.png",
+      "Metadata/plate_1_small.png",
+      "Metadata/plate_no_light_1.png",
+      "Metadata/top_1.png",
+      "Metadata/pick_1.png",
+      "Metadata/plate_1.json",
+      "3D/3dmodel.model",
+      "3D/_rels/3dmodel.model.rels",
+      "3D/Objects/selected-model-154329376-occt_screw-step-mesh.stl_1.model",
+      "Metadata/project_settings.config",
+      "Metadata/plate_1.gcode.md5",
+      "Metadata/plate_1.gcode",
+      "Metadata/_rels/model_settings.config.rels",
+      "Metadata/model_settings.config",
+      "Metadata/slice_info.config",
+      "_rels/.rels"
+    ],
+    "entry_count": 17,
+    "filament_count": 1,
+    "layer_range_evidence": [],
+    "modifier_evidence": [],
+    "object_count": 1,
+    "object_filament_assignments": [
+      {
+        "filament_index": 1,
+        "object_name": "selected-model-154329376-occt_screw-step-mesh.stl"
+      }
+    ],
+    "object_names": [
+      "selected-model-154329376-occt_screw-step-mesh.stl"
+    ],
+    "object_setting_evidence": [
+      {
+        "key": "solid_infill_filament",
+        "object_name": "selected-model-154329376-occt_screw-step-mesh.stl",
+        "value": "1"
+      },
+      {
+        "key": "sparse_infill_filament",
+        "object_name": "selected-model-154329376-occt_screw-step-mesh.stl",
+        "value": "1"
+      },
+      {
+        "key": "wall_filament",
+        "object_name": "selected-model-154329376-occt_screw-step-mesh.stl",
+        "value": "1"
+      },
+      {
+        "key": "solid_infill_filament",
+        "object_name": "selected-model-154329376-occt_screw-step-mesh.stl",
+        "value": "1"
+      },
+      {
+        "key": "sparse_infill_filament",
+        "object_name": "selected-model-154329376-occt_screw-step-mesh.stl",
+        "value": "1"
+      },
+      {
+        "key": "wall_filament",
+        "object_name": "selected-model-154329376-occt_screw-step-mesh.stl",
+        "value": "1"
+      }
+    ],
+    "path": "regression-fixtures/orca-project-references/step-sliced-source-metadata/step-sliced-source-metadata.gcode.3mf",
+    "plate_count": 1,
+    "plate_json_entries": [
+      "Metadata/plate_1.json"
+    ],
+    "plate_json_indices": [
+      1
+    ],
+    "plate_names": [
+      "Plate 1"
+    ],
+    "preserved_features": [
+      "mesh_geometry",
+      "source_file_evidence",
+      "step_source_file_evidence",
+      "object_names",
+      "object_filament_assignments",
+      "object_settings",
+      "plate_metadata",
+      "filament_metadata",
+      "project_thumbnails",
+      "plate_json_metadata",
+      "sliced_plate_gcode_entries",
+      "project_settings",
+      "model_settings",
+      "slice_info"
+    ],
+    "sliced_plate_gcode_entries": [
+      "Metadata/plate_1.gcode"
+    ],
+    "sliced_plate_gcode_indices": [
+      1
+    ],
+    "source_file_evidence": [
+      "selected-model-154329376-occt_screw.step"
+    ],
+    "thumbnail_entries": [
+      "Metadata/pick_1.png",
+      "Metadata/plate_1.png",
+      "Metadata/plate_1_small.png",
+      "Metadata/plate_no_light_1.png",
+      "Metadata/top_1.png"
+    ],
+    "thumbnail_plate_indices": [
+      1
+    ]
+  },
+  "ok": true
+}
