@@ -27,6 +27,25 @@ expand live host/printer coverage.
 
 ## Verified On 2026-05-15
 
+The following follow-up gate pass was completed on local branch
+`orca-parity-local-checkpoint` after local checkpoint commit `01c9c0bd`
+(`Checkpoint Orca parity work`). Nothing was pushed to a remote.
+
+- `scripts/verify_android.sh local`
+- `scripts/verify_android.sh orca-project-parity-device-matrix 100.123.18.83:42917`
+- `scripts/verify_android.sh sliced-3mf-metadata 100.123.18.83:42917`
+- `scripts/verify_android.sh multi-plate-sliced-3mf-metadata 100.123.18.83:42917`
+- `scripts/verify_android.sh fluidd-thumbnail-metadata 100.123.18.83:42917`
+- `scripts/verify_android.sh orca-metadata-benchmark 100.123.18.83:42917`
+- `MOBILE_SLICER_MOONRAKER_URL=http://100.112.193.10:10088 scripts/verify_android.sh fluidd-thumbnail-metadata 100.123.18.83:42917`
+
+The live Moonraker/Fluidd check reached `/server/info`, confirmed Klippy was
+ready, uploaded the generated G-code without starting a print, waited for
+Moonraker metadata, verified reported thumbnail dimensions including `48x48`
+and `300x300`, and deleted the uploaded test file. This specifically covers
+the Qidi Q2 Fluidd-visible thumbnail path that is not proven by local ZIP/G-code
+audits alone.
+
 The following gates were rerun during this audit:
 
 - `scripts/verify_android.sh local`
