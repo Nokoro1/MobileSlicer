@@ -91,3 +91,26 @@ That gate slices three import surfaces through the app automation path:
 
 The STEP case must produce a non-empty converted STL, load it through the
 native plate-model path, slice it, and write non-trivial G-code.
+
+## Orca Project Fixture Boundary
+
+The current desktop-Orca CLI cannot be used to generate a true STEP-derived
+project reference fixture. On the vendored Orca build, direct STEP input is
+rejected as an unknown file format, and `--load-assemble-list` rejects STEP/STP
+objects as unsupported. This is tracked by:
+
+```bash
+scripts/verify_android.sh orca-step-project-reference-probe
+```
+
+That probe is intentionally a limitation gate. It prevents us from checking in
+a fake "STEP-derived" fixture that was really converted to STL before Orca saw
+it. Real STEP project round-trip proof must therefore come from MobileSlicer's
+Android import/export path, where the original STEP file and
+`StepMeshConvert` geometry source are preserved while the converted STL is used
+for mesh operations.
+
+The project preservation audit already has a `--require-step-source` switch for
+future app-produced STEP project packages. A valid STEP project package must
+preserve STEP/STP source-file evidence instead of only preserving the converted
+STL mesh.

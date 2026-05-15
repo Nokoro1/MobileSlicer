@@ -120,6 +120,9 @@ STRUCTURAL_PART_METADATA_KEYS = STRUCTURAL_OBJECT_METADATA_KEYS | {
 }
 
 
+STEP_SOURCE_EXTENSIONS = (".step", ".stp")
+
+
 def is_thumbnail_entry(name: str) -> bool:
     lower = name.lower()
     if not lower.endswith(".png"):
@@ -171,6 +174,7 @@ def inspect_3mf(path: Path) -> dict[str, object]:
         entry for entry in entries if re.fullmatch(r"Metadata/plate_\d+\.gcode", entry)
     )
     object_names: list[str] = []
+    source_file_evidence: list[str] = []
     object_name_by_model_settings_index: dict[int, str] = {}
     object_name_by_model_object_id: dict[int, str] = {}
     assignments: list[ObjectAssignment] = []
@@ -191,6 +195,10 @@ def inspect_3mf(path: Path) -> dict[str, object]:
         extruder = metadata.get("extruder", "").strip()
         if name and extruder.isdigit() and int(extruder) > 0:
             assignments.append(ObjectAssignment(object_name=name, filament_index=int(extruder)))
+        for key in ("input_file", "source_file"):
+            value = metadata.get(key, "").strip()
+            if value:
+                source_file_evidence.append(value)
         for key, value in sorted(metadata.items()):
             if key not in STRUCTURAL_OBJECT_METADATA_KEYS:
                 object_settings.append(ObjectSettingEvidence(object_name=name or "<unnamed object>", key=key, value=value))
@@ -296,6 +304,10 @@ def inspect_3mf(path: Path) -> dict[str, object]:
     preserved_features = []
     if "3D/3dmodel.model" in entries:
         preserved_features.append("mesh_geometry")
+    if source_file_evidence:
+        preserved_features.append("source_file_evidence")
+    if any(value.lower().endswith(STEP_SOURCE_EXTENSIONS) for value in source_file_evidence):
+        preserved_features.append("step_source_file_evidence")
     if object_names:
         preserved_features.append("object_names")
     if assignments:
@@ -347,6 +359,7 @@ def inspect_3mf(path: Path) -> dict[str, object]:
         "plate_names": plate_names,
         "object_count": len(object_names) or len(build_items),
         "object_names": object_names,
+        "source_file_evidence": sorted(set(source_file_evidence)),
         "object_filament_assignments": [asdict(assignment) for assignment in assignments],
         "object_setting_evidence": [asdict(setting) for setting in object_settings],
         "modifier_evidence": [asdict(modifier) for modifier in modifiers],
@@ -372,6 +385,7 @@ def validate(
     require_plate_json_metadata: bool = False,
     require_sliced_plate_gcode: bool = False,
     require_project_settings: bool = False,
+    require_step_source: bool = False,
 ) -> list[AuditFailure]:
     failures: list[AuditFailure] = []
     if int(metadata["plate_count"]) < min_plate_count:
@@ -436,6 +450,14 @@ def validate(
             )
     if require_project_settings and "Metadata/project_settings.config" not in metadata["config_entries"]:
         failures.append(AuditFailure("project-settings", "missing Metadata/project_settings.config"))
+    if require_step_source:
+        step_sources = [
+            value
+            for value in metadata.get("source_file_evidence", [])
+            if str(value).lower().endswith(STEP_SOURCE_EXTENSIONS)
+        ]
+        if not step_sources:
+            failures.append(AuditFailure("step-source", "missing STEP/STP source file evidence"))
     return failures
 
 
@@ -497,6 +519,7 @@ def compare_roundtrip(
     require_sliced_plate_gcode: bool = False,
     require_project_settings: bool = False,
     require_plate_names: bool = False,
+    require_step_source: bool = False,
 ) -> list[AuditFailure]:
     failures: list[AuditFailure] = []
     source_plate_count = int(source["plate_count"])
@@ -711,6 +734,21 @@ def compare_roundtrip(
         if missing:
             failures.append(AuditFailure("roundtrip-config-entries", f"missing config entries: {missing}"))
 
+    if require_step_source:
+        source_step_sources = {
+            str(value)
+            for value in source.get("source_file_evidence", [])
+            if str(value).lower().endswith(STEP_SOURCE_EXTENSIONS)
+        }
+        roundtrip_step_sources = {
+            str(value)
+            for value in roundtrip.get("source_file_evidence", [])
+            if str(value).lower().endswith(STEP_SOURCE_EXTENSIONS)
+        }
+        missing = sorted(source_step_sources - roundtrip_step_sources)
+        if missing:
+            failures.append(AuditFailure("roundtrip-step-source", f"missing STEP/STP source evidence: {missing}"))
+
     return failures
 
 
@@ -733,6 +771,7 @@ def main() -> int:
     parser.add_argument("--require-sliced-plate-gcode", action="store_true")
     parser.add_argument("--require-project-settings", action="store_true")
     parser.add_argument("--require-plate-names", action="store_true")
+    parser.add_argument("--require-step-source", action="store_true", help="Require object source metadata ending in .step or .stp.")
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()
 
@@ -756,6 +795,7 @@ def main() -> int:
             require_plate_json_metadata=args.require_plate_json_metadata,
             require_sliced_plate_gcode=args.require_sliced_plate_gcode,
             require_project_settings=args.require_project_settings,
+            require_step_source=args.require_step_source,
         )
         failures.extend(
             compare_roundtrip(
@@ -773,6 +813,7 @@ def main() -> int:
                 require_sliced_plate_gcode=args.require_sliced_plate_gcode,
                 require_project_settings=args.require_project_settings,
                 require_plate_names=args.require_plate_names,
+                require_step_source=args.require_step_source,
             )
         )
         output = {
@@ -800,6 +841,7 @@ def main() -> int:
             require_plate_json_metadata=args.require_plate_json_metadata,
             require_sliced_plate_gcode=args.require_sliced_plate_gcode,
             require_project_settings=args.require_project_settings,
+            require_step_source=args.require_step_source,
         )
         output = {
             "metadata": metadata,

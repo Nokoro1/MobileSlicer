@@ -126,6 +126,7 @@ Usage:
   scripts/verify_android.sh orca-project-parity-matrix
   scripts/verify_android.sh orca-project-parity-device-matrix [serial]
   scripts/verify_android.sh orca-active-multifilament-reference-probe
+  scripts/verify_android.sh orca-step-project-reference-probe
   scripts/verify_android.sh orca-fixture-capture-mobile [serial]
   scripts/verify_android.sh printer-thumbnail-compatibility
   scripts/verify_android.sh fluidd-thumbnail-metadata [serial]
@@ -460,6 +461,7 @@ run_script_tests() {
   bash -n "$ROOT_DIR/scripts/generate_orca_modifier_project_fixture.sh"
   bash -n "$ROOT_DIR/scripts/generate_orca_height_range_project_fixture.sh"
   bash -n "$ROOT_DIR/scripts/probe_orca_active_multifilament_reference.sh"
+  bash -n "$ROOT_DIR/scripts/probe_orca_step_project_reference.sh"
   bash -n "$ROOT_DIR/scripts/run_orca_thumbnail_reference_matrix.sh"
   python3 -m py_compile "$ROOT_DIR"/scripts/*.py
   (cd "$ROOT_DIR" && python3 scripts/test_orca_metadata_audit.py)
@@ -832,6 +834,11 @@ run_orca_thumbnail_reference_fixture_gate() {
 run_orca_active_multifilament_reference_probe() {
   log "Probing desktop Orca active multi-filament thumbnail reference generation"
   (cd "$ROOT_DIR" && scripts/probe_orca_active_multifilament_reference.sh)
+}
+
+run_orca_step_project_reference_probe() {
+  log "Probing desktop Orca STEP project reference availability"
+  (cd "$ROOT_DIR" && scripts/probe_orca_step_project_reference.sh)
 }
 
 run_printer_thumbnail_compatibility_gate() {
@@ -4342,6 +4349,9 @@ case "$mode" in
     ;;
   orca-active-multifilament-reference-probe)
     run_orca_active_multifilament_reference_probe
+    ;;
+  orca-step-project-reference-probe)
+    run_orca_step_project_reference_probe
     ;;
   orca-fixture-capture-mobile)
     run_orca_fixture_mobile_capture "$(device_serial "${2:-}")"

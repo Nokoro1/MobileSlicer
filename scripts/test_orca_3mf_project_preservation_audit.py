@@ -206,13 +206,72 @@ class Orca3mfProjectPreservationAuditTest(unittest.TestCase):
             checks = {failure.check for failure in failures}
             self.assertIn("roundtrip-project-thumbnails", checks)
 
+    def test_step_source_evidence_is_reported_and_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = Path(tmp) / "step-project.3mf"
+            write_fixture(fixture, model_settings_xml=STEP_MODEL_SETTINGS_XML)
 
-def write_fixture(path: Path, *, include_second_plate: bool = False, include_second_plate_thumbnails: bool = True) -> None:
+            metadata = audit.inspect_3mf(fixture)
+
+            self.assertEqual(["occt_screw.step"], metadata["source_file_evidence"])
+            self.assertIn("source_file_evidence", metadata["preserved_features"])
+            self.assertIn("step_source_file_evidence", metadata["preserved_features"])
+            self.assertEqual(
+                [],
+                audit.validate(
+                    metadata,
+                    min_plate_count=1,
+                    min_object_count=1,
+                    require_step_source=True,
+                    require_project_settings=True,
+                ),
+            )
+
+    def test_step_source_requirement_fails_when_flattened_to_stl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = Path(tmp) / "stl-project.3mf"
+            write_fixture(fixture)
+
+            failures = audit.validate(
+                audit.inspect_3mf(fixture),
+                min_plate_count=1,
+                min_object_count=1,
+                require_step_source=True,
+            )
+
+            checks = {failure.check for failure in failures}
+            self.assertIn("step-source", checks)
+
+    def test_roundtrip_compare_requires_step_source_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.3mf"
+            roundtrip = Path(tmp) / "roundtrip.3mf"
+            write_fixture(source, model_settings_xml=STEP_MODEL_SETTINGS_XML)
+            write_fixture(roundtrip)
+
+            failures = audit.compare_roundtrip(
+                audit.inspect_3mf(source),
+                audit.inspect_3mf(roundtrip),
+                require_step_source=True,
+            )
+
+            checks = {failure.check for failure in failures}
+            self.assertIn("roundtrip-step-source", checks)
+
+
+def write_fixture(
+    path: Path,
+    *,
+    include_second_plate: bool = False,
+    include_second_plate_thumbnails: bool = True,
+    model_settings_xml: str | None = None,
+) -> None:
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("3D/3dmodel.model", ROOT_MODEL_XML)
         zf.writestr(
             "Metadata/model_settings.config",
-            MODEL_SETTINGS_XML if not include_second_plate else MODEL_SETTINGS_TWO_PLATES_XML,
+            model_settings_xml
+            or (MODEL_SETTINGS_XML if not include_second_plate else MODEL_SETTINGS_TWO_PLATES_XML),
         )
         zf.writestr("Metadata/layer_config_ranges.xml", LAYER_CONFIG_RANGES_XML)
         zf.writestr("Metadata/slice_info.config", SLICE_INFO_XML)
@@ -297,6 +356,21 @@ MODEL_SETTINGS_TWO_PLATES_XML = MODEL_SETTINGS_XML.replace(
   </plate>
 </config>""",
 )
+
+STEP_MODEL_SETTINGS_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="2">
+    <metadata key="name" value="occt_screw"/>
+    <metadata key="extruder" value="1"/>
+    <metadata key="source_file" value="occt_screw.step"/>
+    <metadata key="wall_loops" value="5"/>
+  </object>
+  <plate>
+    <metadata key="plater_id" value="1"/>
+    <metadata key="plater_name" value="STEP source plate"/>
+  </plate>
+</config>
+"""
 
 LAYER_CONFIG_RANGES_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <objects>
