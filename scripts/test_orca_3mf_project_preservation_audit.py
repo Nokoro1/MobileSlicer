@@ -214,6 +214,7 @@ class Orca3mfProjectPreservationAuditTest(unittest.TestCase):
             metadata = audit.inspect_3mf(fixture)
 
             self.assertEqual(["occt_screw.step"], metadata["source_file_evidence"])
+            self.assertEqual(1, metadata["step_source_object_count"])
             self.assertIn("source_file_evidence", metadata["preserved_features"])
             self.assertIn("step_source_file_evidence", metadata["preserved_features"])
             self.assertEqual(
@@ -241,6 +242,40 @@ class Orca3mfProjectPreservationAuditTest(unittest.TestCase):
 
             checks = {failure.check for failure in failures}
             self.assertIn("step-source", checks)
+            self.assertIn("step-source-object-count", checks)
+
+    def test_step_source_requirement_can_require_multiple_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = Path(tmp) / "step-project.3mf"
+            write_fixture(fixture, include_second_plate=True, model_settings_xml=STEP_TWO_OBJECT_MODEL_SETTINGS_XML)
+
+            metadata = audit.inspect_3mf(fixture)
+
+            self.assertEqual(2, metadata["step_source_object_count"])
+            self.assertEqual(
+                [],
+                audit.validate(
+                    metadata,
+                    min_plate_count=2,
+                    min_object_count=2,
+                    require_step_source=True,
+                    min_step_source_object_count=2,
+                    require_plate_json_metadata=True,
+                    require_sliced_plate_gcode=True,
+                    require_project_thumbnails=True,
+                ),
+            )
+
+            failures = audit.validate(
+                metadata,
+                min_plate_count=2,
+                min_object_count=2,
+                require_step_source=True,
+                min_step_source_object_count=3,
+            )
+
+            checks = {failure.check for failure in failures}
+            self.assertIn("step-source-object-count", checks)
 
     def test_roundtrip_compare_requires_step_source_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -253,10 +288,12 @@ class Orca3mfProjectPreservationAuditTest(unittest.TestCase):
                 audit.inspect_3mf(source),
                 audit.inspect_3mf(roundtrip),
                 require_step_source=True,
+                min_step_source_object_count=1,
             )
 
             checks = {failure.check for failure in failures}
             self.assertIn("roundtrip-step-source", checks)
+            self.assertIn("roundtrip-step-source-object-count", checks)
 
 
 def write_fixture(
@@ -373,6 +410,39 @@ STEP_MODEL_SETTINGS_XML = """<?xml version="1.0" encoding="UTF-8"?>
   <plate>
     <metadata key="plater_id" value="1"/>
     <metadata key="plater_name" value="STEP source plate"/>
+  </plate>
+</config>
+"""
+
+STEP_TWO_OBJECT_MODEL_SETTINGS_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="2">
+    <metadata key="name" value="left_step_screw"/>
+    <metadata key="extruder" value="1"/>
+    <part id="1" subtype="normal_part">
+      <metadata key="name" value="left_step_screw"/>
+      <metadata key="source_file" value="left_screw.step"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="0"/>
+    </part>
+  </object>
+  <object id="4">
+    <metadata key="name" value="right_step_screw"/>
+    <metadata key="extruder" value="1"/>
+    <part id="2" subtype="normal_part">
+      <metadata key="name" value="right_step_screw"/>
+      <metadata key="source_file" value="right_screw.stp"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="0"/>
+    </part>
+  </object>
+  <plate>
+    <metadata key="plater_id" value="1"/>
+    <metadata key="plater_name" value="STEP source plate 1"/>
+  </plate>
+  <plate>
+    <metadata key="plater_id" value="2"/>
+    <metadata key="plater_name" value="STEP source plate 2"/>
   </plate>
 </config>
 """

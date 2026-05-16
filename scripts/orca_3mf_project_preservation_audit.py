@@ -130,6 +130,18 @@ STRUCTURAL_PART_METADATA_KEYS = STRUCTURAL_OBJECT_METADATA_KEYS | {
 STEP_SOURCE_EXTENSIONS = (".step", ".stp")
 
 
+def is_step_source(value: str) -> bool:
+    return value.lower().endswith(STEP_SOURCE_EXTENSIONS)
+
+
+def metadata_has_step_source(metadata: dict[str, str]) -> bool:
+    return any(
+        is_step_source(value.strip())
+        for key, value in metadata.items()
+        if key in {"input_file", "source_file"} and value.strip()
+    )
+
+
 def is_thumbnail_entry(name: str) -> bool:
     lower = name.lower()
     if not lower.endswith(".png"):
@@ -187,8 +199,10 @@ def inspect_3mf(path: Path) -> dict[str, object]:
     assignments: list[ObjectAssignment] = []
     object_settings: list[ObjectSettingEvidence] = []
     modifiers: list[ModifierEvidence] = []
+    step_source_object_count = 0
     for object_index, object_element in enumerate(iter_elements(model_settings, "object"), start=1):
         metadata = child_metadata(object_element)
+        object_has_step_source = metadata_has_step_source(metadata)
         name = metadata.get("name", "").strip()
         if name:
             object_names.append(name)
@@ -208,6 +222,7 @@ def inspect_3mf(path: Path) -> dict[str, object]:
                 object_settings.append(ObjectSettingEvidence(object_name=name or "<unnamed object>", key=key, value=value))
         for part in [child for child in list(object_element) if local_name(child.tag) == "part"]:
             part_metadata = child_metadata(part)
+            object_has_step_source = object_has_step_source or metadata_has_step_source(part_metadata)
             append_source_file_evidence(source_file_evidence, part_metadata)
             part_name = part_metadata.get("name", "").strip()
             subtype = part.attrib.get("subtype", "").strip()
@@ -232,6 +247,8 @@ def inspect_3mf(path: Path) -> dict[str, object]:
                 )
             else:
                 object_settings.extend(part_settings)
+        if object_has_step_source:
+            step_source_object_count += 1
 
     model_object_ids: list[int] = []
     if root_model is not None:
@@ -311,7 +328,7 @@ def inspect_3mf(path: Path) -> dict[str, object]:
         preserved_features.append("mesh_geometry")
     if source_file_evidence:
         preserved_features.append("source_file_evidence")
-    if any(value.lower().endswith(STEP_SOURCE_EXTENSIONS) for value in source_file_evidence):
+    if any(is_step_source(value) for value in source_file_evidence):
         preserved_features.append("step_source_file_evidence")
     if object_names:
         preserved_features.append("object_names")
@@ -365,6 +382,7 @@ def inspect_3mf(path: Path) -> dict[str, object]:
         "object_count": len(object_names) or len(build_items),
         "object_names": object_names,
         "source_file_evidence": sorted(set(source_file_evidence)),
+        "step_source_object_count": step_source_object_count,
         "object_filament_assignments": [asdict(assignment) for assignment in assignments],
         "object_setting_evidence": [asdict(setting) for setting in object_settings],
         "modifier_evidence": [asdict(modifier) for modifier in modifiers],
@@ -379,6 +397,7 @@ def validate(
     *,
     min_plate_count: int,
     min_object_count: int,
+    min_step_source_object_count: int = 1,
     require_object_names: bool = False,
     require_filament_assignments: bool = False,
     require_object_settings: bool = False,
@@ -459,10 +478,18 @@ def validate(
         step_sources = [
             value
             for value in metadata.get("source_file_evidence", [])
-            if str(value).lower().endswith(STEP_SOURCE_EXTENSIONS)
+            if is_step_source(str(value))
         ]
         if not step_sources:
             failures.append(AuditFailure("step-source", "missing STEP/STP source file evidence"))
+        step_source_object_count = int(metadata.get("step_source_object_count", 0))
+        if step_source_object_count < min_step_source_object_count:
+            failures.append(
+                AuditFailure(
+                    "step-source-object-count",
+                    f"STEP/STP source evidence covers {step_source_object_count} object(s), expected at least {min_step_source_object_count}",
+                )
+            )
     return failures
 
 
@@ -512,6 +539,7 @@ def compare_roundtrip(
     source: dict[str, object],
     roundtrip: dict[str, object],
     *,
+    min_step_source_object_count: int = 1,
     require_object_names: bool = False,
     require_filament_assignments: bool = False,
     require_object_settings: bool = False,
@@ -743,16 +771,24 @@ def compare_roundtrip(
         source_step_sources = {
             str(value)
             for value in source.get("source_file_evidence", [])
-            if str(value).lower().endswith(STEP_SOURCE_EXTENSIONS)
+            if is_step_source(str(value))
         }
         roundtrip_step_sources = {
             str(value)
             for value in roundtrip.get("source_file_evidence", [])
-            if str(value).lower().endswith(STEP_SOURCE_EXTENSIONS)
+            if is_step_source(str(value))
         }
         missing = sorted(source_step_sources - roundtrip_step_sources)
         if missing:
             failures.append(AuditFailure("roundtrip-step-source", f"missing STEP/STP source evidence: {missing}"))
+        step_source_object_count = int(roundtrip.get("step_source_object_count", 0))
+        if step_source_object_count < min_step_source_object_count:
+            failures.append(
+                AuditFailure(
+                    "roundtrip-step-source-object-count",
+                    f"round-trip STEP/STP source evidence covers {step_source_object_count} object(s), expected at least {min_step_source_object_count}",
+                )
+            )
 
     return failures
 
@@ -777,6 +813,12 @@ def main() -> int:
     parser.add_argument("--require-project-settings", action="store_true")
     parser.add_argument("--require-plate-names", action="store_true")
     parser.add_argument("--require-step-source", action="store_true", help="Require object source metadata ending in .step or .stp.")
+    parser.add_argument(
+        "--min-step-source-object-count",
+        type=int,
+        default=1,
+        help="Minimum object count that must carry STEP/STP source metadata when --require-step-source is used.",
+    )
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()
 
@@ -789,6 +831,7 @@ def main() -> int:
             roundtrip,
             min_plate_count=args.min_plate_count,
             min_object_count=args.min_object_count,
+            min_step_source_object_count=args.min_step_source_object_count,
             require_object_names=args.require_object_names,
             require_filament_assignments=args.require_filament_assignments,
             require_object_settings=args.require_object_settings,
@@ -819,6 +862,7 @@ def main() -> int:
                 require_project_settings=args.require_project_settings,
                 require_plate_names=args.require_plate_names,
                 require_step_source=args.require_step_source,
+                min_step_source_object_count=args.min_step_source_object_count,
             )
         )
         output = {
@@ -835,6 +879,7 @@ def main() -> int:
             metadata,
             min_plate_count=args.min_plate_count,
             min_object_count=args.min_object_count,
+            min_step_source_object_count=args.min_step_source_object_count,
             require_object_names=args.require_object_names,
             require_filament_assignments=args.require_filament_assignments,
             require_object_settings=args.require_object_settings,

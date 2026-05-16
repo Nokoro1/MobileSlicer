@@ -137,16 +137,27 @@ The device gate for this behavior is:
 MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh step-sliced-3mf-source-metadata
 ```
 
+The multi-object, multi-plate device gate is:
+
+```bash
+MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 scripts/verify_android.sh step-multi-plate-sliced-3mf-source-metadata
+```
+
 The committed regression fixture is:
 
 ```bash
 scripts/verify_android.sh orca-step-sliced-source-fixture
+scripts/verify_android.sh orca-step-multi-plate-sliced-source-fixture
 ```
 
 It audits
 `regression-fixtures/orca-project-references/step-sliced-source-metadata/step-sliced-source-metadata.gcode.3mf`
 with `--require-step-source`, package thumbnails, plate JSON, sliced G-code,
 project settings, and model settings requirements.
+The multi-plate fixture at
+`regression-fixtures/orca-project-references/step-multi-plate-sliced-source-metadata/step-multi-plate-sliced-source-metadata.gcode.3mf`
+also requires `--min-step-source-object-count 2`, two plate JSON files, two
+plate G-code files, object names, and filament assignments.
 
 Do not replace this with a pre-converted STL-only path. That would slice, but it
 would lose the source evidence needed for Orca-style project/package parity.

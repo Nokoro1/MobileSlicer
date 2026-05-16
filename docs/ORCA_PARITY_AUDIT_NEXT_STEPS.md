@@ -286,6 +286,13 @@ preservation audit exposes `--require-step-source` for MobileSlicer-produced
 STEP project packages. The committed app-produced fixture is
 `regression-fixtures/orca-project-references/step-sliced-source-metadata/step-sliced-source-metadata.gcode.3mf`,
 and it is gated by `scripts/verify_android.sh orca-step-sliced-source-fixture`.
+The multi-object, multi-plate app-produced fixture is
+`regression-fixtures/orca-project-references/step-multi-plate-sliced-source-metadata/step-multi-plate-sliced-source-metadata.gcode.3mf`,
+and it is gated by
+`scripts/verify_android.sh orca-step-multi-plate-sliced-source-fixture`. That
+gate requires at least two sliced plates, two objects with STEP/STP source
+metadata, per-plate JSON, per-plate G-code, project thumbnails covering both
+plate indices, object names, and filament assignments.
 
 ### 2. Modifier Transform Editing UX
 
@@ -317,8 +324,9 @@ matrix. It should grow with real-world stress cases:
 - multiple active filaments with different object sizes,
 - painted/color-assigned models,
 - modifier meshes,
-- additional STEP-derived app packages beyond the committed source-metadata
-  fixture, especially multi-object and multi-plate STEP/STP cases,
+- additional STEP-derived app packages beyond the committed single-object and
+  multi-plate source-metadata fixtures, especially mixed STEP/STP source files
+  and CAD assemblies,
 - multi-plate projects imported from desktop Orca.
 
 Do this after project preservation work starts, otherwise the fixtures will
@@ -346,6 +354,7 @@ Before claiming broad Orca support, keep these as mandatory gates:
 - `scripts/verify_android.sh orca-height-range-project-roundtrip-contract`
 - `scripts/verify_android.sh orca-step-project-reference-probe`
 - `scripts/verify_android.sh orca-step-sliced-source-fixture`
+- `scripts/verify_android.sh orca-step-multi-plate-sliced-source-fixture`
 - `scripts/verify_android.sh orca-project-parity-matrix`
 - `scripts/verify_android.sh orca-3mf-roundtrip-device <serial>`
 - `scripts/verify_android.sh orca-rich-project-roundtrip-device <serial>`

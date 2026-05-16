@@ -124,6 +124,7 @@ Usage:
   scripts/verify_android.sh orca-height-range-project-roundtrip-contract
   scripts/verify_android.sh orca-height-range-project-roundtrip-device [serial]
   scripts/verify_android.sh orca-step-sliced-source-fixture
+  scripts/verify_android.sh orca-step-multi-plate-sliced-source-fixture
   scripts/verify_android.sh orca-project-parity-matrix
   scripts/verify_android.sh orca-project-parity-device-matrix [serial]
   scripts/verify_android.sh orca-active-multifilament-reference-probe
@@ -149,6 +150,7 @@ Usage:
   scripts/verify_android.sh orca-import-smoke [serial]
   scripts/verify_android.sh sliced-3mf-metadata [serial]
   scripts/verify_android.sh step-sliced-3mf-source-metadata [serial]
+  scripts/verify_android.sh step-multi-plate-sliced-3mf-source-metadata [serial]
   scripts/verify_android.sh multi-plate-sliced-3mf-metadata [serial]
   scripts/verify_android.sh skirt-parity [serial]
   scripts/verify_android.sh profile-ui [serial]
@@ -620,6 +622,7 @@ run_orca_project_parity_matrix_gate() {
   run_orca_height_range_project_fixture_gate
   run_orca_height_range_project_roundtrip_contract_gate
   run_orca_step_sliced_source_fixture_gate
+  run_orca_step_multi_plate_sliced_source_fixture_gate
 }
 
 run_orca_project_parity_device_matrix_gate() {
@@ -685,6 +688,25 @@ run_orca_step_sliced_source_fixture_gate() {
     --require-sliced-plate-gcode \
     --require-project-settings \
     --require-step-source \
+    --pretty)
+}
+
+run_orca_step_multi_plate_sliced_source_fixture_gate() {
+  log "Running STEP multi-plate sliced source metadata fixture gate"
+  local fixture="$ROOT_DIR/regression-fixtures/orca-project-references/step-multi-plate-sliced-source-metadata/step-multi-plate-sliced-source-metadata.gcode.3mf"
+  [[ -f "$fixture" ]] || fail "Missing STEP multi-plate sliced source metadata fixture: $fixture"
+  (cd "$ROOT_DIR" && python3 scripts/orca_3mf_project_preservation_audit.py \
+    --three-mf "$fixture" \
+    --min-plate-count 2 \
+    --min-object-count 2 \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-project-thumbnails \
+    --require-plate-json-metadata \
+    --require-sliced-plate-gcode \
+    --require-project-settings \
+    --require-step-source \
+    --min-step-source-object-count 2 \
     --pretty)
 }
 
@@ -2990,6 +3012,37 @@ run_step_sliced_3mf_source_metadata_smoke() {
   assert_no_crash_after_launch "$serial"
 }
 
+run_step_multi_plate_sliced_3mf_source_metadata_smoke() {
+  local serial="$1"
+  require_device_automation
+  require_automation_fixture "$STEP_IMPORT_SMOKE_MODEL" "STEP multi-plate sliced 3MF source metadata smoke model"
+  install_apk "$serial"
+  local config_json
+  config_json="$(automation_config_with_overrides "thumbnails=\"128x128\"" "thumbnails_format=\"PNG\"")"
+  run_automation_slice "$STEP_IMPORT_SMOKE_MODEL" "$serial" "step-multi-plate-sliced-3mf-source-metadata" "0" "$config_json" "0" ".gcode.3mf" "0" "0" "1"
+  assert_automation_thumbnail_scope "$serial" "step-multi-plate-sliced-3mf-source-metadata" "true" "5" "offscreen_egl"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  local package_path="$tmp_dir/step-multi-plate-sliced-metadata.gcode.3mf"
+  pull_app_private_file "$serial" "$AUTOMATION_LAST_OUTPUT_PATH" "$package_path"
+  log "Auditing STEP multi-plate sliced 3MF source metadata package"
+  python3 "$ROOT_DIR/scripts/orca_3mf_project_preservation_audit.py" \
+    --three-mf "$package_path" \
+    --min-plate-count 2 \
+    --min-object-count 2 \
+    --require-object-names \
+    --require-filament-assignments \
+    --require-project-thumbnails \
+    --require-plate-json-metadata \
+    --require-sliced-plate-gcode \
+    --require-project-settings \
+    --require-step-source \
+    --min-step-source-object-count 2 \
+    --pretty
+  rm -rf "$tmp_dir"
+  assert_no_crash_after_launch "$serial"
+}
+
 run_multi_plate_sliced_3mf_metadata_smoke() {
   local serial="$1"
   require_device_automation
@@ -4394,6 +4447,9 @@ case "$mode" in
   orca-step-sliced-source-fixture)
     run_orca_step_sliced_source_fixture_gate
     ;;
+  orca-step-multi-plate-sliced-source-fixture)
+    run_orca_step_multi_plate_sliced_source_fixture_gate
+    ;;
   orca-project-parity-matrix)
     run_orca_project_parity_matrix_gate
     ;;
@@ -4485,6 +4541,9 @@ case "$mode" in
     ;;
   step-sliced-3mf-source-metadata)
     run_step_sliced_3mf_source_metadata_smoke "$(device_serial "${2:-}")"
+    ;;
+  step-multi-plate-sliced-3mf-source-metadata)
+    run_step_multi_plate_sliced_3mf_source_metadata_smoke "$(device_serial "${2:-}")"
     ;;
   multi-plate-sliced-3mf-metadata)
     run_multi_plate_sliced_3mf_metadata_smoke "$(device_serial "${2:-}")"
