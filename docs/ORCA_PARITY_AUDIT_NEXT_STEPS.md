@@ -1,5 +1,9 @@
 # Orca Parity Deep Audit and Next Steps
 
+Start a resumed Orca parity session from
+`docs/ORCA_PARITY_RESUME_HANDOFF.md`, then use this file for the deeper audit
+context.
+
 This audit is based on the vendored OrcaSlicer source in `vendor/orcaslicer`,
 the current MobileSlicer wrapper/app implementation, and the device gates run
 against `100.123.18.83:42917` on 2026-05-15. The goal is to keep the next work
