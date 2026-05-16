@@ -49,6 +49,20 @@ and `300x300`, and deleted the uploaded test file. This specifically covers
 the Qidi Q2 Fluidd-visible thumbnail path that is not proven by local ZIP/G-code
 audits alone.
 
+The Qidi Q2 live host checks were rerun on 2026-05-16 against
+`100.123.18.83:36021` with
+`MOBILE_SLICER_MOONRAKER_URL=http://100.112.193.10:10088`:
+
+- `scripts/verify_android.sh fluidd-thumbnail-metadata 100.123.18.83:36021`
+- `scripts/verify_android.sh orca-object-label-parity 100.123.18.83:36021`
+
+The thumbnail gate produced `thumbnailMs: 81`, uploaded
+`MobileSlicer_fluidd_thumbnail_20260516-082904.gcode`, verified Moonraker
+reported `32x32`, `48x48`, and `300x300` thumbnails, and deleted the uploaded
+file. The object-label gate uploaded a printable label-off file, verified
+Moonraker metadata stayed label/object-clean for the label-off case, and
+deleted the uploaded file. Neither live gate starts a print.
+
 The following gates were rerun during this audit:
 
 - `scripts/verify_android.sh local`

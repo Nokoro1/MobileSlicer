@@ -31,10 +31,10 @@
       "status": "proven_live",
       "evidence": {
         "gate": "fluidd-thumbnail-metadata",
-        "live_host": "Qidi Q2 Moonraker at http://192.168.1.162",
+        "live_host": "Qidi Q2 Moonraker at http://100.112.193.10:10088; LAN mirror observed at http://192.168.1.162",
         "latest_report": "artifacts/fluidd-thumbnail-metadata/latest/report.md",
         "moonraker_metadata": "artifacts/fluidd-thumbnail-metadata/latest/moonraker-metadata.json",
-        "notes": "Moonraker indexed MobileSlicer output as OrcaSlicer and reported 32x32, 48x48, and 300x300 thumbnail PNGs."
+        "notes": "Live gate rerun on 2026-05-16 against the Qidi Q2 Fluidd/Moonraker host. Moonraker indexed MobileSlicer output as OrcaSlicer and reported 32x32, 48x48, and 300x300 thumbnail PNGs. The gate uploaded, polled metadata, and deleted the generated test file without starting a print."
       }
     },
     {

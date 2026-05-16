@@ -19,7 +19,7 @@ python3 scripts/printer_thumbnail_compatibility_audit.py --pretty
 
 | Target | Status | Evidence |
 | --- | --- | --- |
-| Qidi Q2 Fluidd/Moonraker PNG thumbnails | proven live | `fluidd-thumbnail-metadata` uploaded to the Qidi Q2 Moonraker host and Moonraker reported `32x32`, `48x48`, and `300x300` thumbnails. |
+| Qidi Q2 Fluidd/Moonraker PNG thumbnails | proven live | `fluidd-thumbnail-metadata` uploaded to the Qidi Q2 Moonraker host on 2026-05-16 and Moonraker reported `32x32`, `48x48`, and `300x300` thumbnails. |
 | Generic Fluidd/Moonraker PNG thumbnails | gated | Local/device gate validates `48x48/PNG` and `300x300/PNG` G-code blocks and visual metrics. |
 | Mainsail/Moonraker PNG thumbnails | pending live validation | Expected through Moonraker metadata, but not claimed until a Mainsail host is tested. |
 | OctoPrint PNG thumbnails | pending live validation | Upload exists, but thumbnail display is plugin-dependent. |
@@ -41,6 +41,9 @@ python3 scripts/printer_thumbnail_compatibility_audit.py --pretty
   imply parity that does not exist.
 
 ## Next Compatibility Work
+
+The current Qidi Q2 live gates upload, poll metadata, and delete generated test
+files. They must not start prints.
 
 1. Test a real Mainsail host and move it to `proven_live` only after Moonraker
    metadata reports expected thumbnails.
