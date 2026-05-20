@@ -198,7 +198,7 @@ Thingiverse access tokens from the custom-scheme callback in the release flow.
 The token is retrieved only by redeeming the one-time handoff code against the
 configured HTTPS backend.
 
-## API Spike Checklist
+## API Validation Checklist
 
 Before coding UI:
 

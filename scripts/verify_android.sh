@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANDROID_DIR="$ROOT_DIR/android-app"
 APK_PATH="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
 PERF_APK_PATH="$ANDROID_DIR/app/build/outputs/apk/perfDebug/app-perfDebug.apk"
+RELEASE_APK_PATH="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
 PACKAGE_NAME="com.mobileslicer"
 MAIN_ACTIVITY="com.mobileslicer/.MainActivity"
 AUTOMATION_ACTION="com.mobileslicer.action.AUTOMATE_SLICE"
@@ -142,6 +143,7 @@ Usage:
   scripts/verify_android.sh asset-tests
   scripts/verify_android.sh apk
   scripts/verify_android.sh release
+  scripts/verify_android.sh release-smoke [serial]
   scripts/verify_android.sh local
   scripts/verify_android.sh install [serial]
   scripts/verify_android.sh device [serial]
@@ -250,6 +252,9 @@ Modes:
   apk     Build the debug APK.
   release Run release compile/lint/R8 checks. Builds the signed release APK
           when release signing credentials are configured.
+  release-smoke
+          Build, install, cold-launch, and check the signed release APK without
+          using debug-only automation. Requires release signing credentials.
   local   Run stub inventory validation, lint, unit tests, and build the debug APK.
   install Build and install the debug APK on a connected device.
   device  Alias for install; no UI automation, log pulls, or runtime probing.
@@ -989,14 +994,18 @@ build_release_apk() {
   if [[ "$signing_configured" == "1" ]]; then
     log "Building signed release APK"
     gradle :app:assembleRelease
-    local release_apk="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
-    [[ -f "$release_apk" ]] || fail "Release APK missing after build: $release_apk"
-    log "Release APK ready: $release_apk"
+    [[ -f "$RELEASE_APK_PATH" ]] || fail "Release APK missing after build: $RELEASE_APK_PATH"
+    log "Release APK ready: $RELEASE_APK_PATH"
   else
     log "Release signing not configured; running release compile, lint, and R8 checks without packaging."
     gradle :app:compileReleaseKotlin :app:lintVitalRelease :app:minifyReleaseWithR8
     log "Release compile, lintVital, and R8 checks passed"
   fi
+}
+
+require_signed_release_apk() {
+  build_release_apk
+  [[ -f "$RELEASE_APK_PATH" ]] || fail "Signed release APK is required for release-smoke: $RELEASE_APK_PATH"
 }
 
 adb_device() {
@@ -1052,6 +1061,15 @@ install_perf_apk() {
   ensure_package_enabled "$serial"
 }
 
+install_release_apk() {
+  local serial="$1"
+  require_signed_release_apk
+  require_device "$serial"
+  log "Installing signed release APK on $serial"
+  adb_device "$serial" install -r "$RELEASE_APK_PATH"
+  ensure_package_enabled "$serial"
+}
+
 launch_app() {
   local serial="$1"
   log "Cold-launching $PACKAGE_NAME on $serial"
@@ -1091,6 +1109,26 @@ assert_no_crash_after_launch() {
   pid="$(adb_device "$serial" shell pidof "$PACKAGE_NAME" || true)"
   [[ -n "$pid" ]] || fail "$PACKAGE_NAME is not running after launch."
   log "$PACKAGE_NAME running with pid $pid and clean crash buffer"
+}
+
+assert_release_build_not_debuggable() {
+  local serial="$1"
+  local package_dump
+  package_dump="$(adb_device "$serial" shell dumpsys package "$PACKAGE_NAME")"
+  if printf '%s\n' "$package_dump" | grep -E 'pkgFlags=.*DEBUGGABLE|privateFlags=.*DEBUGGABLE|flags=.*DEBUGGABLE' >/dev/null; then
+    fail "Installed release package is debuggable."
+  fi
+  log "Installed release package is not debuggable"
+}
+
+assert_release_scanner_entry_hidden() {
+  local serial="$1"
+  local xml
+  xml="$(dump_ui_xml "$serial" || true)"
+  if [[ "$xml" == *"Open Model Scanner"* ]]; then
+    fail "Release UI exposes the scanner entry."
+  fi
+  log "Release UI does not expose the scanner entry"
 }
 
 assert_clean_crash_buffer() {
@@ -1185,6 +1223,15 @@ ensure_home_visible() {
 run_install_only() {
   local serial="$1"
   install_apk "$serial"
+}
+
+run_release_smoke() {
+  local serial="$1"
+  install_release_apk "$serial"
+  launch_app "$serial"
+  assert_no_crash_after_launch "$serial"
+  assert_release_build_not_debuggable "$serial"
+  assert_release_scanner_entry_hidden "$serial"
 }
 
 run_device_automation_smoke() {
@@ -4564,6 +4611,9 @@ case "$mode" in
     ;;
   release)
     build_release_apk
+    ;;
+  release-smoke)
+    run_release_smoke "$(device_serial "${2:-}")"
     ;;
   local)
     run_script_tests

@@ -415,7 +415,7 @@ internal class PrinterConnectionRepository {
             )
         }
         val device = bambuLanAgent.deviceConfig(profile, baseUrl)
-            ?: return PrinterConnectionResult(false, "Send failed", "Enter Bambu LAN IP, access code, and device serial/dev id.")
+            ?: return PrinterConnectionResult(false, "Send failed", profile.bambuLanProfileProblem(baseUrl))
         val bambuRemoteName = remoteFileName.toBambuPackageFileName()
         val job = BambuLanPrintJob(
             taskName = bambuRemoteName.substringBeforeLast(".gcode.3mf", bambuRemoteName),

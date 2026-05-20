@@ -34,6 +34,7 @@ GROUP_RULES = (
     GroupRule(
         name="android-build-and-manifest",
         prefixes=(
+            "android-app/app/proguard-rules.pro",
             "android-app/gradle/",
             "android-app/app/src/main/AndroidManifest.xml",
             "android-app/app/src/main/res/xml/",

@@ -1,0 +1,10 @@
+https://www.mobileslicer.com/* https://mobileslicer.com/:splat 301
+/download /beta.html 301
+/google-play /beta.html 301
+/agpl /licenses/agpl-3.0.html 301
+/features /about.html#features 301
+/features.html /about.html#features 301
+/roadmap /about.html#features 301
+/roadmap.html /about.html#features 301
+/releases /beta.html 301
+/releases.html /beta.html 301

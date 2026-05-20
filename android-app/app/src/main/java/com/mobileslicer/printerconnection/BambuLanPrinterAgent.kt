@@ -90,14 +90,7 @@ internal class BambuLanPrinterAgent(
     private val mqttClient: BambuLanMqttClient
 ) {
     fun deviceConfig(profile: PrinterProfile, baseUrl: String): BambuLanDeviceConfig? {
-        val host = printerHostName(baseUrl) ?: return null
-        val accessCode = profile.printHostApiKey.trim().takeIf { it.isNotBlank() } ?: return null
-        val deviceId = profile.printHostPort.trim().takeIf { it.isNotBlank() } ?: return null
-        return BambuLanDeviceConfig(
-            host = host,
-            deviceId = deviceId,
-            accessCode = accessCode
-        )
+        return profile.bambuLanDeviceConfig(baseUrl)
     }
 
     fun uploadOnly(device: BambuLanDeviceConfig, job: BambuLanPrintJob, onProgress: (Int) -> Unit): PrinterConnectionResult {
@@ -338,6 +331,8 @@ private class DigestCountingInputStream(
 
 private fun insecureLocalBambuSslContext(): SSLContext =
     SSLContext.getInstance("TLS").apply {
+        // Bambu LAN printers use local certificates that do not chain to public
+        // roots. Keep this trust policy scoped to Bambu LAN MQTT/FTPS clients.
         init(null, arrayOf<TrustManager>(trustAllManager()), SecureRandom())
     }
 

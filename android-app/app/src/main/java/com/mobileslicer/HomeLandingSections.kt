@@ -266,6 +266,7 @@ internal fun TopBarSettingsButton(
 internal fun HeroImportCard(
     importedModel: String,
     importInProgress: Boolean,
+    showScannerEntry: Boolean,
     onSelectModel: () -> Unit,
     onFindAndImportModel: () -> Unit,
     onScannerClick: () -> Unit
@@ -305,15 +306,17 @@ internal fun HeroImportCard(
         ) {
             Text("Find and import model")
         }
-        FilledTonalButton(
-            onClick = onScannerClick,
-            enabled = !importInProgress,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(46.dp),
-            shape = RoundedCornerShape(18.dp)
-        ) {
-            Text("Open Model Scanner")
+        if (showScannerEntry) {
+            FilledTonalButton(
+                onClick = onScannerClick,
+                enabled = !importInProgress,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp),
+                shape = RoundedCornerShape(18.dp)
+            ) {
+                Text("Open Model Scanner")
+            }
         }
     }
 }

@@ -21,6 +21,20 @@ class BambuLanConnectionClientTest {
     }
 
     @Test
+    fun testConnectionRequiresEightCharacterAccessCode() {
+        val client = BambuLanConnectionClient(canOpenTcp = { _, _, _ -> true })
+        val profile = ProfileStoreRepository.fallbackPrinterProfile().copy(
+            printHostApiKey = "1234",
+            printHostPort = "SERIAL123"
+        )
+
+        val result = client.testConnection(profile, "http://192.168.1.55")
+
+        assertFalse(result.success)
+        assertTrue(result.detail.contains("8 characters"))
+    }
+
+    @Test
     fun testConnectionRequiresDeviceSerial() {
         val client = BambuLanConnectionClient(canOpenTcp = { _, _, _ -> true })
         val profile = ProfileStoreRepository.fallbackPrinterProfile().copy(

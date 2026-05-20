@@ -8152,3 +8152,99 @@ V1 is done when:
 The coherent direction is local printable first, cloud better, no fake geometry,
 strict validation, calibrated scale, measured provenance, and billing controls
 before public cloud release.
+
+## Current Scanner Status
+
+Last updated: 2026-05-16.
+
+Current state:
+
+- The scanner direction is local printable first, with optional cloud later.
+- Fake meshes, fallback cubes, and pretend scanner success are not allowed.
+- Local capture/package/export exists as an experimental foundation.
+- Local AI is currently capture assistance and soft-mask evidence, not metric
+  truth.
+- The app has synthetic scanner automation for Android runtime verification.
+- A pulled real phone scan is preserved as a replay fixture.
+- Real capture still requires real-device validation for camera, autofocus,
+  AR/depth, orientation, material behavior, and actual reconstruction quality.
+
+Key files:
+
+```text
+android-app/app/src/main/java/com/mobileslicer/scanner/
+android-app/app/src/test/java/com/mobileslicer/scanner/
+android-app/app/src/test/resources/scanner/real_scan_c2a4f330/
+scripts/scanner_synthetic_regression.sh
+scripts/scanner_app_synthetic_smoke.sh
+scripts/scanner_real_replay.sh
+scripts/scanner_device_smoke.sh
+scripts/scanner_pull_latest_audit.sh
+```
+
+Verification ladder:
+
+```bash
+scripts/scanner_synthetic_regression.sh
+scripts/scanner_app_synthetic_smoke.sh
+scripts/scanner_real_replay.sh
+cd android-app && ./gradlew :app:testDebugUnitTest --tests 'com.mobileslicer.scanner.*'
+```
+
+Use `scripts/scanner_device_smoke.sh` only when checking real camera/AR/depth
+behavior, because that still requires a physical scan.
+
+Last known verified results:
+
+- Full scanner JVM suite passed.
+- `scripts/scanner_app_synthetic_smoke.sh` passed.
+- `scripts/scanner_real_replay.sh` passed.
+- The real scan replay no longer fails at:
+
+```text
+feature_tracks:not_enough_long_feature_tracks
+```
+
+- The real scan replay now reaches the correct next blockers:
+
+```text
+verified_marker_mat_required
+calibration_missing
+scale_confidence_low
+marker_reprojection_missing
+```
+
+Current blockers:
+
+- Real printable output is not done.
+- Verified calibration/scale is not implemented end-to-end for real scans.
+- Marker observation detection is not production-ready.
+- Real metric pose validation is still blocked without verified scale and marker
+  evidence.
+- Dense/surface/mesh/printability/export stages are protected by gates and must
+  not be bypassed.
+- Real camera behavior still needs device testing after any CameraX/ARCore/UI
+  capture change.
+
+Next best implementation step:
+
+Implement the calibration/scale bridge for real captures:
+
+1. Preserve the current decision to skip mandatory marker mats in UX for now,
+   but keep calibration support in the pipeline.
+2. Add a real calibration input path that can record one of:
+   - measured scale bar
+   - known object dimension
+   - later marker/card observations
+3. Write calibration metadata into the scan package and reconstruction manifest.
+4. Update real replay with a calibrated fixture variant that is allowed to move
+   past `verified_marker_mat_required`, `calibration_missing`,
+   `scale_confidence_low`, and `marker_reprojection_missing` only when evidence
+   exists.
+5. Keep metric/export/workspace handoff blocked until pose, sparse, dense,
+   mesh, printability, and slicer-load gates pass.
+
+Do not start by polishing UI unless the next change touches real capture
+workflow. The highest-value next work is making scale/calibration evidence
+machine-readable so the real phone scan can advance beyond the current metric
+blockers without weakening the gates.

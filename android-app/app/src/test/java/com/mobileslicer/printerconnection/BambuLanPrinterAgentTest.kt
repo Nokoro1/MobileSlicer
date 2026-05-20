@@ -28,6 +28,19 @@ class BambuLanPrinterAgentTest {
     }
 
     @Test
+    fun deviceConfigRejectsInvalidAccessCode() {
+        val agent = BambuLanPrinterAgent(NoopTransferClient(), RecordingMqttClient())
+        val profile = ProfileStoreRepository.fallbackPrinterProfile().copy(
+            printHostApiKey = "1234",
+            printHostPort = "SERIAL123"
+        )
+
+        val device = agent.deviceConfig(profile, "http://192.168.1.55")
+
+        assertEquals(null, device)
+    }
+
+    @Test
     fun profileMapsToBambuLanPrintOptions() {
         val profile = ProfileStoreRepository.fallbackPrinterProfile().copy(
             bambuBedType = "Textured PEI Plate",

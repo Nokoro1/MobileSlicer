@@ -23,6 +23,7 @@ internal fun ModelLoaderHomeScreen(
     processTitle: String,
     projects: List<SavedProject>,
     importInProgress: Boolean,
+    showScannerEntry: Boolean,
     onOpenSettings: () -> Unit,
     onSelectModel: () -> Unit,
     onFindAndImportModel: () -> Unit,
@@ -46,6 +47,7 @@ internal fun ModelLoaderHomeScreen(
         HeroImportCard(
             importedModel = importedModel,
             importInProgress = importInProgress,
+            showScannerEntry = showScannerEntry,
             onSelectModel = onSelectModel,
             onFindAndImportModel = onFindAndImportModel,
             onScannerClick = onScannerClick

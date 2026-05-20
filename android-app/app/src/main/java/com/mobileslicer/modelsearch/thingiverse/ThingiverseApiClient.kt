@@ -167,7 +167,7 @@ class ThingiverseApiClient(
             if (includeAuthorization) {
                 setRequestProperty("Authorization", "Bearer $appToken")
             }
-            setRequestProperty("User-Agent", "MobileSlicer Thingiverse API Spike")
+            setRequestProperty("User-Agent", THINGIVERSE_API_USER_AGENT)
         }
 
     private fun requireConfigured() {
@@ -266,6 +266,7 @@ class ThingiverseApiClient(
     }
 
     companion object {
+        const val THINGIVERSE_API_USER_AGENT = "MobileSlicer Android ThingiverseImport"
         const val DEFAULT_SEARCH_PAGE_SIZE = 20
         const val MAX_DOWNLOAD_BYTES = 250L * 1024L * 1024L
         const val MAX_DOWNLOAD_REDIRECTS = 5

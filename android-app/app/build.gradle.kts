@@ -154,6 +154,7 @@ android {
             isMinifyEnabled = false
             versionNameSuffix = "-debug"
             buildConfigField("boolean", "AUTOMATION_ENABLED", "true")
+            buildConfigField("boolean", "SCANNER_ENTRY_ENABLED", "true")
             buildConfigField("String", "VIEWER_BUILD_STAMP", "\"viewer-build: debug\"")
             buildConfigField("String", "THINGIVERSE_APP_TOKEN", (thingiverseAppToken ?: "").asBuildConfigString())
             buildConfigField("String", "THINGIVERSE_CLIENT_ID", (thingiverseClientId ?: "").asBuildConfigString())
@@ -174,6 +175,7 @@ android {
             matchingFallbacks += listOf("debug")
             versionNameSuffix = "-perf"
             buildConfigField("boolean", "AUTOMATION_ENABLED", "true")
+            buildConfigField("boolean", "SCANNER_ENTRY_ENABLED", "true")
             buildConfigField("String", "VIEWER_BUILD_STAMP", "\"viewer-build: perf\"")
             buildConfigField("String", "THINGIVERSE_APP_TOKEN", (thingiverseAppToken ?: "").asBuildConfigString())
             buildConfigField("String", "THINGIVERSE_CLIENT_ID", (thingiverseClientId ?: "").asBuildConfigString())
@@ -197,6 +199,7 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
             buildConfigField("boolean", "AUTOMATION_ENABLED", "false")
+            buildConfigField("boolean", "SCANNER_ENTRY_ENABLED", "false")
             buildConfigField("String", "VIEWER_BUILD_STAMP", "\"viewer-build: release\"")
             buildConfigField("String", "THINGIVERSE_APP_TOKEN", "\"\"")
             buildConfigField("String", "THINGIVERSE_CLIENT_ID", (thingiverseClientId ?: "").asBuildConfigString())
@@ -249,6 +252,28 @@ android {
         htmlReport = true
         textReport = true
         xmlReport = true
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        // Scanner is disabled in release builds; do not ship scanner-only native
+        // payloads that can fail Android 16 KB page-size compatibility checks.
+        variant.packaging.jniLibs.excludes.addAll(
+            listOf(
+                "**/libarcore_sdk_c.so",
+                "**/libarcore_sdk_jni.so",
+                "**/libc++_shared.so",
+                "**/libimage_processing_util_jni.so",
+                "**/libmediapipe_tasks_jni.so",
+                "**/libmediapipe_tasks_vision_jni.so",
+                "**/libopencv_java4.so",
+                "**/libscanner_apriltag.so",
+                "**/libscanner_pose_optimizer.so",
+                "**/libscanner_pose_solver.so",
+                "**/libsurface_util_jni.so"
+            )
+        )
     }
 }
 

@@ -6,6 +6,7 @@ import com.mobileslicer.modelsearch.importflow.ModelImportIntentResolver
 import com.mobileslicer.modelsearch.sources.SourceIntegrationMode
 import com.mobileslicer.modelsearch.sources.SourceRegistry
 import com.mobileslicer.modelsearch.sources.SourceUrlNormalizer
+import com.mobileslicer.modelsearch.thingiverse.ThingiverseApiClient
 import com.mobileslicer.modelsearch.thingiverse.ThingiverseFileResult
 import com.mobileslicer.modelsearch.thingiverse.ThingiverseSearchResult
 import com.mobileslicer.modelsearch.thingiverse.ThingiverseSearchUiState
@@ -185,6 +186,12 @@ class ModelSearchContractsTest {
         assertTrue(isThingiverseOAuthRedirectParts("mobileslicer", "thingiverse-auth", "mobileslicer", "thingiverse-auth"))
         assertFalse(isThingiverseOAuthRedirectParts("mobileslicer", "other-auth", "mobileslicer", "thingiverse-auth"))
         assertFalse(isThingiverseOAuthRedirectParts("https", "thingiverse-auth", "mobileslicer", "thingiverse-auth"))
+    }
+
+    @Test
+    fun thingiverseApiUserAgentIsReleaseNamed() {
+        assertEquals("MobileSlicer Android ThingiverseImport", ThingiverseApiClient.THINGIVERSE_API_USER_AGENT)
+        assertFalse(ThingiverseApiClient.THINGIVERSE_API_USER_AGENT.contains("Spike"))
     }
 
     private fun thingiverseFile(

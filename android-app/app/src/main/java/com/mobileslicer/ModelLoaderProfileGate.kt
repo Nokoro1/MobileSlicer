@@ -130,6 +130,7 @@ internal fun ModelLoaderIncompleteProfileGate(
                     ?: "No process selected",
                 projects = savedProjects,
                 importInProgress = importInProgress,
+                showScannerEntry = BuildConfig.SCANNER_ENTRY_ENABLED,
                 onOpenSettings = { onCurrentScreenChanged(AppScreen.Settings) },
                 onSelectModel = {
                     onMissingProfileMessage(

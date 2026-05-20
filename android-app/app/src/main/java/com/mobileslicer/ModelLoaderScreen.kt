@@ -2658,6 +2658,7 @@ internal fun ModelLoaderScreen(
                 processTitle = selectedProcess.name,
                 projects = savedProjects,
                 importInProgress = importInProgress,
+                showScannerEntry = BuildConfig.SCANNER_ENTRY_ENABLED,
                 onOpenSettings = { currentScreen = AppScreen.Settings },
                 onSelectModel = {
                     launchModelPickerOrPromptForProfiles(appendToPlate = false)

@@ -5,6 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if (ANDROID)
+    add_link_options("-Wl,-z,max-page-size=16384")
+endif()
+
 add_subdirectory(
     ../../../../../engine-wrapper/orca-android-core
     ${CMAKE_CURRENT_BINARY_DIR}/orca-android-core

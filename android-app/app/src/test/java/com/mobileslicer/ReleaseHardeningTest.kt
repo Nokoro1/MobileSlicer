@@ -125,6 +125,27 @@ class ReleaseHardeningTest {
     }
 
     @Test
+    fun scannerEntryIsHiddenForReleaseBuilds() {
+        val buildGradle = File("build.gradle.kts").readText()
+        val homeScreen = File("src/main/java/com/mobileslicer/ModelLoaderHomeScreen.kt").readText()
+        val homeSections = File("src/main/java/com/mobileslicer/HomeLandingSections.kt").readText()
+        val modelLoaderScreen = File("src/main/java/com/mobileslicer/ModelLoaderScreen.kt").readText()
+        val profileGate = File("src/main/java/com/mobileslicer/ModelLoaderProfileGate.kt").readText()
+
+        assertTrue(buildGradle.contains("""buildConfigField("boolean", "SCANNER_ENTRY_ENABLED", "true")"""))
+        assertTrue(buildGradle.contains("""buildConfigField("boolean", "SCANNER_ENTRY_ENABLED", "false")"""))
+        assertTrue(homeScreen.contains("showScannerEntry: Boolean"))
+        assertTrue(homeSections.contains("if (showScannerEntry)"))
+        assertTrue(homeSections.contains("Open Model Scanner"))
+        assertTrue(modelLoaderScreen.contains("showScannerEntry = BuildConfig.SCANNER_ENTRY_ENABLED"))
+        assertTrue(profileGate.contains("showScannerEntry = BuildConfig.SCANNER_ENTRY_ENABLED"))
+
+        val verifyScript = repoFile("scripts/verify_android.sh").readText()
+        assertTrue(verifyScript.contains("assert_release_scanner_entry_hidden"))
+        assertTrue(verifyScript.contains("release-smoke"))
+    }
+
+    @Test
     fun nativeOrcaAutoArrangeUsesParallelSolver() {
         val planningSource = repoFile("engine-wrapper/orca_wrapper_planning_api.cpp").readText()
         val arrangeFunction = planningSource.substringAfter("extern \"C\" int orca_plan_plate_arrangement")
@@ -305,6 +326,19 @@ class ReleaseHardeningTest {
         assertTrue(releaseGate.contains("orca-object-label-parity"))
         assertTrue(profileParityDoc.contains("Object labels and exclude-object markers"))
         assertTrue(profileParityDoc.contains("Moonraker"))
+    }
+
+    @Test
+    fun publicReleaseGateUsesSignedReleaseSmokeWithoutDebugAutomation() {
+        val verifyScript = repoFile("scripts/verify_android.sh").readText()
+        val releaseGate = repoFile("scripts/release_gate_android.sh").readText()
+
+        assertTrue(verifyScript.contains("run_release_smoke"))
+        assertTrue(verifyScript.contains("assert_release_build_not_debuggable"))
+        assertTrue(verifyScript.contains("install_release_apk"))
+        assertTrue(releaseGate.contains("--public"))
+        assertTrue(releaseGate.contains("release-smoke"))
+        assertTrue(releaseGate.contains("MODE\" == \"public\""))
     }
 
     private fun androidManifest() = parseXml(File("src/main/AndroidManifest.xml"))

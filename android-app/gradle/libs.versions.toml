@@ -13,7 +13,7 @@ json = "20240303"
 junit = "4.13.2"
 pahoMqtt = "1.2.5"
 commonsNet = "3.11.1"
-mediapipeTasksVision = "0.10.15"
+mediapipeTasksVision = "0.10.35"
 opencv = "4.13.0"
 
 [libraries]
