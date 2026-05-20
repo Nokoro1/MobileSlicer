@@ -16,7 +16,7 @@ encoded_redirect="$(
   python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$REDIRECT_URI"
 )"
 
-start_url="$base/v1/thingiverse/oauth/start?client_id=$CLIENT_ID&redirect_uri=$encoded_redirect"
+start_url="$base/v1/thingiverse/oauth/start?client_id=$CLIENT_ID&redirect_uri=$encoded_redirect&state=production-smoke"
 start_headers="$(mktemp)"
 callback_headers="$(mktemp)"
 redeem_body="$(mktemp)"
@@ -50,8 +50,8 @@ redeem_status="$(
     -D "$redeem_headers" \
     -w "%{http_code}" \
     -H "content-type: application/json" \
-    --data '{"code":"mobileslicer-production-smoke-invalid-code"}' \
-    "$base/v1/thingiverse/oauth/redeem"
+    --data '{}' \
+    "$base/v1/thingiverse/oauth/redeem?code=mobileslicer-production-smoke-invalid-code"
 )"
 [[ "$redeem_status" != "404" ]] || {
   echo "OAuth redeem route returned 404" >&2
