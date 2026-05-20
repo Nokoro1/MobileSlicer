@@ -475,6 +475,7 @@ run_script_tests() {
   bash -n "$ROOT_DIR/scripts/probe_orca_active_multifilament_reference.sh"
   bash -n "$ROOT_DIR/scripts/probe_orca_step_project_reference.sh"
   bash -n "$ROOT_DIR/scripts/run_orca_thumbnail_reference_matrix.sh"
+  (cd "$ANDROID_DIR" && ./gradlew --no-daemon :app:generateOrcaSettingMetadata)
   python3 -m py_compile "$ROOT_DIR"/scripts/*.py
   (cd "$ROOT_DIR" && python3 scripts/test_orca_metadata_audit.py)
   (cd "$ROOT_DIR" && python3 scripts/test_orca_metadata_fixture_gate.py)
