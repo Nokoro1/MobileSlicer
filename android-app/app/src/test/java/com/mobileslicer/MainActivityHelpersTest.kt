@@ -152,7 +152,39 @@ class MainActivityHelpersTest {
 
             assertTrue(audit.requiresMulticolorEvidence)
             assertTrue(audit.hasMulticolorEvidence)
+            assertEquals(setOf(0, 1), audit.filamentMapToolIds)
             assertEquals(null, audit.failureReason)
+        } finally {
+            gcodeFile.delete()
+        }
+    }
+
+    @Test
+    fun generatedGcodeAuditFailsWhenToolChangesDoNotMatchFilamentMap() {
+        val gcodeFile = File.createTempFile("mobileslicer-mismatched-map-tools-", ".gcode").apply {
+            writeText(
+                """
+                ; filament_colour = #D3A46F;#F5F5F5
+                ; filament_map = 1,2
+                T0
+                G1 X10 Y10 E1
+                T2
+                G1 X20 Y20 E2
+                """.trimIndent()
+            )
+        }
+        try {
+            val audit = auditGeneratedGcodeMulticolor(
+                gcodeFile,
+                """{"${NativeConfigKeys.Mobile.ActiveFilamentSlotCount}":2}"""
+            )
+
+            assertTrue(audit.requiresMulticolorEvidence)
+            assertTrue(audit.hasMulticolorEvidence)
+            assertTrue(
+                audit.failureReason.orEmpty()
+                    .contains("toolchanges are missing filament_map tool IDs 1")
+            )
         } finally {
             gcodeFile.delete()
         }

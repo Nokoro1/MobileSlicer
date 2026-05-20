@@ -980,8 +980,8 @@ build_perf_apk() {
 
 build_release_apk() {
   local signing_configured=0
-  local version_name="${MOBILE_SLICER_VERSION_NAME:-0.1.1-beta}"
-  local version_code="${MOBILE_SLICER_VERSION_CODE:-4}"
+  local version_name="${MOBILE_SLICER_VERSION_NAME:-0.1.4-beta}"
+  local version_code="${MOBILE_SLICER_VERSION_CODE:-7}"
   log "Release version inputs: versionName=$version_name versionCode=$version_code"
   if [[ -n "${MOBILE_SLICER_RELEASE_STORE_FILE:-}" &&
         -n "${MOBILE_SLICER_RELEASE_STORE_PASSWORD:-}" &&

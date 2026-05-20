@@ -1,0 +1,35 @@
+{
+  "release": {
+    "name": "MobileSlicer 0.1.4 Beta",
+    "tag": "v0.1.4-beta",
+    "commit": "v0.1.4-beta^{commit}",
+    "created_at_utc": "2026-05-20T16:20:34Z",
+    "prerelease": true
+  },
+  "android": {
+    "application_id": "com.mobileslicer",
+    "version_name": "0.1.4-beta",
+    "version_code": 7,
+    "min_sdk": 26,
+    "target_sdk": 35
+  },
+  "apk": {
+    "name": "MobileSlicer-0.1.4-beta-v7.apk",
+    "sha256": "41ce2afc26abbaadf99ba3d731af7ada9a8d72037faceb0929a6bb9354bf9ae2"
+  },
+  "verification_commands": [
+    "cd android-app && ./gradlew :app:testDebugUnitTest",
+    "cd android-app && ./gradlew :app:lintRelease :app:assembleRelease",
+    ".android-sdk/build-tools/35.0.0/zipalign -c -P 16 -v 4 android-app/app/build/outputs/apk/release/app-release.apk",
+    "ANDROID_HOME=$PWD/.android-sdk apksigner verify --verbose --print-certs android-app/app/build/outputs/apk/release/app-release.apk",
+    "scripts/verify_android.sh release-smoke $ANDROID_SERIAL",
+    "scripts/verify_android.sh orca-gcode-metadata-parity",
+    "scripts/compare_orca_snapmaker_u1_multinozzle_gcode.py --reference regression-fixtures/orca-project-references/snapmaker-u1-multinozzle/snapmaker-u1-multinozzle.gcode.3mf --mobile-gcode <generated-gcode> --require-prime-tower --require-thumbnails --require-reference-filament-map --require-reference-filament-colour --require-reference-nozzle-diameter --require-reference-prime-tower-settings",
+    "scripts/verify_github_release_asset.sh MobileSlicerApp/MobileSlicer v0.1.4-beta MobileSlicer-0.1.4-beta-v7.apk 41ce2afc26abbaadf99ba3d731af7ada9a8d72037faceb0929a6bb9354bf9ae2 0.1.4-beta 7 <tag-commit-sha>",
+    "MOBILE_SLICER_RELEASE_REPO=MobileSlicerApp/MobileSlicer MOBILE_SLICER_RELEASE_TAG=v0.1.4-beta MOBILE_SLICER_RELEASE_ASSET=MobileSlicer-0.1.4-beta-v7.apk MOBILE_SLICER_RELEASE_SHA256=41ce2afc26abbaadf99ba3d731af7ada9a8d72037faceb0929a6bb9354bf9ae2 MOBILE_SLICER_RELEASE_VERSION_NAME=0.1.4-beta MOBILE_SLICER_RELEASE_VERSION_CODE=7 MOBILE_SLICER_RELEASE_COMMIT=<tag-commit-sha> scripts/release_gate_android.sh --public $ANDROID_SERIAL"
+  ],
+  "optional_public_claim_gates": {
+    "bambu_lan": "scripts/bambu_lan_release_smoke.sh <bambu-lan-smoke-evidence.json>",
+    "thingiverse_oauth": "MOBILE_SLICER_THINGIVERSE_CLIENT_ID=<client-id> scripts/thingiverse_oauth_production_smoke.sh"
+  }
+}

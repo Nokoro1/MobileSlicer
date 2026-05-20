@@ -67,7 +67,7 @@ This audit covers every `ProcessProfile` setting property and classifies whether
 | `elefantFootCompensationMm` | process | object-candidate | `elefant_foot_compensation` | yes | yes |
 | `enableArcFitting` | process | object-candidate | `enable_arc_fitting` | yes | yes |
 | `enableOverhangSpeed` | process | object-candidate | `enable_overhang_speed` | yes | yes |
-| `enablePrimeTower` | process/multimaterial | object-candidate | `enable_prime_tower` | yes | yes |
+| `enablePrimeTower` | process/multimaterial | object-candidate | `enable_prime_tower`, `mobile_slicer_process_prime_tower_enabled` | yes | yes |
 | `enableSupport` | process | object-candidate | `enable_support` | yes | yes |
 | `enableTowerInterfaceCooldownDuringTower` | process/multimaterial | stored-only | `enable_tower_interface_cooldown_during_tower` | yes | yes |
 | `enableTowerInterfaceFeatures` | process/multimaterial | stored-only | `enable_tower_interface_features` | yes | yes |

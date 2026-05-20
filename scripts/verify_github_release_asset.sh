@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 6 ]]; then
-  echo "Usage: $0 <repo> <tag> <asset-name> <expected-sha256> <version-name> <version-code>" >&2
+if [[ $# -lt 6 || $# -gt 7 ]]; then
+  echo "Usage: $0 <repo> <tag> <asset-name> <expected-sha256> <version-name> <version-code> [expected-commit]" >&2
   exit 64
 fi
 
@@ -12,6 +12,7 @@ ASSET_NAME="$3"
 EXPECTED_SHA256="$4"
 VERSION_NAME="$5"
 VERSION_CODE="$6"
+EXPECTED_COMMIT="${7:-}"
 ANDROID_HOME="${ANDROID_HOME:-$(pwd)/.android-sdk}"
 AAPT="${AAPT:-$ANDROID_HOME/build-tools/35.0.0/aapt}"
 
@@ -32,6 +33,16 @@ asset_digest="$(jq -r --arg name "$ASSET_NAME" '.assets[] | select(.name == $nam
   echo "asset digest mismatch: $asset_digest" >&2
   exit 1
 }
+if [[ -n "$EXPECTED_COMMIT" ]]; then
+  actual_commit="$(git ls-remote "https://github.com/$REPO.git" "refs/tags/$TAG^{}" | awk '{print $1}')"
+  if [[ -z "$actual_commit" ]]; then
+    actual_commit="$(git ls-remote "https://github.com/$REPO.git" "refs/tags/$TAG" | awk '{print $1}')"
+  fi
+  [[ "$actual_commit" == "$EXPECTED_COMMIT" ]] || {
+    echo "release tag commit mismatch: $actual_commit" >&2
+    exit 1
+  }
+fi
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT

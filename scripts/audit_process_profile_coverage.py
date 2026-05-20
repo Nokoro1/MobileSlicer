@@ -80,6 +80,7 @@ DOCUMENTED_NON_ORCA_KEYS = {
     "first_layer_print_speed",
     "initial_layer_travel_speed_percent",
     "internal_bridge_support_thickness",
+    "mobile_slicer_process_prime_tower_enabled",
     "skirts",
 }
 

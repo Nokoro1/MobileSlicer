@@ -196,6 +196,7 @@ internal data class GeneratedGcodeMulticolorAudit(
     val expectedActiveSlots: Int,
     val expectedPhysicalNozzles: Int,
     val toolIds: Set<Int>,
+    val filamentMapToolIds: Set<Int>,
     val filamentColorCount: Int,
     val filamentMapCount: Int,
     val nozzleDiameterCount: Int,
@@ -219,6 +220,12 @@ internal data class GeneratedGcodeMulticolorAudit(
             if (filamentMapCount != expectedActiveSlots) {
                 issues += "filament_map count is $filamentMapCount, expected $expectedActiveSlots"
             }
+            if (filamentMapToolIds.isNotEmpty() && toolIds.isNotEmpty()) {
+                val missingMappedTools = filamentMapToolIds - toolIds
+                if (missingMappedTools.isNotEmpty()) {
+                    issues += "toolchanges are missing filament_map tool IDs ${missingMappedTools.sorted().joinToString(",")}"
+                }
+            }
             if (expectedPhysicalNozzles > 1 && nozzleDiameterCount < expectedPhysicalNozzles) {
                 issues += "nozzle_diameter count is $nozzleDiameterCount, expected at least $expectedPhysicalNozzles"
             }
@@ -233,6 +240,7 @@ internal data class GeneratedGcodeMulticolorAudit(
         "expectedActiveSlots=$expectedActiveSlots " +
             "expectedPhysicalNozzles=$expectedPhysicalNozzles " +
             "toolIds=${toolIds.sorted().joinToString(",", prefix = "[", postfix = "]")} " +
+            "filamentMapToolIds=${filamentMapToolIds.sorted().joinToString(",", prefix = "[", postfix = "]")} " +
             "filamentColorCount=$filamentColorCount filamentMapCount=$filamentMapCount nozzleDiameterCount=$nozzleDiameterCount " +
             "M620=$m620Count M621=$m621Count hasMulticolorEvidence=$hasMulticolorEvidence"
 }
@@ -299,6 +307,7 @@ internal fun auditGeneratedGcodeMulticolor(gcodeFile: File, configJson: String):
         org.json.JSONObject(configJson).optInt("mobile_slicer_physical_nozzle_count", 1)
     }.getOrDefault(1).coerceAtLeast(1)
     val toolIds = linkedSetOf<Int>()
+    val filamentMapToolIds = linkedSetOf<Int>()
     var filamentColorCount = 0
     var filamentMapCount = 0
     var nozzleDiameterCount = 0
@@ -309,6 +318,13 @@ internal fun auditGeneratedGcodeMulticolor(gcodeFile: File, configJson: String):
         value.split(';', ',')
             .map { it.trim() }
             .count { it.isNotBlank() }
+
+    fun oneBasedToolIds(value: String): List<Int> =
+        value.split(';', ',')
+            .map { it.trim() }
+            .mapNotNull { it.toIntOrNull() }
+            .filter { it > 0 }
+            .map { it - 1 }
 
     gcodeFile.bufferedReader().useLines { lines ->
         lines.forEach { rawLine ->
@@ -327,7 +343,10 @@ internal fun auditGeneratedGcodeMulticolor(gcodeFile: File, configJson: String):
                 val value = body.substringAfter('=').trim()
                 when (key) {
                     "filament_colour" -> filamentColorCount = maxOf(filamentColorCount, listCount(value))
-                    "filament_map" -> filamentMapCount = maxOf(filamentMapCount, listCount(value))
+                    "filament_map" -> {
+                        filamentMapCount = maxOf(filamentMapCount, listCount(value))
+                        filamentMapToolIds += oneBasedToolIds(value)
+                    }
                     "nozzle_diameter" -> nozzleDiameterCount = maxOf(nozzleDiameterCount, listCount(value))
                 }
             }
@@ -342,6 +361,7 @@ internal fun auditGeneratedGcodeMulticolor(gcodeFile: File, configJson: String):
         expectedActiveSlots = expectedActiveSlots,
         expectedPhysicalNozzles = expectedPhysicalNozzles,
         toolIds = toolIds,
+        filamentMapToolIds = filamentMapToolIds,
         filamentColorCount = filamentColorCount,
         filamentMapCount = filamentMapCount,
         nozzleDiameterCount = nozzleDiameterCount,

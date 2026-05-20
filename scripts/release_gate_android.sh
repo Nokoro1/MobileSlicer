@@ -51,7 +51,10 @@ Runs the Android release confidence gate:
   11. Orca 3MF project round-trip preservation gate
   12. Fluidd/Moonraker thumbnail metadata gate
   13. heavy performance gate with repeat count defaulting to 2
-  14. final git status capture
+  14. optional published GitHub release asset verification
+  15. optional Bambu LAN real-printer smoke evidence gate
+  16. optional Thingiverse production OAuth route smoke
+  17. final git status capture
 
 The default mode runs the full debug-automation gate. Use --public for a
 public-beta gate that installs and smokes the signed release APK, then runs the
@@ -64,6 +67,25 @@ Environment:
   ANDROID_SERIAL                     Default device serial fallback.
   MOBILE_SLICER_RELEASE_GATE_MODE    full or public. The --public flag sets
                                      this to public for that invocation.
+  MOBILE_SLICER_RELEASE_REPO         GitHub repo for post-publish release asset
+                                     verification, for example
+                                     MobileSlicerApp/MobileSlicer.
+  MOBILE_SLICER_RELEASE_TAG          Published beta tag to verify.
+  MOBILE_SLICER_RELEASE_ASSET        Published APK asset name to verify.
+  MOBILE_SLICER_RELEASE_SHA256       Expected APK SHA-256.
+  MOBILE_SLICER_RELEASE_VERSION_NAME Expected Android versionName.
+  MOBILE_SLICER_RELEASE_VERSION_CODE Expected Android versionCode.
+  MOBILE_SLICER_RELEASE_COMMIT       Optional tag target commit SHA.
+  MOBILE_SLICER_BAMBU_SMOKE_EVIDENCE Optional JSON evidence file for the Bambu
+                                     LAN real-printer smoke gate.
+  MOBILE_SLICER_THINGIVERSE_BASE_URL Optional production backend base URL for
+                                     the Thingiverse OAuth smoke gate.
+  MOBILE_SLICER_THINGIVERSE_CLIENT_ID
+                                     Public OAuth client ID for the Thingiverse
+                                     production smoke gate.
+  MOBILE_SLICER_THINGIVERSE_REDIRECT_URI
+                                     Redirect URI for the Thingiverse
+                                     production smoke gate.
   MOBILE_SLICER_PERF_REPEAT_COUNT    Defaults to 2 for this release gate.
   MOBILE_SLICER_PERF_BASELINE        Passed through to verify_android.sh.
   MOBILE_SLICER_METADATA_PNG_THUMBNAIL_MAX_MS
@@ -283,6 +305,34 @@ wait_for_device_idle() {
   done
 }
 
+verify_published_release_asset() {
+  local repo="${MOBILE_SLICER_RELEASE_REPO:-}"
+  local tag="${MOBILE_SLICER_RELEASE_TAG:-}"
+  local asset="${MOBILE_SLICER_RELEASE_ASSET:-}"
+  local sha256="${MOBILE_SLICER_RELEASE_SHA256:-}"
+  local version_name="${MOBILE_SLICER_RELEASE_VERSION_NAME:-}"
+  local version_code="${MOBILE_SLICER_RELEASE_VERSION_CODE:-}"
+  local commit="${MOBILE_SLICER_RELEASE_COMMIT:-}"
+  [[ -n "$repo" ]] || fail "MOBILE_SLICER_RELEASE_REPO is required for published release verification."
+  [[ -n "$tag" ]] || fail "MOBILE_SLICER_RELEASE_TAG is required for published release verification."
+  [[ -n "$asset" ]] || fail "MOBILE_SLICER_RELEASE_ASSET is required for published release verification."
+  [[ -n "$sha256" ]] || fail "MOBILE_SLICER_RELEASE_SHA256 is required for published release verification."
+  [[ -n "$version_name" ]] || fail "MOBILE_SLICER_RELEASE_VERSION_NAME is required for published release verification."
+  [[ -n "$version_code" ]] || fail "MOBILE_SLICER_RELEASE_VERSION_CODE is required for published release verification."
+  "$ROOT_DIR/scripts/verify_github_release_asset.sh" \
+    "$repo" "$tag" "$asset" "$sha256" "$version_name" "$version_code" "$commit"
+}
+
+verify_bambu_lan_smoke_evidence() {
+  local evidence="${MOBILE_SLICER_BAMBU_SMOKE_EVIDENCE:-}"
+  [[ -n "$evidence" ]] || fail "MOBILE_SLICER_BAMBU_SMOKE_EVIDENCE is required for Bambu LAN smoke verification."
+  "$ROOT_DIR/scripts/bambu_lan_release_smoke.sh" "$evidence"
+}
+
+verify_thingiverse_production_oauth() {
+  "$ROOT_DIR/scripts/thingiverse_oauth_production_smoke.sh"
+}
+
 on_exit() {
   local exit_code="$?"
   finish_context_files "$exit_code"
@@ -304,6 +354,9 @@ log "Writing artifacts to $RUN_DIR"
 run_step "local" "$VERIFY_SCRIPT" local
 if [[ "$MODE" == "public" ]]; then
   run_step "release-smoke" "$VERIFY_SCRIPT" release-smoke "$SERIAL"
+  if [[ -n "${MOBILE_SLICER_RELEASE_TAG:-}" ]]; then
+    run_step "github-release-asset" verify_published_release_asset
+  fi
 else
   run_step "slice-lifecycle" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" slice-lifecycle "$SERIAL"
   run_step "slice-regression" env MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 "$VERIFY_SCRIPT" slice-regression "$SERIAL"
@@ -332,5 +385,11 @@ if [[ "$MODE" != "public" ]]; then
     MOBILE_SLICER_ALLOW_DEVICE_AUTOMATION=1 \
     MOBILE_SLICER_PERF_REPEAT_COUNT="${MOBILE_SLICER_PERF_REPEAT_COUNT:-2}" \
     "$VERIFY_SCRIPT" perf-heavy "$SERIAL"
+fi
+if [[ -n "${MOBILE_SLICER_BAMBU_SMOKE_EVIDENCE:-}" ]]; then
+  run_step "bambu-lan-real-printer-smoke" verify_bambu_lan_smoke_evidence
+fi
+if [[ -n "${MOBILE_SLICER_THINGIVERSE_CLIENT_ID:-}" ]]; then
+  run_step "thingiverse-production-oauth" verify_thingiverse_production_oauth
 fi
 run_step "git-status" git -C "$ROOT_DIR" status --short --branch
