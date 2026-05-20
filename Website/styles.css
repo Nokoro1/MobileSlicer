@@ -657,30 +657,6 @@ p {
   font-weight: 850;
 }
 
-.beta-checksum {
-  display: grid;
-  gap: 7px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  background: var(--paper);
-}
-
-.beta-checksum span {
-  color: var(--quiet);
-  font-size: 0.78rem;
-  font-weight: 850;
-  text-transform: uppercase;
-}
-
-.beta-checksum code {
-  color: var(--ink);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 0.84rem;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
 .support-side {
   display: grid;
   gap: 12px;
