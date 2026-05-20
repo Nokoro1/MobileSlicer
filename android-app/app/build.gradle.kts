@@ -37,11 +37,11 @@ val releaseKeyPassword = projectOrEnvironmentValue(
 val mobileSlicerVersionCode = projectOrEnvironmentValue(
     propertyName = "mobileSlicer.versionCode",
     environmentName = "MOBILE_SLICER_VERSION_CODE"
-)?.toIntOrNull()?.takeIf { it > 0 } ?: 4
+)?.toIntOrNull()?.takeIf { it > 0 } ?: 5
 val mobileSlicerVersionName = projectOrEnvironmentValue(
     propertyName = "mobileSlicer.versionName",
     environmentName = "MOBILE_SLICER_VERSION_NAME"
-)?.takeIf { it.isNotBlank() } ?: "0.1.1-beta"
+)?.takeIf { it.isNotBlank() } ?: "0.1.2-beta"
 val hasReleaseSigningConfig = listOf(
     releaseStoreFilePath,
     releaseStorePassword,
